@@ -11,7 +11,15 @@
 - 运行参数为 16K 最大上下文、最多 4 条活跃序列、2,048 batched tokens 和 eager；显存采样峰值 20,802 MiB。
 - 原始环境、模型与完整记录保留在私有工作区，公开版结构化证据保留数值与来源哈希。
 
-仓库初始化与 CI 的最终核查状态将在首次同步完成后补充。
+- 本地独立 Git 仓库、公开 GitHub 仓库、开发依赖锁、GPU 依赖锁、贡献与工作约定已建立。
+- 本地记录与导出检查、脚本语法和打包检查通过；[首次 GitHub CI](https://github.com/Atttt-3/vllm-prefix-scheduler/actions/runs/41302896213) 全部成功。
+- 开发环境使用 `.venv`，GPU 脚本使用 `.venv-gpu`，两套依赖独立。
+
+## 工作副本状态
+
+本地与 [GitHub](https://github.com/Atttt-3/vllm-prefix-scheduler) 已同步。尝试建立集群新 checkout 时，登录网关在已有会话、全新会话和 IPv4 重试中均连接超时；新 checkout 尚未创建。此前已验证的环境、模型和原始记录仍保留在原工作目录。
+
+连接恢复后，先按忽略的 `.local/workspace.json` 中的机器位置 clone 同一仓库，以 `.venv-gpu`、`models` 和 `.cache` 链接复用既有资源，再从新 checkout 重放最小验证。仓库化脚本已完成静态检查，新的路径布局尚待集群复跑。不要重复下载模型，也不要把开发锁同步到已有 GPU 环境。
 
 ## 下一项工作
 

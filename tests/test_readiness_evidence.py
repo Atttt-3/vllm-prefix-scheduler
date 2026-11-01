@@ -32,6 +32,12 @@ def test_archived_native_run_supports_the_readiness_claims(record, pins):
     assert len(record["requests"]) == 7
 
 
+def test_frozen_baseline_matches_the_archived_engine_arguments(record):
+    baseline = json.loads((ROOT / "configs" / "baseline-3090.json").read_text())
+    for key, value in baseline.items():
+        assert record["requested_engine_args"][key] == value
+
+
 @pytest.mark.parametrize(
     "corruption",
     ["async_disabled", "kv_mismatch", "apc_no_reuse", "unfinished_request"],

@@ -3,7 +3,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_PROJECT_ENVIRONMENT := $(CURDIR)/.venv
 
-.PHONY: dev check lint format test evidence build
+.PHONY: dev check lint format test evidence build script-syntax
 
 dev:
 	$(UV) sync --locked --dev
@@ -25,4 +25,7 @@ evidence:
 build:
 	$(UV) build --no-sources
 
-check: lint test evidence build
+script-syntax:
+	@for script in scripts/*.sh scripts/*.sbatch; do bash -n "$$script" || exit; done
+
+check: lint script-syntax test evidence build

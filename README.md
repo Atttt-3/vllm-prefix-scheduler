@@ -1,5 +1,7 @@
 # vLLM 共享前缀调度优化与等待保护
 
+[![checks](https://github.com/Atttt-3/vllm-prefix-scheduler/actions/workflows/checks.yml/badge.svg)](https://github.com/Atttt-3/vllm-prefix-scheduler/actions/workflows/checks.yml)
+
 在固定版本 vLLM 中研究小窗口缓存感知排序：让等待队列中能够复用现有前缀的请求先执行，减少缓存淘汰引起的重复 prefill，并通过等待保护限制冷请求持续被插队的代价。
 
 **当前阶段：RTX 3090 上的原生运行环境和模型验证已完成；自定义调度器、B/C 淘汰反例与优化实验待实现。** 当前结果证明 BF16 推理、APC 和异步调度可用，不代表调度优化收益。
