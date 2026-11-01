@@ -1,0 +1,35 @@
+# Local interpreters, caches, weights and raw cluster records
+/.venv*
+/.tools
+/.cache
+/.tmp
+/.local
+/models
+/runs
+data/raw/
+artifacts/
+upstream/
+logs/
+results/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+slurm-*.out
+
+# Python/build/editor outputs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.DS_Store
+.coverage
+htmlcov/
+.vscode/
+.idea/

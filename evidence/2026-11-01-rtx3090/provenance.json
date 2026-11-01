@@ -1,0 +1,23 @@
+{
+  "source_file_sha256": {
+    "validation.json": "e7d89cfe4530860ae09fc43772d71dbe528f65015b4a4fa75e76f475c2bdb90b",
+    "environment.json": "4b5e8d6947fb6af641b1172200b9ce9aec10cf9ca415117354ce15942063cd65",
+    "pinned-source-verification.json": "de6590937c4dd8a816ea5bc461779a09a9bf302dd131405dfe6b8d1f958405dc"
+  },
+  "exporter": "scripts/export_readiness.py",
+  "retained": "Numerical measurements, configuration, generated synthetic outputs and UTC times",
+  "removed": [
+    "cluster hostname and username",
+    "absolute filesystem paths",
+    "Slurm job ID",
+    "GPU UUID and physical index",
+    "unfiltered logs, process information and filesystem mount details"
+  ],
+  "timing_scope": "Call wall times are readiness diagnostics, not performance measurements",
+  "exported_file_sha256": {
+    "validation.json": "72df0f5a5cf9ee629666103ab13ed8ecf39171353770a05aa37ae053f39e6909",
+    "summary.json": "db80da8c279ef28c46de022be4f18bccdcfc014ef90a1ec8e2363fee56008f84",
+    "environment.json": "c99e632bbb58ba315dbae17737a7996d0051d69d0a7854a8698223004187e0c3",
+    "pinned-source-verification.json": "de6590937c4dd8a816ea5bc461779a09a9bf302dd131405dfe6b8d1f958405dc"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "files": [
+    {
+      "path": "vllm/config/scheduler.py",
+      "installed_sha256": "2fb86b1572a4925be59f304d13b4f6ec03d496b67a7c4abbb976ecda2232839a",
+      "upstream_sha256": "2fb86b1572a4925be59f304d13b4f6ec03d496b67a7c4abbb976ecda2232839a",
+      "matches": true
+    },
+    {
+      "path": "vllm/config/cache.py",
+      "installed_sha256": "d37db21e7a6a1b477a580b54d90011d8708c4e7f6e3903221432d9a39830559b",
+      "upstream_sha256": "d37db21e7a6a1b477a580b54d90011d8708c4e7f6e3903221432d9a39830559b",
+      "matches": true
+    },
+    {
+      "path": "vllm/v1/core/sched/async_scheduler.py",
+      "installed_sha256": "38d296e77e4d612e696241c67298eb1ca9b6a48b483cd33d35495bf31691032e",
+      "upstream_sha256": "38d296e77e4d612e696241c67298eb1ca9b6a48b483cd33d35495bf31691032e",
+      "matches": true
+    },
+    {
+      "path": "vllm/v1/engine/core.py",
+      "installed_sha256": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+      "upstream_sha256": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+      "matches": true
+    }
+  ],
+  "all_match": true
+}

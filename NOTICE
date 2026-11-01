@@ -1,0 +1,13 @@
+vllm-prefix-scheduler
+Copyright 2026 Atttt-3
+
+This repository contains original project scaffolding, readiness tooling and
+documentation. The custom prefix scheduler is not implemented at initialization.
+
+Technical references include vLLM (Apache-2.0), SGLang (Apache-2.0), vLLM pull
+requests #54625 and #58837, and Qwen/Qwen3-4B. They are not bundled here.
+See docs/references.md for source URLs and pinned revisions. Any future code
+adaptation must preserve its original license and attribution.
+
+Model weights and separately installed dependencies remain subject to their own
+licenses. No model weights or upstream source tree are distributed in this repo.

@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "completed_requests": 7,
+  "cold_cached_tokens": 0,
+  "warm_cached_tokens": 2224,
+  "kv_capacity_tokens": 88848,
+  "kv_allocation_gib": 12.201416015625,
+  "gpu_sampled_peak_mib": 20802
+}

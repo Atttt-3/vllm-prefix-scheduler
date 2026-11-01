@@ -1,0 +1,11 @@
+{
+  "implementation_status": "planned_not_implemented",
+  "scheduler_base": "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
+  "configuration_container": "additional_config.prefix_scheduler",
+  "default": {
+    "mode": "off",
+    "window": 16,
+    "max_wait_ms": 500
+  },
+  "planned_modes": ["off", "prefix", "guarded"]
+}

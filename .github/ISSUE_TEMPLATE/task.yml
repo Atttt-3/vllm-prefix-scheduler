@@ -1,0 +1,22 @@
+name: 开发任务
+description: 定义一个可独立验收的实现或实验任务
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 具体问题和范围
+      description: 写明触发条件、当前行为及本任务边界。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收证据
+      description: 指定原生用例、运行配置、预期行为和需要保留的结果。
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: 上游依据与依赖
+      description: 链接固定 commit、相关 PR 和前置任务。

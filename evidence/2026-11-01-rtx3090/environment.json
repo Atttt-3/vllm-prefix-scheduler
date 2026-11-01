@@ -1,0 +1,19 @@
+{
+  "vllm": "0.32.0",
+  "torch": "2.13.0+cu129",
+  "torch_cuda": "12.9",
+  "cuda_available": true,
+  "gpu_name": "NVIDIA GeForce RTX 3090",
+  "compute_capability": [
+    8,
+    6
+  ],
+  "bf16_supported": true,
+  "requested_vllm_upstream_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "installation": "PyPI release wheel vllm==0.32.0; cu129 PyTorch index",
+  "flashinfer_python": "0.7.0.post1",
+  "flashinfer_cubin": "0.7.0.post1",
+  "flashinfer_jit_cache": "0.7.0.post1+cu129",
+  "dependency_check": "uv pip check: all installed packages are compatible",
+  "python_version": "3.12.16"
+}
