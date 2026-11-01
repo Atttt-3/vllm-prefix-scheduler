@@ -1,0 +1,4572 @@
+{
+  "events": [
+    {
+      "cached_blocks": [
+        {
+          "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+          "id": 1,
+          "null": false,
+          "ref_cnt": 0
+        },
+        {
+          "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+          "id": 2,
+          "null": false,
+          "ref_cnt": 0
+        }
+      ],
+      "case": "0-ample-BC",
+      "event": "A_cached_and_evictable",
+      "source_line": 434,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 5
+    },
+    {
+      "call": 15,
+      "case": "0-ample-BC",
+      "details": {
+        "num_new_computed_tokens": 0,
+        "num_new_tokens": 49
+      },
+      "event": "call",
+      "method": "allocate_slots",
+      "owner": "B",
+      "source_line": 439,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 15,
+      "case": "0-ample-BC",
+      "event": "return",
+      "method": "allocate_slots",
+      "owner": "B",
+      "result": {
+        "blocks": [
+          [
+            3,
+            4,
+            5,
+            6
+          ]
+        ],
+        "success": true
+      },
+      "source_line": 450,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            5
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 21,
+      "case": "0-ample-BC",
+      "event": "return",
+      "method": "get_computed_blocks",
+      "owner": "C",
+      "result": {
+        "blocks": [
+          [
+            1,
+            2
+          ]
+        ],
+        "hit_tokens": 32,
+        "shared_prefix_boundary": 0
+      },
+      "source_line": 452,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            5
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              5,
+              6
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [
+          "B"
+        ],
+        "waiting": [
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 23,
+      "case": "0-ample-BC",
+      "details": {},
+      "event": "call",
+      "method": "touch",
+      "owner": "C",
+      "source_line": 454,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            5
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [
+          "B"
+        ],
+        "waiting": [
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 23,
+      "case": "0-ample-BC",
+      "event": "return",
+      "method": "touch",
+      "owner": "C",
+      "result": null,
+      "source_line": 455,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          8,
+          9
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            5
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              5,
+              6
+            ],
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [
+          "B"
+        ],
+        "waiting": [
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "case": "0-ample-BC",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 49,
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "B",
+          "scheduled_tokens": 49,
+          "start": 0,
+          "step": 6
+        },
+        {
+          "decode_tokens": 0,
+          "end": 33,
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "C",
+          "scheduled_tokens": 1,
+          "start": 32,
+          "step": 6
+        }
+      ],
+      "source_line": 461,
+      "step": 6
+    },
+    {
+      "case": "0-ample-BC",
+      "event": "drained",
+      "pending_outputs": 0,
+      "phase": "BC",
+      "source_line": 518,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          6,
+          8,
+          9,
+          5,
+          4,
+          3,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            5
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 51,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 10
+    },
+    {
+      "cached_blocks": [
+        {
+          "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+          "id": 1,
+          "null": false,
+          "ref_cnt": 0
+        },
+        {
+          "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+          "id": 2,
+          "null": false,
+          "ref_cnt": 0
+        }
+      ],
+      "case": "0-ample-CB",
+      "event": "A_cached_and_evictable",
+      "source_line": 579,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 5
+    },
+    {
+      "after": [
+        "C",
+        "B"
+      ],
+      "before": [
+        "B",
+        "C"
+      ],
+      "case": "0-ample-CB",
+      "count": 1,
+      "event": "test_only_reorder",
+      "source_line": 581,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 5
+    },
+    {
+      "call": 14,
+      "case": "0-ample-CB",
+      "event": "return",
+      "method": "get_computed_blocks",
+      "owner": "C",
+      "result": {
+        "blocks": [
+          [
+            1,
+            2
+          ]
+        ],
+        "hit_tokens": 32,
+        "shared_prefix_boundary": 0
+      },
+      "source_line": 584,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 16,
+      "case": "0-ample-CB",
+      "details": {},
+      "event": "call",
+      "method": "touch",
+      "owner": "C",
+      "source_line": 586,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 16,
+      "case": "0-ample-CB",
+      "event": "return",
+      "method": "touch",
+      "owner": "C",
+      "result": null,
+      "source_line": 587,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 20,
+      "case": "0-ample-CB",
+      "details": {
+        "num_new_computed_tokens": 0,
+        "num_new_tokens": 49
+      },
+      "event": "call",
+      "method": "allocate_slots",
+      "owner": "B",
+      "source_line": 595,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          4,
+          5,
+          6,
+          7,
+          8,
+          9
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "C": [
+              1,
+              2,
+              3
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 32,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          }
+        },
+        "running": [
+          "C"
+        ],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 20,
+      "case": "0-ample-CB",
+      "event": "return",
+      "method": "allocate_slots",
+      "owner": "B",
+      "result": {
+        "blocks": [
+          [
+            4,
+            5,
+            6,
+            7
+          ]
+        ],
+        "success": true
+      },
+      "source_line": 606,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 6,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          8,
+          9
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            4
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            6
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            5
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              4,
+              5,
+              6,
+              7
+            ],
+            "C": [
+              1,
+              2,
+              3
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 32,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          }
+        },
+        "running": [
+          "C"
+        ],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "case": "0-ample-CB",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 33,
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "C",
+          "scheduled_tokens": 1,
+          "start": 32,
+          "step": 6
+        },
+        {
+          "decode_tokens": 0,
+          "end": 49,
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "B",
+          "scheduled_tokens": 49,
+          "start": 0,
+          "step": 6
+        }
+      ],
+      "source_line": 607,
+      "step": 6
+    },
+    {
+      "case": "0-ample-CB",
+      "event": "drained",
+      "pending_outputs": 0,
+      "phase": "BC",
+      "source_line": 664,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 5,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 6,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 7,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 8,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 9,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          7,
+          3,
+          8,
+          9,
+          2,
+          1,
+          6,
+          5,
+          4
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            4
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            6
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            5
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 51,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 10
+    },
+    {
+      "cached_blocks": [
+        {
+          "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+          "id": 1,
+          "null": false,
+          "ref_cnt": 0
+        },
+        {
+          "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+          "id": 2,
+          "null": false,
+          "ref_cnt": 0
+        }
+      ],
+      "case": "0-pressure-BC",
+      "event": "A_cached_and_evictable",
+      "source_line": 61,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 5
+    },
+    {
+      "call": 15,
+      "case": "0-pressure-BC",
+      "details": {
+        "num_new_computed_tokens": 0,
+        "num_new_tokens": 49
+      },
+      "event": "call",
+      "method": "allocate_slots",
+      "owner": "B",
+      "source_line": 66,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 19,
+      "case": "0-pressure-BC",
+      "details": {
+        "block_id": 2
+      },
+      "event": "call",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "source_line": 72,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 19,
+      "case": "0-pressure-BC",
+      "event": "return",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "result": true,
+      "source_line": 73,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 20,
+      "case": "0-pressure-BC",
+      "details": {
+        "block_id": 1
+      },
+      "event": "call",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "source_line": 74,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 20,
+      "case": "0-pressure-BC",
+      "event": "return",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "result": true,
+      "source_line": 75,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {},
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 15,
+      "case": "0-pressure-BC",
+      "event": "return",
+      "method": "allocate_slots",
+      "owner": "B",
+      "result": {
+        "blocks": [
+          [
+            3,
+            4,
+            2,
+            1
+          ]
+        ],
+        "success": true
+      },
+      "source_line": 77,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            2
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              2,
+              1
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B",
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 21,
+      "case": "0-pressure-BC",
+      "event": "return",
+      "method": "get_computed_blocks",
+      "owner": "C",
+      "result": {
+        "blocks": [
+          []
+        ],
+        "hit_tokens": 0,
+        "shared_prefix_boundary": 0
+      },
+      "source_line": 79,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            2
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              2,
+              1
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "RUNNING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [
+          "B"
+        ],
+        "waiting": [
+          "C"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "case": "0-pressure-BC",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 49,
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "B",
+          "scheduled_tokens": 49,
+          "start": 0,
+          "step": 6
+        }
+      ],
+      "source_line": 82,
+      "step": 6
+    },
+    {
+      "case": "0-pressure-BC",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 33,
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "C",
+          "scheduled_tokens": 33,
+          "start": 0,
+          "step": 10
+        }
+      ],
+      "source_line": 142,
+      "step": 10
+    },
+    {
+      "case": "0-pressure-BC",
+      "event": "drained",
+      "pending_outputs": 0,
+      "phase": "BC",
+      "source_line": 187,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          4,
+          3,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 51,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 14
+    },
+    {
+      "cached_blocks": [
+        {
+          "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+          "id": 1,
+          "null": false,
+          "ref_cnt": 0
+        },
+        {
+          "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+          "id": 2,
+          "null": false,
+          "ref_cnt": 0
+        }
+      ],
+      "case": "0-pressure-CB",
+      "event": "A_cached_and_evictable",
+      "source_line": 248,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 5
+    },
+    {
+      "after": [
+        "C",
+        "B"
+      ],
+      "before": [
+        "B",
+        "C"
+      ],
+      "case": "0-pressure-CB",
+      "count": 1,
+      "event": "test_only_reorder",
+      "source_line": 250,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 5
+    },
+    {
+      "call": 14,
+      "case": "0-pressure-CB",
+      "event": "return",
+      "method": "get_computed_blocks",
+      "owner": "C",
+      "result": {
+        "blocks": [
+          [
+            1,
+            2
+          ]
+        ],
+        "hit_tokens": 32,
+        "shared_prefix_boundary": 0
+      },
+      "source_line": 253,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 16,
+      "case": "0-pressure-CB",
+      "details": {},
+      "event": "call",
+      "method": "touch",
+      "owner": "C",
+      "source_line": 255,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "call": 16,
+      "case": "0-pressure-CB",
+      "event": "return",
+      "method": "touch",
+      "owner": "C",
+      "result": null,
+      "source_line": 256,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "C": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "C",
+          "B"
+        ]
+      },
+      "step": 6
+    },
+    {
+      "case": "0-pressure-CB",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 33,
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "C",
+          "scheduled_tokens": 1,
+          "start": 32,
+          "step": 6
+        }
+      ],
+      "source_line": 266,
+      "step": 6
+    },
+    {
+      "call": 35,
+      "case": "0-pressure-CB",
+      "details": {
+        "num_new_computed_tokens": 0,
+        "num_new_tokens": 49
+      },
+      "event": "call",
+      "method": "allocate_slots",
+      "owner": "B",
+      "source_line": 316,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          3,
+          4,
+          2,
+          1
+        ],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "call": 39,
+      "case": "0-pressure-CB",
+      "details": {
+        "block_id": 2
+      },
+      "event": "call",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "source_line": 322,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "01379576afdee105c41f0dbd9eb97e388c1b276ddd5b4054f169d42e2573848000000000": [
+            2
+          ],
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "call": 39,
+      "case": "0-pressure-CB",
+      "event": "return",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "result": true,
+      "source_line": 323,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "call": 40,
+      "case": "0-pressure-CB",
+      "details": {
+        "block_id": 1
+      },
+      "event": "call",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "source_line": 324,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000",
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "bbdf6ed185230d43b18f27b37c7caa19206ab372c0fc8b99132b9669690e635400000000": [
+            1
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "call": 40,
+      "case": "0-pressure-CB",
+      "event": "return",
+      "method": "_maybe_evict_cached_block",
+      "owner": "B",
+      "result": true,
+      "source_line": 325,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": null,
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {},
+        "request_blocks": [
+          {
+            "B": []
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "call": 35,
+      "case": "0-pressure-CB",
+      "event": "return",
+      "method": "allocate_slots",
+      "owner": "B",
+      "result": {
+        "blocks": [
+          [
+            3,
+            4,
+            2,
+            1
+          ]
+        ],
+        "success": true
+      },
+      "source_line": 327,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 1
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 1
+          }
+        ],
+        "free_queue": [],
+        "hash_mapping": {
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            2
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {
+            "B": [
+              3,
+              4,
+              2,
+              1
+            ]
+          }
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 0,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "WAITING"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": [
+          "B"
+        ]
+      },
+      "step": 10
+    },
+    {
+      "case": "0-pressure-CB",
+      "event": "dispatch",
+      "intervals": [
+        {
+          "decode_tokens": 0,
+          "end": 49,
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0,
+          "request_id": "B",
+          "scheduled_tokens": 49,
+          "start": 0,
+          "step": 10
+        }
+      ],
+      "source_line": 328,
+      "step": 10
+    },
+    {
+      "case": "0-pressure-CB",
+      "event": "drained",
+      "pending_outputs": 0,
+      "phase": "BC",
+      "source_line": 373,
+      "state": {
+        "blocks": [
+          {
+            "hash": null,
+            "id": 0,
+            "null": true,
+            "ref_cnt": 0
+          },
+          {
+            "hash": null,
+            "id": 1,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000",
+            "id": 2,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000",
+            "id": 3,
+            "null": false,
+            "ref_cnt": 0
+          },
+          {
+            "hash": "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000",
+            "id": 4,
+            "null": false,
+            "ref_cnt": 0
+          }
+        ],
+        "free_queue": [
+          1,
+          2,
+          4,
+          3
+        ],
+        "hash_mapping": {
+          "2e7cefe1e4e31e7c9c7cc9537069774ef1483f8c8b71c4a6300c923b003a63e100000000": [
+            3
+          ],
+          "492e4edd7ba9b92c8c30a73a75257313c4cbc55faeb49860872b4c40c04d367200000000": [
+            2
+          ],
+          "f5419c22fc7bdcd960ab0cda369f4680e051fb201ab37e8e74c95604085ba0ad00000000": [
+            4
+          ]
+        },
+        "request_blocks": [
+          {}
+        ],
+        "requests": {
+          "A": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "B": {
+            "computed_optimistic": 51,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          },
+          "C": {
+            "computed_optimistic": 35,
+            "in_flight": 0,
+            "is_prefill_chunk": false,
+            "output_placeholders": 0,
+            "output_tokens": [
+              9001,
+              9001,
+              9001
+            ],
+            "preemptions": 0,
+            "stale_output_tokens": 0,
+            "status": "FINISHED_LENGTH_CAPPED"
+          }
+        },
+        "running": [],
+        "waiting": []
+      },
+      "step": 14
+    }
+  ],
+  "scope": "Explicit selected events from repeat 0; complete private trace has 1992 lines/12 cases. Not a complete replay trace.",
+  "source_trace_sha256": "333832ab83c5fc6bb8e9bfd8accbf7a6df9935162f2ffb0bb45927d2b9b03630"
+}

@@ -1,0 +1,517 @@
+{
+  "cases": [
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 82,
+      "C_first_lookup_hit_tokens": 0,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "0-pressure-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 0,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "0-pressure-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 0,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "0-ample-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 0,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "0-ample-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 0,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 82,
+      "C_first_lookup_hit_tokens": 0,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "1-pressure-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 1,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "1-pressure-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 1,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "1-ample-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 1,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "1-ample-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 1,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 82,
+      "C_first_lookup_hit_tokens": 0,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "2-pressure-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 2,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "pressure",
+      "case": "2-pressure-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 5,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 2,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "2-ample-BC",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "B",
+        "C"
+      ],
+      "repeat": 2,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    },
+    {
+      "BC_decode_tokens": 4,
+      "BC_prefill_tokens": 50,
+      "C_first_lookup_hit_tokens": 32,
+      "all_references_released": true,
+      "capacity": "ample",
+      "case": "2-ample-CB",
+      "final_pending_outputs": 0,
+      "max_pending_outputs": 2,
+      "num_blocks": 10,
+      "order": [
+        "C",
+        "B"
+      ],
+      "repeat": 2,
+      "requests": {
+        "A": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 33,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "B": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 49,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        },
+        "C": {
+          "decode_tokens": 2,
+          "final_status": "FINISHED_LENGTH_CAPPED",
+          "preemptions": 0,
+          "prefill_tokens": 1,
+          "repeated_decode_tokens": 0,
+          "repeated_prefill_tokens": 0
+        }
+      }
+    }
+  ],
+  "definitions": {
+    "decode": "Dispatched positions beyond original prompt length; last sampled output is not dispatched again.",
+    "prefill": "Intersection of each dispatched [start,end) with original prompt positions, including repeated dispatches.",
+    "repeated": "Positions already dispatched for the same Request; not inferred from cache-hit length."
+  },
+  "metric": "scheduled/dispatched prefill tokens; no KV tensors or GPU execution",
+  "real_kv_tensors_computed": false,
+  "task_id": "M1-native-bc-replay",
+  "warmup_included_in_BC_totals": false
+}

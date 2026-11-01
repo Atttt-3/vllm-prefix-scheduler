@@ -2,7 +2,7 @@
 
 ## 当前结构
 
-`src/vllm_prefix_scheduler/` 是项目包，目前只包含公开证据的一致性检查。`scripts/validate_model.py` 使用原生 LLM，`scripts/diagnostic_worker.py` 通过具名 worker RPC 读取模型精度、调度配置和 KV 分配。诊断扩展不修改调度顺序或模型执行，也不需要开启不安全的函数序列化。
+`src/vllm_prefix_scheduler/` 包含证据检查和 M1 host-side 原生重放 `native_replay.py`。重放直接构造真实 `AsyncScheduler`，以合成 `ModelRunnerOutput` 消费异步生命周期；仅在测试控制组施加一次 B/C 改序，未实现生产 scheduler 子类。固定输入、透传观测与区间计数、四组反例/负对照及验证边界见 [M1 记录](research/m1-native-bc-replay.md)。`scripts/validate_model.py` 使用原生 LLM，`scripts/diagnostic_worker.py` 通过具名 worker RPC 读取模型精度、调度配置和 KV 分配。诊断扩展不修改调度顺序或模型执行，也不需要开启不安全的函数序列化。
 
 实测运行使用 V2 GPU Model Runner、FlashAttention 2 和单 full-attention group。eager 模式关闭 torch.compile、CUDA Graph 和 JIT warmup；APC 与异步调度在 worker 中保持开启。
 

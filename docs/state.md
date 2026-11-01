@@ -1,6 +1,6 @@
 # 技术状态与验证边界
 
-截至 2026-11-01，已完成固定版本原生环境的最小验证；自定义调度器、B/C 淘汰反例、原生调度回归和正式性能实验尚未实现。
+截至 2026-11-02，已完成固定版本原生环境最小验证，以及 M1 原生 AsyncScheduler B/C 淘汰反例与派发工作基线。自定义调度器、完整原生调度回归和正式性能实验尚未实现。
 
 ## 已验证能力
 
@@ -8,9 +8,11 @@
 - KV cache 容量为 88,848 tokens（5,553 blocks × 16 tokens），约 12.20 GiB；0.5 秒采样的显存峰值为 20,802 MiB。测量定义及来源见[验证汇总](../evidence/2026-11-01-rtx3090/summary.json)与[来源清单](../evidence/2026-11-01-rtx3090/provenance.json)。
 - 从版本化 checkout 复用独立环境、模型和缓存后再次通过原生 7 请求验证；引擎退出后 GPU 占用 1 MiB，作业已释放，见[重放验收记录](../evidence/2026-11-01-checkout-replay/workspace-verification.json)。
 
+- M1 在真实 `AsyncScheduler` / Request / hash / KVCacheManager / BlockPool 上完成四组 × 三次重放：压力 B→C 的 C prefill 派发33，测试 C→B 为1；充足容量两序均为1。A自然完成释放后被B原生分配淘汰的因果 trace、独立审查与证据见 [M1记录](research/m1-native-bc-replay.md)。这只是合成 runner 驱动的 host-side 元数据和 scheduled/dispatched prefill tokens，没有真实 KV tensor 计算。
+
 ## 下一项技术工作
 
-在固定版本真实 Scheduler 中定位等待队列、前缀命中查找、free queue 分配与异步占位的调用顺序，然后重现 B/C 缓存淘汰反例并记录实际 prefill 工作量。实现边界见[架构说明](architecture.md)，验收标准见[项目方案](project-plan.md)。
+M1 调用链与反例已验收；下一阶段另行设计只读评分、连续等待窗口及等待保护，并建立相应原生回归。本轮不进入 M2。实现边界见[架构说明](architecture.md)，验收标准见[项目方案](project-plan.md)。
 
 ## 结果解释
 
