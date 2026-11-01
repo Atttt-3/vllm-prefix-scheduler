@@ -28,6 +28,10 @@ def assert_trace(trace_path, config=None):
     This helper is also callable against the immutable archived native trace.
     It performs no vLLM operations and cannot alter native cache state.
     """
+    if not __debug__:
+        raise RuntimeError(
+            "M1 validation requires assertions enabled; remove -O/-OO and unset PYTHONOPTIMIZE"
+        )
     if config is None:
         config = json.loads(CONFIG.read_text())
     cases = defaultdict(list)
@@ -260,6 +264,59 @@ def test_cached_prefix_is_not_mistaken_for_dispatched_work():
 def test_invalid_dispatch_interval_fails(start, count):
     with pytest.raises(ValueError, match="Invalid dispatched interval"):
         DispatchLedger().record("C", start, count, 33)
+
+
+def run_cli_with_optimization(script, arguments, flag, optimization):
+    """Exercise actual process flags, including environment-driven optimization."""
+    environment = dict(os.environ)
+    environment.pop("PYTHONOPTIMIZE", None)
+    if optimization is not None:
+        environment["PYTHONOPTIMIZE"] = optimization
+    command = [sys.executable]
+    if flag is not None:
+        command.append(flag)
+    return subprocess.run(
+        [*command, str(script), *arguments],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+
+@pytest.mark.parametrize(
+    "flag,optimization", [(None, None), ("-O", None), ("-OO", None), (None, "1"), (None, "2")]
+)
+def test_empty_trace_never_reports_verified(tmp_path, flag, optimization):
+    trace = tmp_path / "empty.jsonl"
+    trace.write_text("")
+    completed = run_cli_with_optimization(
+        Path(__file__), ["--trace", str(trace)], flag, optimization
+    )
+    assert completed.returncode != 0
+    assert "causal_trace_verified" not in completed.stdout
+    if flag is not None or optimization is not None:
+        assert "M1 validation requires assertions enabled" in completed.stderr
+    else:
+        assert "AssertionError" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    "flag,optimization", [(None, None), ("-O", None), ("-OO", None), (None, "1"), (None, "2")]
+)
+def test_native_entry_rejects_optimized_interpreter_before_imports(flag, optimization):
+    completed = run_cli_with_optimization(
+        ROOT / "scripts/replay_bc.py", ["--help"], flag, optimization
+    )
+    if flag is not None or optimization is not None:
+        assert completed.returncode != 0
+        assert "M1 validation requires assertions enabled" in completed.stderr
+        assert "usage:" not in completed.stdout
+    else:
+        assert completed.returncode == 0
+        assert "usage:" in completed.stdout
 
 
 @pytest.mark.native

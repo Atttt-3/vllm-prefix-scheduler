@@ -136,6 +136,19 @@ A 预热另计 33 prefill + 2 decode，不包含在 B+C 合计中。每个请求
 
 私有材料统一位于新 worktree 的 `runs/m1-native-bc-replay/`：`attempt-01{,-data}`、`attempt-02{,-data}`、`trace-audit-02`、`fail-closed{,-data}`、`local-check`、`local-check-network`，以及 `resource-release.txt` 和 `gpu-after.csv`。原始 manifest、acceptance、配置、来源、日志、完整 trace、失败和汇总均保留。公开最小字段导出在 [`evidence/2026-11-02-m1-native-bc-replay/`](../../evidence/2026-11-02-m1-native-bc-replay/)，未调用 readiness 导出器、未覆盖历史证据，移除了实际解释器/内部机器/账号/路径，保留数值、定义、源哈希和原始行号。
 
-专项分支 `feat/m1-native-bc-replay`；交付 commit 与未合并 PR 以交接消息和 Git HEAD 为准。成功被测代码、配置、测试与 Makefile 均来自 `0288eb4`，后续交付改动仅补技术说明和显式公开证据。原工作区始终保留 `feat/project-workflows`，其 `docs/workflows.md` 未提交修改前后 SHA-256 均为 `c3dca495872357a584ecc2464dc92dafa5e4467d16237f4c11dfdf9ab096bb82`。
+专项分支 `feat/m1-native-bc-replay`；交付 commit 与未合并 PR 以交接消息和 Git HEAD 为准。首次交付 `5ec59b1` 的实验代码、配置、测试与 Makefile 均来自 `0288eb4`；本次入口加固另有子进程验证，具体边界见下方复审记录。原工作区始终保留 `feat/project-workflows`，其 `docs/workflows.md` 未提交修改前后 SHA-256 均为 `c3dca495872357a584ecc2464dc92dafa5e4467d16237f4c11dfdf9ab096bb82`。
 
 后续设计应以“准入分配之前的复用机会”为观测对象，避免额外 `get_computed_blocks` 的条件性 event 副作用；保留区间计数、相同到达的容量负对照和 FIFO 排空验证。进入策略工作前仍需独立设计连续新鲜 WAITING 窗口、屏障、等待保护与原生回归。本轮只完成 M1 原生机制与派发基线，没有实现 M2、自定义调度器或性能优化。
+
+
+## 再次独立复审：拒绝关闭断言的解释器
+
+按原始 A–F 标准重新读取实际源码和原始材料，15 个上游模块、65 个被测项目文件、519 对嵌套调用、144 个 FIFO 输出、四组 × 三次完整 trace、公开摘录与释放记录再次核验通过。原生 M1 机制与82/50/50/50的 B+C prefill 派发结论仍成立。
+
+复审发现一个 P2 验收入口缺陷：旧版本执行 `python -O tests/native/test_native_replay.py --trace EMPTY` 会因 Python 移除 `assert` 而退出0，错误报告零个 case 的 `causal_trace_verified=true`。普通模式同样空 trace 正确退出1。原始反证由 schema 2 采集到私有 `runs/m1-native-bc-rereview/before-fix/`，明确记为“命令成功但语义验收拒绝”。历史真实12个 case 的数值和因果已经独立复算，未依赖优化模式下的断言。
+
+最小修复是在原生 main/replay_case/verify_matrix 及独立 assert_trace 入口使用普通 `if not __debug__: raise RuntimeError(...)`，显式拒绝 `-O`、`-OO` 和 `PYTHONOPTIMIZE`，避免原生不变量及审查断言被关闭。未来 runtime 记录补充 `python_optimize` 与 `python_assertions_enabled`。新增10个真实子进程回归覆盖普通模式与四种关闭断言的方式：空 trace 必须失败，原生入口正常帮助可用，优化模式必须在原生导入前失败。
+
+独立 AST 对照确认 `create_scheduler`、`create_requests`、`drive`、`Observation`、`DispatchLedger` 等机制函数与原生被测 `0288eb4` 完全相同；main/replay_case/verify_matrix 仅增加上述前置检查，runtime_record 仅增加两项元数据。正常模式的核心行为不变。本轮没有再次运行 Linux 原生矩阵或申请 GPU；机制验收继续引用 `0288eb4` 的原始记录，入口修复以新的子进程回归、原始 trace 再审和完整本地检查为证据，不能把新提交声称为已重新完成 Linux 原生重放。
+
+本轮私有材料位于 `runs/m1-native-bc-rereview/`，保留优化模式反证、修复后检查及独立 AST/证据复核记录。判断功能完成需同时满足：固定原生因果矩阵成立、完整生命周期与区间计数可核查、四组重复可复现、证据门槛分开，以及无效审查输入不能错误返回通过。当前补丁针对最后一项修复，不扩展到 M2 或性能工作。

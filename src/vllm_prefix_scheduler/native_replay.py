@@ -27,6 +27,14 @@ def sha256_file(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def require_assertions():
+    """Native invariants and this fixture's validation require active assertions."""
+    if not __debug__:
+        raise RuntimeError(
+            "M1 validation requires assertions enabled; remove -O/-OO and unset PYTHONOPTIMIZE"
+        )
+
+
 class DispatchLedger:
     """Count dispatched positions, including overlaps after native preemption."""
 
@@ -232,6 +240,8 @@ def runtime_record(config, model_path):
     return {
         "python_executable": sys.executable,
         "python_version": sys.version,
+        "python_optimize": sys.flags.optimize,
+        "python_assertions_enabled": __debug__,
         "platform": platform.platform(),
         "vllm_version": vllm.__version__,
         "vllm_file": vllm.__file__,
@@ -423,6 +433,7 @@ def drive(config, observation, phase):
 
 
 def replay_case(config, capacity_name, order, model_path, emit):
+    require_assertions()
     scheduler = create_scheduler(config, config["capacities"][capacity_name], model_path)
     requests = create_requests(config)
     observation = Observation(scheduler, requests, emit)
@@ -559,6 +570,7 @@ def replay_case(config, capacity_name, order, model_path, emit):
 
 def verify_matrix(results):
     """Check repeated dispatch counts; causal trace acceptance is a separate gate."""
+    require_assertions()
     expected = {
         ("pressure", "BC"): 33,
         ("pressure", "CB"): 1,
@@ -588,6 +600,7 @@ def verify_matrix(results):
 
 
 def main():
+    require_assertions()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/native-bc-replay.json"))
     parser.add_argument(
