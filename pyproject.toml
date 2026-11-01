@@ -34,7 +34,7 @@ packages = ["src/vllm_prefix_scheduler"]
 include = [
   "/src", "/scripts", "/configs", "/docs", "/evidence", "/tests", "/requirements", "/progress",
   "/README.md", "/AGENTS.md", "/CONTRIBUTING.md", "/NOTICE", "/LICENSE",
-  "/Makefile", "/pyproject.toml", "/uv.lock", "/.python-version", "/.github",
+  "/Makefile", "/pyproject.toml", "/uv.lock", "/.python-version", "/.github", "/.agents/skills",
 ]
 
 [tool.ruff]

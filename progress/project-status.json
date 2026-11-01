@@ -8,7 +8,7 @@
     "description": "基础环境与工作区已通过原生验收。先重现缓存淘汰反例，再实现窗口排序与等待保护。",
     "evidence_boundary": "自定义调度器、原生 B/C 反例与正式性能实验尚未实现；当前记录只证明原生环境与工作区可复现。"
   },
-  "updated_at": "2026-11-01T20:16:38+08:00",
+  "updated_at": "2026-11-01T20:30:14+08:00",
   "focus_task": "M1-call-chain",
   "milestones": [
     {
@@ -791,6 +791,21 @@
         {
           "label": "原生功能验证",
           "url": "https://github.com/Atttt-3/vllm-prefix-scheduler/blob/main/evidence/2026-11-01-rtx3090/validation.json"
+        }
+      ]
+    },
+    {
+      "date": "2026-11-01T20:30:14+08:00",
+      "title": "可复用协作、调研与证据工作流就绪",
+      "description": "新增项目 skill、任务/调研/交接模板及私有运行采集和独立验收入口；完成开源机制差异研究。本项为开发工具建设，不推进 M1 原生反例或调度性能验收。",
+      "evidence": [
+        {
+          "label": "项目工作流",
+          "url": "https://github.com/Atttt-3/vllm-prefix-scheduler/blob/feat/project-workflows/docs/workflows.md"
+        },
+        {
+          "label": "开源调研样例",
+          "url": "https://github.com/Atttt-3/vllm-prefix-scheduler/blob/feat/project-workflows/docs/research/2026-11-01-prefix-scheduling.md"
         }
       ]
     }

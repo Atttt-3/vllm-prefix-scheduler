@@ -21,6 +21,15 @@ The custom scheduler is not implemented. The completed native run validates Pyth
 
 ## Working and verification
 
+### Reusable project workflows
+
+Use the project-local skill at `.agents/skills/project-workflow/SKILL.md` for bounded multi-agent work, upstream mechanism research, and collecting/reviewing experiment evidence. Its procedures and runnable examples live in `docs/workflows.md`; task, research and handoff templates live in `docs/templates/`. Routine small edits do not require delegation or a new research document.
+
+- For independent investigations or reviews, delegate bounded questions with explicit file ownership and return evidence to one coordinator. Subagents share the checkout unless an isolated worktree is explicitly created; coordinate writes and serialize experiments on the single GPU. Do not change the shared branch or absorb another task's uncommitted work. Use a focused branch/worktree when the baseline is clean or the existing changes belong to this task.
+- Research starts with a project question. Open primary source files/PRs, record access date and commit/head/status, compare upstream behavior with this project's invariants, and preserve attribution/license boundaries. A search snippet, moving `main`, or open PR does not establish pinned-runtime behavior. Keep failed retrievals and unverified claims explicit.
+- Collect repeatable commands with `make run-evidence ARGS='...'` (or `scripts/run_evidence.py` in the appropriate environment). The collector records private logs, configs, source fingerprints and artifacts; GPU/performance collection runs inside an existing allocation. `kind` is a declared layer and collector runtime is not necessarily the child runtime.
+- Run `make check-run-evidence ARGS='RUN_DIR'` to check integrity. Command success and accepted behavior are separate gates. Review `acceptance.json` against actual criteria/artifacts; skipped, mocked and missing validation remain visible and cannot satisfy that layer. `--require-command-success` and `--require-accepted` provide distinct automated gates. Only the coordinator records accepted progress; collection never marks a milestone done or publishes raw data.
+
 Use a focused branch for each implementation task. Run `make check` for changed local code and records. Add native replay/regression tests when scheduler behavior changes; local evidence tests alone are not native scheduler validation. GPU work requires a scheduler allocation. Keep heavy installation, compilation and inference off login gateways. Release allocations after bounded tasks and never cancel another task's jobs.
 
 Record the exact command, commit, config, workload seed, runtime versions, raw trace location and result interpretation for experiments. Timing from the minimal validation is not a performance benchmark. Keep negative results and failed/unfinished requests.
