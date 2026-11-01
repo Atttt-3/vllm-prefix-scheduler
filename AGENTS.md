@@ -2,7 +2,7 @@
 
 ## Read before continuing
 
-Read `progress/project-status.json`, `docs/state.md`, `docs/coordination.md`, `docs/project-plan.md`, `docs/architecture.md`, and relevant files under `configs/`. If `.local/workspace.json` exists, use its machine-specific connection and storage locations. It is private, ignored configuration and must never be committed. Remote HKU SSH requires the user to connect Cisco Secure Client to the school VPN first.
+Read `docs/state.md`, `docs/project-plan.md`, `docs/architecture.md`, and relevant files under `configs/`. If `.local/workspace.json` exists, use its machine-specific connection and storage locations. It is private, ignored configuration and must never be committed. Remote HKU SSH requires the user to connect Cisco Secure Client to the school VPN first.
 
 ## Current scope
 
@@ -25,11 +25,9 @@ Use a focused branch for each implementation task. Run `make check` for changed 
 
 Record the exact command, commit, config, workload seed, runtime versions, raw trace location and result interpretation for experiments. Timing from the minimal validation is not a performance benchmark. Keep negative results and failed/unfinished requests.
 
-Use this conversation as the project coordination hub. Bounded execution tasks return evidence to the coordinator before completion is recorded. Keep the current task, acceptance criteria, dependencies, blockers and next action in `progress/project-status.json`.
+Update `docs/state.md` when verified technical capabilities or their limitations change. Link claims to code, tests, or experimental records. Do not mark planned functionality complete based on a placeholder, mocked result, or skipped test.
 
-After each project work session, update that JSON and its event history from actual evidence, run `make progress`, then `make check`. `docs/state.md` and `progress/index.html` are generated; do not edit them directly. Done tasks require evidence and satisfied dependencies. Task counts are not effort-weighted project completion. Do not mark planned functionality complete based on a placeholder, mocked result, or skipped test.
-
-Sync accepted changes through GitHub and update the cluster checkout with `git pull --ff-only`. Refresh the existing private Sites dashboard when progress changes; its identity and publication details live under ignored `.local/coordination-site/` and `.local/coordination-site.json`. Preserve its project_id and audience. Follow the Sites skill for source synchronization and deployment. Do not create a duplicate site or pretend a static snapshot is unattended live monitoring.
+Sync accepted changes through GitHub and update the cluster checkout with `git pull --ff-only`.
 
 ## Public data and upstream attribution
 

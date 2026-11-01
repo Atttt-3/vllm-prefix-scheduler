@@ -6,8 +6,6 @@
 
 **当前阶段：RTX 3090 上的原生运行环境和模型验证已完成；自定义调度器、B/C 淘汰反例与优化实验待实现。** 当前结果证明 BF16 推理、APC 和异步调度可用，不代表调度优化收益。
 
-项目协调入口：[当前进度](docs/state.md) · [协调约定](docs/coordination.md) · [可离线打开的交互看板](progress/index.html)。本对话统筹下一步，`progress/project-status.json` 保存唯一进度事实；HTML 与状态说明由它生成。
-
 ## 已完成的原生验证
 
 2026-11-01，单张 RTX 3090 24 GiB，Python 3.12.16，vLLM 0.32.0，PyTorch 2.13.0+cu129，Qwen3-4B BF16。
@@ -67,9 +65,7 @@ sbatch scripts/validate_gpu.sbatch
 
 | 位置 | 用途 |
 |---|---|
-| [`docs/state.md`](docs/state.md) | 当前完成状态、下一步和最近验证 |
-| [`progress/`](progress/) | 唯一进度数据、看板模板和生成 HTML |
-| [`docs/coordination.md`](docs/coordination.md) | 本对话的协调职责、任务状态和持续更新流程 |
+| [`docs/state.md`](docs/state.md) | 已验证的技术能力、证据与下一步 |
 | [`docs/project-plan.md`](docs/project-plan.md) | 问题定义、范围、里程碑和验收标准 |
 | [`docs/architecture.md`](docs/architecture.md) | 原生调用链、计划接口与实现边界 |
 | [`docs/experiments.md`](docs/experiments.md) | 工作负载、对照、指标和运行记录规范 |
