@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from vllm_prefix_scheduler.run_evidence import check_run, collect_run, write_json
+from vllm_prefix_scheduler.run_evidence import check_run, collect_run, digest, write_json
 
 
 @pytest.fixture
@@ -271,3 +271,27 @@ def test_process_group_permission_error_is_archived_and_blocks_acceptance(reposi
     assert check_run(repository / "runs/one")["integrity"] == "valid"
     with pytest.raises(ValueError, match="success gate"):
         check_run(repository / "runs/one", require_success=True)
+
+
+def test_legacy_review_is_readable_but_cannot_pass_the_new_configuration_gate(repository):
+    run(repository, [sys.executable, "-c", "print('legacy input fixture')"])
+    directory = repository / "runs/one"
+    manifest = json.loads((directory / "manifest.json").read_text())
+    manifest["schema_version"] = 1
+    manifest.pop("config_checks")
+    manifest.pop("config_inputs_stable")
+    write_json(directory / "manifest.json", manifest)
+    receipt = json.loads((directory / "acceptance.json").read_text())
+    receipt.update(
+        manifest_sha256=digest(directory / "manifest.json"),
+        decision="accepted",
+        reviewer="legacy fixture reviewer",
+    )
+    receipt["criteria"][0].update(status="passed", evidence=["stdout.log"])
+    write_json(directory / "acceptance.json", receipt)
+    checked = check_run(directory)
+    assert checked["integrity"] == "valid"
+    assert checked["acceptance"] == "accepted"
+    assert checked["configuration_verification"] == "not_verified"
+    with pytest.raises(ValueError, match="verified stable configuration"):
+        check_run(directory, require_accepted=True)

@@ -10,9 +10,13 @@ import platform
 import signal
 import subprocess
 import sys
+import threading
 import time
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+
+from .config_evidence import check_config_inputs
 
 KINDS = ("local", "native", "gpu", "performance")
 COMMAND_STATES = {"succeeded", "failed", "timed_out", "interrupted", "launch_failed"}
@@ -113,6 +117,97 @@ def group_exists(pid: int) -> bool:
     return True
 
 
+class RunSignals:
+    """Remember the first termination request without interrupting cleanup or sealing."""
+
+    def __init__(self):
+        self.first_signal = None
+
+    def request(self, signum, _frame=None):
+        if self.first_signal is None:
+            self.first_signal = signum
+
+
+@contextmanager
+def collect_signals():
+    requested = RunSignals()
+    previous = {}
+    try:
+        if threading.current_thread() is threading.main_thread():
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous[signum] = signal.signal(signum, requested.request)
+        yield requested
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def wait_for_command(process: subprocess.Popen, timeout: float, requested: RunSignals) -> tuple:
+    deadline = time.monotonic() + timeout
+    while True:
+        if requested.first_signal is not None:
+            return "interrupted", 128 + requested.first_signal
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return "timed_out", 124
+        try:
+            returncode = process.wait(timeout=min(0.1, remaining))
+        except subprocess.TimeoutExpired:
+            continue
+        return (
+            "succeeded" if returncode == 0 else "failed",
+            returncode if returncode >= 0 else 128 - returncode,
+        )
+
+
+def seal_run(output: Path, manifest: dict, requested: RunSignals, code: int) -> int:
+    """Keep the manifest/review binding consistent if a signal arrives during sealing."""
+    while True:
+        observed_signal = requested.first_signal
+        if observed_signal is not None:
+            manifest.update(command_status="interrupted", termination_signal=observed_signal)
+            code = 128 + observed_signal
+        write_json(output / "manifest.json", manifest)
+        acceptance = {
+            "schema_version": 1,
+            "manifest_sha256": digest(output / "manifest.json"),
+            "decision": "pending",
+            "reviewer": None,
+            "criteria": [
+                {**criterion, "status": "pending", "evidence": [], "note": ""}
+                for criterion in manifest["criteria"]
+            ],
+            "limitations": [],
+        }
+        write_json(output / "acceptance.json", acceptance)
+        report = [
+            "# Command evidence (private)",
+            "",
+            f"Task: `{manifest['task_id']}`; declared layer: `{manifest['kind']}`.",
+            f"Command status: **{manifest['command_status']}**; return code: `{manifest['returncode']}`.",
+            "Acceptance: **pending**. See acceptance.json for the current review decision.",
+            "",
+            "A successful command is not semantic acceptance. Skipped tests, mock results and",
+            "missing native/GPU artifacts do not establish their corresponding validation layer.",
+            "Collector runtime is not necessarily the runtime of the child command.",
+            "These files contain private commands, paths and logs; publish only through an explicit exporter.",
+            "",
+            "Exact argument vector:",
+            "",
+            "```json",
+            json.dumps(manifest["argv"], ensure_ascii=False, indent=2),
+            "```",
+            "",
+            "## Collection errors",
+            "",
+            *[f"- {error}" for error in manifest["collection_errors"]],
+            "",
+        ]
+        (output / "report.md").write_text("\n".join(report))
+        if requested.first_signal == observed_signal:
+            return code if code else int(bool(manifest["collection_errors"]))
+
+
 def collect_run(
     root: Path,
     output: Path,
@@ -137,7 +232,8 @@ def collect_run(
         raise ValueError("Private evidence inside the repository must stay under runs/")
     config_paths = list(
         dict.fromkeys(
-            (path if path.is_absolute() else root / path).resolve()
+            # Keep symlink paths so retargeting an input is checked as the command sees it.
+            (path if path.is_absolute() else root / path).absolute()
             for path in [root / "configs/upstream.json", *configs]
         )
     )
@@ -161,7 +257,7 @@ def collect_run(
         except importlib.metadata.PackageNotFoundError:
             versions[package] = None
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "task_id": task_id,
         "criteria": [{"id": f"C{i}", "description": text} for i, text in enumerate(criteria, 1)],
         "kind": kind,
@@ -192,20 +288,8 @@ def collect_run(
     write_json(output / "manifest.json", manifest)
     started = time.monotonic()
     process = None
-    termination_signal = signal.SIGINT
-
-    def interrupted(signum, _frame):
-        nonlocal termination_signal
-        termination_signal = signum
-        raise KeyboardInterrupt
-
-    previous_term = None
-    try:
-        previous_term = signal.signal(signal.SIGTERM, interrupted)
-    except ValueError:
-        # Library callers in worker threads cannot install handlers; the CLI uses the main thread.
-        pass
-    try:
+    with collect_signals() as requested:
+        state, code = "launch_failed", 127
         with (
             (output / "stdout.log").open("wb") as stdout,
             (output / "stderr.log").open("wb") as stderr,
@@ -218,96 +302,59 @@ def collect_run(
                     stderr=stderr,
                     start_new_session=os.name == "posix",
                 )
-                returncode = process.wait(timeout=timeout)
-                state = "succeeded" if returncode == 0 else "failed"
-                code = returncode if returncode >= 0 else 128 - returncode
-                if group_exists(process.pid):
-                    manifest["collection_errors"].append(
-                        "Command left background processes; its process group was terminated"
-                    )
-                    manifest["collection_errors"].extend(stop_process(process))
-            except subprocess.TimeoutExpired:
-                manifest["collection_errors"].extend(stop_process(process))
-                returncode, state, code = process.returncode, "timed_out", 124
+                state, code = wait_for_command(process, timeout, requested)
             except KeyboardInterrupt:
-                if process is not None:
-                    manifest["collection_errors"].extend(stop_process(process))
-                returncode = process.returncode if process else None
-                state, code = "interrupted", 128 + termination_signal
-                manifest["termination_signal"] = termination_signal
+                requested.request(signal.SIGINT)
+                state, code = "interrupted", 128 + requested.first_signal
             except OSError as error:
                 stderr.write(f"{type(error).__name__}: {error}\n".encode())
-                returncode, state, code = None, "launch_failed", 127
-            if process is not None and group_exists(process.pid):
-                # A non-child zombie can briefly retain the group ID; wait before hashing logs.
-                deadline = time.monotonic() + 0.5
-                while group_exists(process.pid) and time.monotonic() < deadline:
-                    time.sleep(0.01)
-    finally:
-        if previous_term is not None:
-            signal.signal(signal.SIGTERM, previous_term)
-    manifest.update(
-        command_status=state,
-        returncode=returncode,
-        finished_at=datetime.now(UTC).isoformat(),
-        duration_seconds=time.monotonic() - started,
-    )
-    for filename in ("stdout.log", "stderr.log"):
-        records.append(file_record(output, output / filename))
-    for index, path in enumerate(artifacts):
-        try:
-            source = path if path.is_absolute() else root / path
-            records.append(snapshot(output, source, "artifacts", index))
-        except (OSError, ValueError) as error:
-            manifest["collection_errors"].append(str(error))
-    try:
-        after = source_state(root)
-        after_file = output / "source-after.json"
-        write_json(after_file, after)
-        records.append(file_record(output, after_file))
-        manifest["source_changed_during_run"] = (
-            before["files_sha256"] != after["files_sha256"] or before["commit"] != after["commit"]
+                state, code = "launch_failed", 127
+            finally:
+                if process is not None:
+                    group_alive = group_exists(process.pid)
+                    if group_alive and state in {"succeeded", "failed"}:
+                        manifest["collection_errors"].append(
+                            "Command left background processes; its process group was terminated"
+                        )
+                    if process.poll() is None or group_alive:
+                        manifest["collection_errors"].extend(stop_process(process))
+                    if group_exists(process.pid):
+                        # A non-child zombie can briefly retain the group ID.
+                        deadline = time.monotonic() + 0.5
+                        while group_exists(process.pid) and time.monotonic() < deadline:
+                            time.sleep(0.01)
+        manifest.update(
+            command_status=state,
+            returncode=process.returncode if process is not None else None,
+            timeout_expired=state == "timed_out",
+            finished_at=datetime.now(UTC).isoformat(),
+            duration_seconds=time.monotonic() - started,
         )
-    except (OSError, subprocess.SubprocessError) as error:
-        manifest["collection_errors"].append(str(error))
-    write_json(output / "manifest.json", manifest)
-    acceptance = {
-        "schema_version": 1,
-        "manifest_sha256": digest(output / "manifest.json"),
-        "decision": "pending",
-        "reviewer": None,
-        "criteria": [
-            {**criterion, "status": "pending", "evidence": [], "note": ""}
-            for criterion in manifest["criteria"]
-        ],
-        "limitations": [],
-    }
-    write_json(output / "acceptance.json", acceptance)
-    report = [
-        "# Command evidence (private)",
-        "",
-        f"Task: `{task_id}`; declared layer: `{kind}`.",
-        f"Command status: **{state}**; return code: `{returncode}`.",
-        "Acceptance: **pending**. See acceptance.json for the current review decision.",
-        "",
-        "A successful command is not semantic acceptance. Skipped tests, mock results and",
-        "missing native/GPU artifacts do not establish their corresponding validation layer.",
-        "Collector runtime is not necessarily the runtime of the child command.",
-        "These files contain private commands, paths and logs; publish only through an explicit exporter.",
-        "",
-        "Exact argument vector:",
-        "",
-        "```json",
-        json.dumps(argv, ensure_ascii=False, indent=2),
-        "```",
-        "",
-        "## Collection errors",
-        "",
-        *[f"- {error}" for error in manifest["collection_errors"]],
-        "",
-    ]
-    (output / "report.md").write_text("\n".join(report))
-    return manifest, code if code else int(bool(manifest["collection_errors"]))
+        for filename in ("stdout.log", "stderr.log"):
+            records.append(file_record(output, output / filename))
+        for index, path in enumerate(artifacts):
+            try:
+                source = path if path.is_absolute() else root / path
+                records.append(snapshot(output, source, "artifacts", index))
+            except (OSError, ValueError) as error:
+                manifest["collection_errors"].append(str(error))
+        config_checks, errors = check_config_inputs(records)
+        manifest["config_checks"] = config_checks
+        manifest["config_inputs_stable"] = bool(config_checks) and not errors
+        manifest["collection_errors"].extend(errors)
+        try:
+            after = source_state(root)
+            after_file = output / "source-after.json"
+            write_json(after_file, after)
+            records.append(file_record(output, after_file))
+            manifest["source_changed_during_run"] = (
+                before["files_sha256"] != after["files_sha256"]
+                or before["commit"] != after["commit"]
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            manifest["collection_errors"].append(str(error))
+        code = seal_run(output, manifest, requested, code)
+    return manifest, code
 
 
 def contained_file(directory: Path, name: str) -> Path:
@@ -321,7 +368,8 @@ def contained_file(directory: Path, name: str) -> Path:
 def check_run(directory: Path, *, require_success=False, require_accepted=False) -> dict:
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    if manifest.get("schema_version") != 1 or manifest.get("kind") not in KINDS:
+    schema = manifest.get("schema_version")
+    if schema not in {1, 2} or manifest.get("kind") not in KINDS:
         raise ValueError("Unsupported run evidence schema/kind")
     state = manifest.get("command_status")
     if state not in COMMAND_STATES:
@@ -338,6 +386,23 @@ def check_run(directory: Path, *, require_success=False, require_accepted=False)
         path = contained_file(directory, name)
         if digest(path) != record["sha256"] or path.stat().st_size != record["bytes"]:
             raise ValueError(f"Evidence hash/size mismatch: {name}")
+    configs_verified = schema == 2 and manifest.get("config_inputs_stable") is True
+    if schema == 2:
+        configs = {name: record for name, record in by_path.items() if name.startswith("configs/")}
+        checks = manifest.get("config_checks", [])
+        by_config = {item["snapshot_path"]: item for item in checks}
+        if not configs or set(configs) != set(by_config) or len(checks) != len(by_config):
+            raise ValueError("Configuration checks must cover every registered input")
+        for name, record in configs.items():
+            item = by_config[name]
+            if item["expected_sha256"] != record["sha256"] or item["source"] != record["source"]:
+                raise ValueError("Configuration check differs from its archived input")
+            if item["status"] not in {"unchanged", "changed", "missing", "unreadable"}:
+                raise ValueError("Invalid configuration check status")
+            if (item["status"] == "unchanged") != (item["actual_sha256"] == record["sha256"]):
+                raise ValueError("Configuration check contradicts its hash")
+        if configs_verified != all(item["status"] == "unchanged" for item in checks):
+            raise ValueError("Configuration stability contradicts its checks")
     acceptance = json.loads((directory / "acceptance.json").read_text())
     if acceptance.get("schema_version") != 1 or acceptance.get("manifest_sha256") != digest(
         manifest_path
@@ -361,6 +426,8 @@ def check_run(directory: Path, *, require_success=False, require_accepted=False)
     ):
         raise ValueError("Invalid criterion status")
     if decision == "accepted":
+        if not configs_verified and (schema == 2 or require_accepted):
+            raise ValueError("Acceptance requires verified stable configuration inputs")
         criteria = acceptance.get("criteria", [])
         if (
             state != "succeeded"
@@ -381,7 +448,11 @@ def check_run(directory: Path, *, require_success=False, require_accepted=False)
             for name in criterion["evidence"]:
                 if name not in by_path:
                     raise ValueError(f"Acceptance refers to unarchived evidence: {name}")
-    if require_success and (state != "succeeded" or manifest.get("collection_errors")):
+    if require_success and (
+        state != "succeeded"
+        or manifest.get("collection_errors")
+        or (schema == 2 and not configs_verified)
+    ):
         raise ValueError("Command success gate did not pass")
     if require_accepted and decision != "accepted":
         raise ValueError("Run has not been accepted")
@@ -390,6 +461,7 @@ def check_run(directory: Path, *, require_success=False, require_accepted=False)
         "command_status": state,
         "acceptance": decision,
         "kind": manifest["kind"],
+        "configuration_verification": "verified" if configs_verified else "not_verified",
         "semantic_scope": "Review assertions are checked structurally, not independently proven",
     }
 

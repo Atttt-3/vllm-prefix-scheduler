@@ -22,12 +22,13 @@ test:
 evidence:
 	@for record in evidence/*/validation.json; do "$(UV)" run --frozen prefix-evidence-check "$$record" || exit; done
 
-# ARGS supplies collector/checker arguments; commands run locally, without GPU allocation.
+# ARGS is shell-quoted argument text. Read its raw value so make cannot expand literal $.
+# The recipe shell still parses ARGS; quote shell metacharacters for that shell.
 run-evidence:
-	"$(UV)" run --frozen python scripts/run_evidence.py $(ARGS)
+	"$(UV)" run --frozen python scripts/run_evidence.py $(value ARGS)
 
 check-run-evidence:
-	"$(UV)" run --frozen python scripts/check_run_evidence.py $(ARGS)
+	"$(UV)" run --frozen python scripts/check_run_evidence.py $(value ARGS)
 
 build:
 	"$(UV)" build --no-sources

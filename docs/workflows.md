@@ -67,9 +67,15 @@ make check-run-evidence ARGS='runs/workflow-local-check/first-check'
 
 Makefile 使用工作区内缓存和已有开发环境；已安装依赖时也可用 `.venv/bin/python scripts/run_evidence.py` 与 `.venv/bin/python scripts/check_run_evidence.py`。每次使用新的运行目录；工具拒绝覆盖已有记录。具体参数可通过两个脚本的 `--help` 查询。合成负载另传 `--seed`，用 `--config` 登记负载/到达表等实际输入，用可重复的 `--artifact` 登记请求 trace 或额外结果，用可重复的 `--criterion` 定义本轮待核验标准。超时取适合任务和资源分配的上限，不沿用本地示例来覆盖长实验。
 
+登记配置在启动前归档、命令结束后逐项重算 SHA-256，包括仓库外或被 Git 忽略的配置，以及配置符号链接当前指向的内容。配置变化、删除或读取失败会写入 `config_checks` 和采集错误，令 `config_inputs_stable=false`，阻止成功及验收门槛通过。该检查比较运行边界，不能发现中途修改后又恢复原内容的情况；实验仍须冻结输入、避免并行改写。
+
+Make 入口把 `ARGS` 原样交给执行命令的 shell，避免 make 自身展开 `$5`、`$(...)` 或 `${VAR}`。`ARGS` 仍是一段需要 shell 引用的参数文本：外层引号保护调用 make 的 shell，参数内部的引号保护 recipe shell；字面美元符号和其他 shell 元字符应在后者使用单引号保护。自动化调用可用 `shlex.join(argv)` 构造 `ARGS`，再以参数列表调用 make。直接调用 Python 脚本时只经过调用者的 shell 引用；以 `subprocess.run([...])` 调用脚本则无需 shell 引用。复杂程序也可保存为脚本再作为子命令执行。
+
 采集工具执行分隔符后的参数列表，不通过 shell 拼接命令；它保存实际 argv、项目 commit、执行前后源码指纹、固定上游配置、配置快照、产物哈希、seed、采集进程的运行时信息、stdout/stderr 和退出结果，并生成 `report.md`。`--seed` 只记录元数据，负载命令须实际采用相同 seed；子命令若切换解释器或远程运行，还需归档它自己的真实运行时记录。`command_status` 区分 `succeeded`、`failed`、`timed_out`、`interrupted` 与 `launch_failed`；失败、超时、SIGINT/SIGTERM 中断也会留下记录。
 
-POSIX 系统中，工具会终止本轮命令遗留的同进程组子进程，并把后台遗留写入采集错误；超时或中断也清理该进程组。不能依靠此行为释放 Slurm 分配，也不能覆盖自行脱离进程组的服务。SIGKILL、机器断电或采集进程在封存前退出可能留下 `running` 记录；核验器拒绝将其作为完成证据。仓库内的原始记录只允许写入 `runs/`；工具不改写已有运行目录。
+POSIX 系统中，工具会终止本轮命令遗留的同进程组子进程，并把后台遗留写入采集错误；超时或中断也清理该进程组。CLI 在命令运行、清理和归档阶段只记录 SIGINT/SIGTERM 请求，由主流程有序退出；重复信号不打断清理，首次信号决定 `termination_signal` 与退出码。若超时后的清理又收到信号，记录同时保留 `timeout_expired=true` 与 `interrupted` 状态；封存期间收到信号也会重写最终状态并重新绑定验收哈希。直接从 Python 非主线程调用 API 时不能安装进程级信号处理，调用者负责该线程之外的终止策略。
+
+不能依靠此行为释放 Slurm 分配，也不能覆盖自行脱离进程组的服务。SIGKILL、机器断电或采集进程在封存前退出可能留下 `running` 记录；核验器拒绝将其作为完成证据。仓库内的原始记录只允许写入 `runs/`；工具不改写已有运行目录。
 
 `gpu` 与 `performance` 仅在已有 `SLURM_JOB_ID` 的环境中执行。这个环境变量只是资源分配前提，不证明真实硬件、模型或原生路径已经验证。工具不申请 GPU。日志和 manifest 留在忽略的 `runs/`，不会自动公开、提交或改写项目文档。
 
@@ -80,7 +86,9 @@ make check-run-evidence ARGS='runs/workflow-local-check/first-check --require-co
 make check-run-evidence ARGS='runs/workflow-local-check/first-check --require-accepted'
 ```
 
-后者要求命令成功、采集无错误、执行期间源码指纹保持不变、审查者非空、原始非空标准逐项通过且关联归档证据。存在未提交代码时，commit 不能单独复现该轮源码；两份 source 指纹用于定位变更，分享复现结果前还需保留对应代码版本。**命令退出成功表示执行成功，记录完整表示材料可核对；工具无法判断标准的语义是否被真实满足。** 被测命令如果跳过测试、使用 mock 或只做 readiness，不因退出码为 0 或人工填写 accepted 而升级为原生或性能证据。
+后者要求命令成功、采集无错误、源码指纹和登记配置在运行边界保持不变、审查者非空、原始非空标准逐项通过且关联归档证据。新采集的 manifest 使用 schema 2；核验器仍可读取旧 schema 1 的完整性与历史审查结果，但缺少配置核验信息的旧记录不能通过新的 `--require-accepted` 门槛，需要按新流程重新采集，不能手动补写为已核验。
+
+存在未提交代码时，commit 不能单独复现该轮源码；两份 source 指纹用于定位变更，分享复现结果前还需保留对应代码版本。**命令退出成功表示执行成功，记录完整表示材料可核对；工具无法判断标准的语义是否被真实满足。** 被测命令如果跳过测试、使用 mock 或只做 readiness，不因退出码为 0 或人工填写 accepted 而升级为原生或性能证据。
 
 失败、超时与未执行项均保留。环境未满足时记录原因和所缺验证，不把跳过写成通过，也不删除失败请求来改善分母。等待时间和性能指标的定义、缓存初态与预热方式须在实验前冻结。
 
