@@ -24,3 +24,9 @@
 [nano-vLLM](https://github.com/GeeeekExplorer/nano-vllm) 可辅助理解 scheduler、block manager 和 model runner；主成果仍在固定版本 vLLM 上验证。LMCache/CacheBlend、CPU offload 和投机解码不进入首版依赖，避免把项目扩展成多个独立主线。
 
 后续引入上游代码时，应在对应文件和变更说明中补充仓库、路径、commit/PR、适配内容和原许可证说明，保留必要 notice。公开机制来源、个人代码和本人实测结果分别陈述。
+
+## 可复用调研记录
+
+[2026-11-01 前缀感知准入调研](research/2026-11-01-prefix-scheduling.md) 是本项目首份机制卡样例：区分固定源码、PR 历史 head、当前页面状态和未核实 diff，并列出连续窗口、等待轴与异步适配差异。本次可读取并固定的 SGLang 对照版本为 `baa9befa381511cd4d56f83980951e5a45fffc6d`；上表原参考版本保留，未假定两版一致。
+
+新调研使用[研究模板](templates/research.md)，按[项目工作流](workflows.md)输出来源、迁移差异及下一项验证；研究记录不替代原生运行和性能验收。

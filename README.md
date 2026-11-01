@@ -70,6 +70,7 @@ sbatch scripts/validate_gpu.sbatch
 | [`docs/architecture.md`](docs/architecture.md) | 原生调用链、计划接口与实现边界 |
 | [`docs/experiments.md`](docs/experiments.md) | 工作负载、对照、指标和运行记录规范 |
 | [`docs/development.md`](docs/development.md) | 分支、检查和日常工作流程 |
+| [`docs/workflows.md`](docs/workflows.md) | 多 agent 协作、开源调研、运行证据采集与独立验收 |
 | [`docs/references.md`](docs/references.md) | 上游固定版本、参考实现和归属 |
 | `src/vllm_prefix_scheduler/` | 可安装的项目包；当前提供证据一致性检查 |
 | `scripts/` | 环境准备、模型下载、只读诊断和 GPU 验证 |
