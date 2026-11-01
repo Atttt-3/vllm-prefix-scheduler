@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 
@@ -91,6 +92,20 @@ def test_input_replaced_by_directory_is_reported_as_unreadable(configuration):
     assert snapshot.read_bytes() == original
 
 
+@pytest.mark.skipif(os.name != "posix", reason="POSIX special-file configuration input")
+def test_input_retargeted_to_device_is_reported_as_unreadable(configuration):
+    source, snapshot, record = configuration
+    original = snapshot.read_bytes()
+    source.unlink()
+    source.symlink_to(os.devnull)
+    checks, errors = check_config_inputs([record])
+    assert checks[0]["status"] == "unreadable"
+    assert checks[0]["actual_sha256"] is None
+    assert "not a regular file" in checks[0]["error"]
+    assert errors and "unreadable" in errors[0]
+    assert snapshot.read_bytes() == original
+
+
 def test_empty_config_registry_cannot_be_reported_as_checked():
     checks, errors = check_config_inputs([{"path": "stdout.log"}])
     assert not checks
@@ -156,6 +171,38 @@ def collect_config_command(root, source, snippet, *arguments):
         criteria=["Record the actual command observation"],
     )
     return directory, manifest, code
+
+
+def collect_config_subprocess(root, source, snippet, *arguments):
+    """Bound the entire collector, including its final configuration recheck."""
+    program = """
+from pathlib import Path
+import sys
+from vllm_prefix_scheduler.run_evidence import collect_run
+
+root, source = map(Path, sys.argv[1:3])
+_, code = collect_run(
+    root, root / "runs/collected",
+    [sys.executable, "-c", sys.argv[3], str(source), *sys.argv[4:]],
+    task_id="config-special-file-regression", kind="local", timeout=1,
+    configs=[source], artifacts=[], criteria=["Record the actual command observation"],
+)
+raise SystemExit(code)
+"""
+    process = subprocess.Popen(
+        [sys.executable, "-c", program, str(root), str(source), snippet, *map(str, arguments)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=5)
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=5)
+    assert process.returncode == 1, (stdout, stderr)
+    directory = root / "runs/collected"
+    return directory, json.loads((directory / "manifest.json").read_text())
 
 
 def mark_config_run_accepted(directory):
@@ -231,6 +278,45 @@ def test_registered_symlink_is_rechecked_after_retargeting(config_run_repository
     assert (directory / config_check["snapshot_path"]).read_bytes() == original
     assert json.loads((directory / "stdout.log").read_text())["requests"] == 1
     assert check_run(directory)["integrity"] == "valid"
+    mark_config_run_accepted(directory)
+    with pytest.raises(ValueError, match="stable configuration inputs"):
+        check_run(directory, require_accepted=True)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX FIFO configuration input")
+@pytest.mark.parametrize("operation", ["replace", "retarget"])
+def test_fifo_configuration_is_sealed_without_waiting_for_a_writer(
+    config_run_repository, operation
+):
+    root, source = config_run_repository
+    original = source.read_bytes()
+    fifo = source.parent / "workload-fifo"
+    if operation == "retarget":
+        first_target = source.parent / "workload-first.json"
+        first_target.write_bytes(original)
+        source.unlink()
+        source.symlink_to(first_target)
+        os.mkfifo(fifo)
+    snippet = (
+        "from pathlib import Path; import os, sys; p=Path(sys.argv[1]); p.unlink(); "
+        "os.mkfifo(p) if sys.argv[2] == 'replace' else p.symlink_to(sys.argv[3]); "
+        "print('configuration replaced with FIFO')"
+    )
+    directory, manifest = collect_config_subprocess(root, source, snippet, operation, fifo)
+    assert manifest["command_status"] == "succeeded"
+    assert manifest["returncode"] == 0
+    assert manifest["source_changed_during_run"] is False
+    assert manifest["config_inputs_stable"] is False
+    config_check = next(item for item in manifest["config_checks"] if item["source"] == str(source))
+    assert config_check["status"] == "unreadable"
+    assert config_check["actual_sha256"] is None
+    assert "not a regular file" in config_check["error"]
+    assert any(str(source) in error for error in manifest["collection_errors"])
+    assert (directory / config_check["snapshot_path"]).read_bytes() == original
+    assert (directory / "stdout.log").read_text().strip() == "configuration replaced with FIFO"
+    assert check_run(directory)["integrity"] == "valid"
+    with pytest.raises(ValueError, match="success gate"):
+        check_run(directory, require_success=True)
     mark_config_run_accepted(directory)
     with pytest.raises(ValueError, match="stable configuration inputs"):
         check_run(directory, require_accepted=True)

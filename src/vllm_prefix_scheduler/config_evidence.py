@@ -1,6 +1,9 @@
 """Recheck registered configuration inputs against their immutable run snapshots."""
 
+import errno
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 
@@ -31,8 +34,20 @@ def check_config_inputs(records: list[dict]) -> tuple[list[dict], list[str]]:
                 raise ValueError("Configuration source must be an absolute path")
             if not isinstance(result["expected_sha256"], str):
                 raise ValueError("Configuration snapshot is missing its SHA-256")
-            with Path(source).open("rb") as stream:
-                result["actual_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+            # An input can have become a FIFO (including through a symlink) since
+            # snapshotting. Open without waiting for a writer, then check the
+            # opened object so a path replacement cannot bypass the type check.
+            descriptor = os.open(source, os.O_RDONLY | os.O_NONBLOCK)
+            try:
+                mode = os.fstat(descriptor).st_mode
+                if stat.S_ISDIR(mode):
+                    raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), source)
+                if not stat.S_ISREG(mode):
+                    raise ValueError("Configuration source is not a regular file")
+                with os.fdopen(descriptor, "rb", closefd=False) as stream:
+                    result["actual_sha256"] = hashlib.file_digest(stream, "sha256").hexdigest()
+            finally:
+                os.close(descriptor)
             result["status"] = (
                 "unchanged" if result["actual_sha256"] == result["expected_sha256"] else "changed"
             )

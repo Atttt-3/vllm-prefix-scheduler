@@ -67,7 +67,7 @@ make check-run-evidence ARGS='runs/workflow-local-check/first-check'
 
 Makefile 使用工作区内缓存和已有开发环境；已安装依赖时也可用 `.venv/bin/python scripts/run_evidence.py` 与 `.venv/bin/python scripts/check_run_evidence.py`。每次使用新的运行目录；工具拒绝覆盖已有记录。具体参数可通过两个脚本的 `--help` 查询。合成负载另传 `--seed`，用 `--config` 登记负载/到达表等实际输入，用可重复的 `--artifact` 登记请求 trace 或额外结果，用可重复的 `--criterion` 定义本轮待核验标准。超时取适合任务和资源分配的上限，不沿用本地示例来覆盖长实验。
 
-登记配置在启动前归档、命令结束后逐项重算 SHA-256，包括仓库外或被 Git 忽略的配置，以及配置符号链接当前指向的内容。配置变化、删除或读取失败会写入 `config_checks` 和采集错误，令 `config_inputs_stable=false`，阻止成功及验收门槛通过。该检查比较运行边界，不能发现中途修改后又恢复原内容的情况；实验仍须冻结输入、避免并行改写。
+登记配置在启动前归档、命令结束后逐项重算 SHA-256，包括仓库外或被 Git 忽略的配置，以及配置符号链接当前指向的内容。最终重查使用非阻塞打开，并核对已打开的文件描述符只对应常规文件；配置被替换成命名管道或设备文件时记为 `unreadable`，不会等待管道写端。配置变化、删除或读取失败会写入 `config_checks` 和采集错误，令 `config_inputs_stable=false`，阻止成功及验收门槛通过。该检查比较运行边界，不能发现中途修改后又恢复原内容的情况；实验仍须冻结输入、避免并行改写。
 
 Make 入口把 `ARGS` 原样交给执行命令的 shell，避免 make 自身展开 `$5`、`$(...)` 或 `${VAR}`。`ARGS` 仍是一段需要 shell 引用的参数文本：外层引号保护调用 make 的 shell，参数内部的引号保护 recipe shell；字面美元符号和其他 shell 元字符应在后者使用单引号保护。自动化调用可用 `shlex.join(argv)` 构造 `ARGS`，再以参数列表调用 make。直接调用 Python 脚本时只经过调用者的 shell 引用；以 `subprocess.run([...])` 调用脚本则无需 shell 引用。复杂程序也可保存为脚本再作为子命令执行。
 
