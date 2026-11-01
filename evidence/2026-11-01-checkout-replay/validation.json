@@ -1,0 +1,226 @@
+{
+  "status": "passed",
+  "started_at_utc": "2026-11-01T12:01:53.770072+00:00",
+  "vllm": "0.32.0",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "project_commit": "227327e69f061e1e4807ef2ff4e225f3214a7882",
+  "scope": "native minimal inference/APC/async readiness, not optimization benchmark",
+  "kv_capacity": {
+    "num_gpu_blocks": 5553,
+    "block_size_tokens": 16,
+    "capacity_tokens": 88848,
+    "allocation_bytes": 13101170688,
+    "allocation_gib": 12.201416015625,
+    "full_16k_sequences_theoretical": 5.4228515625
+  },
+  "apc_behavior_verified": true,
+  "gpu_memory_sampling_interval_seconds": 0.5,
+  "gpu_memory_sample_count": 41,
+  "gpu_memory_sampled_peak_used_mib": 20802,
+  "finished_at_utc": "2026-11-01T12:02:18.103362+00:00",
+  "python_version": "3.12.16",
+  "model_id": "Qwen/Qwen3-4B",
+  "requested_engine_args": {
+    "dtype": "bfloat16",
+    "tensor_parallel_size": 1,
+    "max_model_len": 16384,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 2048,
+    "gpu_memory_utilization": 0.85,
+    "enable_prefix_caching": true,
+    "async_scheduling": true,
+    "enable_chunked_prefill": true,
+    "enforce_eager": true,
+    "seed": 42,
+    "trust_remote_code": false,
+    "disable_log_stats": false,
+    "worker_extension_cls": "diagnostic_worker.ReadinessWorkerExtension"
+  },
+  "resolved_config": {
+    "dtype": "torch.bfloat16",
+    "max_model_len": 16384,
+    "async_scheduling": true,
+    "scheduler_class": "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
+    "enable_prefix_caching": true,
+    "enable_chunked_prefill": true,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 2048,
+    "enforce_eager": true,
+    "gpu_memory_utilization": 0.85
+  },
+  "worker_after_init": [
+    {
+      "model_parameter_dtype": "torch.bfloat16",
+      "model_config_dtype": "torch.bfloat16",
+      "async_scheduling": true,
+      "scheduler_class": "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
+      "enable_prefix_caching": true,
+      "num_gpu_blocks": 5553,
+      "kv_cache_groups": [
+        {
+          "spec_class": "FullAttentionSpec",
+          "block_size": 16,
+          "layer_count": 36,
+          "page_size_bytes": 65536,
+          "dtype": "torch.bfloat16"
+        }
+      ],
+      "kv_allocation_bytes": 13101170688,
+      "torch_memory_allocated_bytes": 21224698368,
+      "torch_memory_reserved_bytes": 21258829824,
+      "torch_peak_allocated_bytes": 21224698368,
+      "torch_peak_reserved_bytes": 21258829824,
+      "gpu_name": "NVIDIA GeForce RTX 3090",
+      "compute_capability": [
+        8,
+        6
+      ],
+      "model_runner_class": "vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+    }
+  ],
+  "worker_after_requests": [
+    {
+      "model_parameter_dtype": "torch.bfloat16",
+      "model_config_dtype": "torch.bfloat16",
+      "async_scheduling": true,
+      "scheduler_class": "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
+      "enable_prefix_caching": true,
+      "num_gpu_blocks": 5553,
+      "kv_cache_groups": [
+        {
+          "spec_class": "FullAttentionSpec",
+          "block_size": 16,
+          "layer_count": 36,
+          "page_size_bytes": 65536,
+          "dtype": "torch.bfloat16"
+        }
+      ],
+      "kv_allocation_bytes": 13101170688,
+      "torch_memory_allocated_bytes": 21224698368,
+      "torch_memory_reserved_bytes": 21451767808,
+      "torch_peak_allocated_bytes": 21386181120,
+      "torch_peak_reserved_bytes": 21451767808,
+      "gpu_name": "NVIDIA GeForce RTX 3090",
+      "compute_capability": [
+        8,
+        6
+      ],
+      "model_runner_class": "vllm.v1.worker.gpu.model_runner.GPUModelRunner"
+    }
+  ],
+  "requests": [
+    {
+      "label": "basic_smoke",
+      "request_id": "0",
+      "finished": true,
+      "prompt_tokens": 24,
+      "output_tokens": 14,
+      "num_cached_tokens": 0,
+      "finish_reason": "stop",
+      "text": "GPU 是用于加速图形处理和并行计算的芯片。",
+      "call_wall_seconds_not_benchmark": 0.6512375180609524
+    },
+    {
+      "label": "prefix_cold",
+      "request_id": "1",
+      "finished": true,
+      "prompt_tokens": 2230,
+      "output_tokens": 18,
+      "num_cached_tokens": 0,
+      "finish_reason": "stop",
+      "text": "The reference explains that GPU inference reuses identical prompt prefixes to test automatic prefix caching.",
+      "call_wall_seconds_not_benchmark": 0.6897391537204385
+    },
+    {
+      "label": "prefix_warm_identical_prompt",
+      "request_id": "2",
+      "finished": true,
+      "prompt_tokens": 2230,
+      "output_tokens": 18,
+      "num_cached_tokens": 2224,
+      "finish_reason": "stop",
+      "text": "The reference explains that GPU inference reuses identical prompt prefixes to test automatic prefix caching.",
+      "call_wall_seconds_not_benchmark": 0.44153036922216415
+    },
+    {
+      "label": "batch_four_0",
+      "request_id": "3",
+      "finished": true,
+      "prompt_tokens": 2231,
+      "output_tokens": 18,
+      "num_cached_tokens": 2208,
+      "finish_reason": "stop",
+      "text": "GPU inference can significantly accelerate tasks like machine learning model inference by leveraging parallel processing capabilities.",
+      "call_wall_seconds_not_benchmark": 0.7768062702380121
+    },
+    {
+      "label": "batch_four_1",
+      "request_id": "4",
+      "finished": true,
+      "prompt_tokens": 2231,
+      "output_tokens": 18,
+      "num_cached_tokens": 2208,
+      "finish_reason": "stop",
+      "text": "GPU inference can significantly accelerate tasks like machine learning model inference by leveraging parallel processing capabilities.",
+      "call_wall_seconds_not_benchmark": 0.7768062702380121
+    },
+    {
+      "label": "batch_four_2",
+      "request_id": "5",
+      "finished": true,
+      "prompt_tokens": 2231,
+      "output_tokens": 18,
+      "num_cached_tokens": 2208,
+      "finish_reason": "stop",
+      "text": "GPU inference can significantly accelerate tasks like machine learning model inference by leveraging parallel processing capabilities.",
+      "call_wall_seconds_not_benchmark": 0.7768062702380121
+    },
+    {
+      "label": "batch_four_3",
+      "request_id": "6",
+      "finished": true,
+      "prompt_tokens": 2231,
+      "output_tokens": 18,
+      "num_cached_tokens": 2208,
+      "finish_reason": "stop",
+      "text": "GPU inference can significantly accelerate tasks like machine learning model inference by leveraging parallel processing capabilities.",
+      "call_wall_seconds_not_benchmark": 0.7768062702380121
+    }
+  ],
+  "gpu_before_engine": {
+    "utc": "2026-11-01T12:01:53.839543+00:00",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 3090",
+        "total_mib": 24576,
+        "used_mib": 1,
+        "free_mib": 24124,
+        "utilization_percent": 0
+      }
+    ]
+  },
+  "gpu_after_engine_init": {
+    "utc": "2026-11-01T12:02:14.335161+00:00",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 3090",
+        "total_mib": 24576,
+        "used_mib": 20618,
+        "free_mib": 3507,
+        "utilization_percent": 0
+      }
+    ]
+  },
+  "gpu_after_requests": {
+    "utc": "2026-11-01T12:02:16.964449+00:00",
+    "gpus": [
+      {
+        "name": "NVIDIA GeForce RTX 3090",
+        "total_mib": 24576,
+        "used_mib": 20802,
+        "free_mib": 3323,
+        "utilization_percent": 38
+      }
+    ]
+  }
+}
