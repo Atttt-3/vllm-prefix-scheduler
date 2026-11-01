@@ -284,6 +284,7 @@ def create_scheduler(config, capacity, model_path):
         max_model_len=config["max_model_len"],
         enable_chunked_prefill=config["enable_chunked_prefill"],
         async_scheduling=True,
+        is_encoder_decoder=model.is_encoder_decoder,
         policy="fcfs",
         watermark=config["watermark"],
         scheduler_reserve_full_isl=config["scheduler_reserve_full_isl"],
