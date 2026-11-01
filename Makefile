@@ -3,7 +3,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_PROJECT_ENVIRONMENT := $(CURDIR)/.venv
 
-.PHONY: dev check lint format test evidence build script-syntax progress progress-check run-evidence check-run-evidence
+.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence
 
 dev:
 	"$(UV)" sync --locked --dev
@@ -22,12 +22,6 @@ test:
 evidence:
 	@for record in evidence/*/validation.json; do "$(UV)" run --frozen prefix-evidence-check "$$record" || exit; done
 
-progress:
-	"$(UV)" run --frozen python scripts/build_progress.py
-
-progress-check:
-	"$(UV)" run --frozen python scripts/build_progress.py --check
-
 # ARGS supplies collector/checker arguments; commands run locally, without GPU allocation.
 run-evidence:
 	"$(UV)" run --frozen python scripts/run_evidence.py $(ARGS)
@@ -41,4 +35,4 @@ build:
 script-syntax:
 	@for script in scripts/*.sh scripts/*.sbatch; do bash -n "$$script" || exit; done
 
-check: lint script-syntax progress-check test evidence build
+check: lint script-syntax test evidence build
