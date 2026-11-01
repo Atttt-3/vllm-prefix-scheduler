@@ -129,3 +129,17 @@ def test_exporter_removes_unexpected_private_fields_and_preserves_numbers(record
     repeated = subprocess.run(command, check=False, capture_output=True, text=True)
     assert repeated.returncode != 0
     assert (exported / "validation.json").read_bytes() == before
+
+
+def test_restored_checkout_evidence_preserves_provenance_and_release():
+    directory = ROOT / "evidence/2026-11-01-checkout-replay"
+    receipt = json.loads((directory / "workspace-verification.json").read_text())
+    assert receipt["tracked_worktree_clean"]
+    assert receipt["all_resource_links_ignored_by_git"]
+    assert receipt["development_gpu_environment_isolated"]
+    assert receipt["allocation_released"]
+    assert receipt["post_process_gpu_memory_mib"] == 1
+    assert receipt["native_replay"]["status"] == "passed"
+    provenance = json.loads((directory / "provenance.json").read_text())
+    for name, expected in provenance["exported_file_sha256"].items():
+        assert hashlib.sha256((directory / name).read_bytes()).hexdigest() == expected
