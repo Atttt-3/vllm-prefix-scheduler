@@ -69,6 +69,26 @@ def emit(event, **fields):
                 "phase": os.environ.get("M3_PHASE"),
                 **fields,
             }
+            campaign_id = os.environ.get("M3_CAMPAIGN_ID")
+            campaign_sha256 = os.environ.get("M3_CAMPAIGN_SHA256")
+            if campaign_id is not None or campaign_sha256 is not None:
+                if (
+                    not campaign_id
+                    or not campaign_sha256
+                    or len(campaign_sha256) != 64
+                    or any(char not in "0123456789abcdef" for char in campaign_sha256)
+                    or not os.environ.get("SLURM_JOB_ID", "").isdigit()
+                    or any(
+                        key in fields
+                        for key in ("campaign_id", "campaign_sha256", "campaign_job_id")
+                    )
+                ):
+                    raise ValueError("invalid or conflicting M3 campaign event binding")
+                data.update(
+                    campaign_id=campaign_id,
+                    campaign_sha256=campaign_sha256,
+                    campaign_job_id=os.environ["SLURM_JOB_ID"],
+                )
             root = Path(os.environ["M3_TRACE_DIR"])
             root.mkdir(parents=True, exist_ok=True)
             payload = (json.dumps(data, sort_keys=True, allow_nan=False) + "\n").encode()

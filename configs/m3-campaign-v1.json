@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": "M3-real-model-integration",
+  "campaign_id": "m3-campaign-20261103-v1",
+  "scope": "replacement_campaign_with_retained_history_exception",
+  "runtime_config": {
+    "path": "configs/m3-real-model.json",
+    "sha256": "ad0c99c8fa06d12e8f48921486029ab60da9e88c07497598186fa8a168e8e836"
+  },
+  "authorization": {
+    "path": "configs/m3-campaign-authorization.json",
+    "sha256": "937b3eb2f1a9639853fd5d4821036fc858f35b5537ec3cbf155686afdb2292ff"
+  },
+  "history": {
+    "index_sha256": "c79c635723fb161e98b01b26c58241fbc7757709089eaf260cbbe0f6d2cea8e5",
+    "ledger_sha256": "00d3b06f4839721d9d17c1a4143d927b5b49b5e318a05fd569796607735a59e3",
+    "allocation_count": 4,
+    "unverified_run": "formal-02",
+    "unverified_terminal_count": 1,
+    "original_full_history_gate": "blocked"
+  },
+  "budget": {
+    "new_allocations": 4,
+    "cumulative_allocations": 8,
+    "gpus": 1,
+    "max_minutes": 20,
+    "serial": true
+  },
+  "required": {
+    "gpu_cases": 20,
+    "repeats": 3,
+    "compat_cases": 432,
+    "m1_cases": 12
+  }
+}
