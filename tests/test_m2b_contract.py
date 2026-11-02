@@ -269,3 +269,160 @@ def test_native_parallel_observation_requires_exact_nonempty_fields(auditor, con
     mutation(native["effective_config"]["parallel"])
     with pytest.raises(ValueError, match="effective native parallel semantics changed"):
         auditor.audit_identity([native], metadata, config)
+
+
+def rejected_attempts(state):
+    """Local oracle controls only; these are not native scheduler evidence."""
+    guard = {
+        "present": True,
+        "fault_code": "clock_type" if state == "fault" else None,
+        "closed": state == "closed",
+        "records": [],
+    }
+    return [
+        {"event": "schedule_before", "step": 3, "phase": "retry", "guard": copy.deepcopy(guard)},
+        {
+            "event": "schedule_raise",
+            "step": 3,
+            "phase": "retry",
+            "error_type": "WaitGuardError",
+            "guard": copy.deepcopy(guard),
+        },
+        {
+            "event": "enqueue_call",
+            "step": 3,
+            "request_id": "blocked",
+            "object": "object:3",
+            "guard": copy.deepcopy(guard),
+        },
+        {
+            "event": "enqueue_raise",
+            "step": 3,
+            "request_id": "blocked",
+            "object": "object:3",
+            "error_type": "WaitGuardError",
+            "guard": copy.deepcopy(guard),
+        },
+    ]
+
+
+@pytest.mark.parametrize("state", ["fault", "closed"])
+@pytest.mark.parametrize(
+    "mutate,fragment",
+    [
+        (lambda es: es.__delitem__(slice(0, 2)), "guard retry schedule attempt missing"),
+        (lambda es: es.__delitem__(slice(2, 4)), "guard retry add attempt missing"),
+        (lambda es: es.insert(0, copy.deepcopy(es[0])), "guard retry schedule attempt duplicated"),
+        (lambda es: es.insert(2, copy.deepcopy(es[2])), "guard retry add attempt duplicated"),
+        (lambda es: es.pop(1), "guard retry schedule did not raise WaitGuardError"),
+        (lambda es: es.pop(3), "guard retry add did not raise WaitGuardError"),
+        (
+            lambda es: es[1].update(error_type="RuntimeError"),
+            "guard retry schedule did not raise WaitGuardError",
+        ),
+        (
+            lambda es: es[3].update(error_type="RuntimeError"),
+            "guard retry add did not raise WaitGuardError",
+        ),
+        (lambda es: es[1].update(step=2), "guard retry schedule did not raise WaitGuardError"),
+        (
+            lambda es: es[3].update(object="object:other"),
+            "guard retry add did not raise WaitGuardError",
+        ),
+        (lambda es: es[3].update(step=2), "guard retry add did not raise WaitGuardError"),
+        (
+            lambda es: es[0]["guard"].update(fault_code=None, closed=False),
+            "retry schedule did not occur after fault/close",
+        ),
+        (
+            lambda es: es[2]["guard"].update(fault_code=None, closed=False),
+            "retry add did not occur after fault/close",
+        ),
+        (
+            lambda es: es.insert(1, {"event": "native_schedule_enter"}),
+            "rejected schedule entered protected/native work",
+        ),
+        (
+            lambda es: es.insert(3, {"event": "native_add_call"}),
+            "rejected add entered protected/native work",
+        ),
+    ],
+)
+def test_rejected_attempts_need_actual_calls_and_matching_errors(auditor, state, mutate, fragment):
+    events = rejected_attempts(state)
+    args = {"schedule_phase": "retry", "request_id": "blocked", "state": state}
+    assert auditor.audit_rejected_retries(events, **args) == {
+        "schedule_attempts": 1,
+        "add_attempts": 1,
+    }
+    mutate(events)
+    with pytest.raises(ValueError, match=fragment):
+        auditor.audit_rejected_retries(events, **args)
+
+
+def empty_reuse_boundary():
+    return {
+        "event": "reuse_boundary",
+        "pending_outputs": 0,
+        "guard": {"present": True, "records": []},
+        "state": {
+            "waiting": [],
+            "kv_holding_waiting": [],
+            "deferred_waiting": [],
+            "running": [],
+            "active_requests": [],
+            "requests": {},
+            "free_queue": [1],
+            "blocks": [{"id": 1, "null": False, "ref_cnt": 0}],
+            "request_blocks": [{}],
+            "full": {
+                "scheduler_lifecycle": {
+                    "_inflight_prefills": {"set": []},
+                    "deferred_frees": [],
+                    "finished_req_ids": {"set": []},
+                    "reset_preempted_req_ids": {"set": []},
+                }
+            },
+        },
+    }
+
+
+@pytest.mark.parametrize("field", ["finished_req_ids", "reset_preempted_req_ids"])
+@pytest.mark.parametrize("value", [{"set": ["old_generation"]}, {}, [], None])
+def test_reuse_requires_exact_empty_native_notifications(auditor, field, value):
+    event = empty_reuse_boundary()
+    auditor.audit_reuse_boundary(event)
+    event["state"]["full"]["scheduler_lifecycle"][field] = value
+    with pytest.raises(
+        ValueError, match="ID reuse retains native terminal/preemption notifications"
+    ):
+        auditor.audit_reuse_boundary(event)
+
+
+@pytest.mark.parametrize(
+    "mutate,fragment",
+    [
+        (lambda e: e.update(pending_outputs=1), "ID reuse retains pending native outputs"),
+        (
+            lambda e: e["guard"]["records"].append({"object": "old"}),
+            "ID reuse retains protection records",
+        ),
+        (
+            lambda e: e["state"]["full"]["scheduler_lifecycle"].update(
+                _inflight_prefills={"set": ["old"]}
+            ),
+            "native in-flight Request references remain",
+        ),
+        (lambda e: e["state"]["blocks"][0].update(ref_cnt=1), "KV references remain"),
+        (
+            lambda e: e["state"].update(request_blocks=[{"old": []}]),
+            "native request block mappings retained historical IDs",
+        ),
+    ],
+)
+def test_reuse_also_requires_native_ownership_to_be_drained(auditor, mutate, fragment):
+    event = empty_reuse_boundary()
+    auditor.audit_reuse_boundary(event)
+    mutate(event)
+    with pytest.raises(ValueError, match=fragment):
+        auditor.audit_reuse_boundary(event)

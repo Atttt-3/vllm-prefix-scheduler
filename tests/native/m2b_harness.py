@@ -528,6 +528,25 @@ def expect_error(d, operation, label, *, expected=Exception):
     raise RuntimeError(f"Expected failure did not occur: {label}")
 
 
+def verify_fault_retries(d, config, variant):
+    from vllm_prefix_scheduler.wait_guard import WaitGuardError
+
+    reads = d.clock.reads
+    expect_error(
+        d,
+        lambda: d.schedule(f"{variant}_retry"),
+        f"{variant}_retry_schedule",
+        expected=WaitGuardError,
+    )
+    expect_error(
+        d,
+        lambda: d.add(req(config, "rejected_after_fault", [9000])),
+        f"{variant}_retry_add",
+        expected=WaitGuardError,
+    )
+    require(d.clock.reads == reads, "latched retries unexpectedly read protection clock")
+
+
 def cancel_all(d):
     from vllm.v1.request import RequestStatus
 
@@ -806,6 +825,7 @@ def metadata_terminal_case(d, config, variant):
             requests[0] not in d.scheduler._wait_guard.records,
             "terminal finally did not clear guard record",
         )
+        verify_fault_retries(d, config, variant)
         # This is the same still-bound terminal native object, never an old generation callback.
         d.event("terminal_recovery", object=d.registry.token(requests[0]), state=d.state(full=True))
         d.scheduler._free_request(requests[0])
@@ -865,10 +885,69 @@ def shutdown_case(d, config, variant):
     cancel_all(d)
 
 
+def drain_reuse_notifications(d, phase):
+    """Fence a new ID generation behind native output, resource and notice drain.
+
+    No live request is scheduled here: ordinary drain must already have released
+    all owning state. Remaining terminal/preemption IDs travel through a genuine
+    empty SchedulerOutput and its FIFO consumer, never a fixture-side clear().
+    """
+    for attempt in range(d.config["max_steps_per_phase"]):
+        scheduler = d.scheduler
+        state = d.state(full=True)
+        require(
+            not d.pending
+            and not scheduler.requests
+            and not scheduler.running
+            and not scheduler.waiting
+            and not scheduler.kv_holding_waiting
+            and not scheduler.deferred_waiting,
+            "ID reuse notice drain started before native requests/outputs drained",
+        )
+        require(
+            not scheduler._inflight_prefills and not scheduler.deferred_frees,
+            "ID reuse notice drain started with native deferred ownership",
+        )
+        require(
+            all(not group for group in state["request_blocks"])
+            and all(block["ref_cnt"] == 0 for block in state["blocks"] if not block["null"])
+            and len(state["free_queue"])
+            == len(set(state["free_queue"]))
+            == scheduler.kv_cache_config.num_blocks - 1,
+            "ID reuse notice drain started before KV resources were released",
+        )
+        guard = getattr(scheduler, "_wait_guard", None)
+        require(guard is None or not guard.records, "ID reuse retained old protection records")
+        finished = set(scheduler.finished_req_ids)
+        preempted = set(scheduler.reset_preempted_req_ids)
+        if not finished and not preempted:
+            d.event(
+                "reuse_notifications_drained",
+                phase=phase,
+                attempts=attempt,
+                pending_outputs=0,
+                state=state,
+            )
+            return
+        output = d.schedule(f"{phase}_terminal_notifications")
+        require(
+            output.total_num_scheduled_tokens == 0 and not output.num_scheduled_tokens,
+            "ID reuse notice drain unexpectedly dispatched request tokens",
+        )
+        require(
+            set(output.finished_req_ids) == finished
+            and set(output.preempted_req_ids or ()) == preempted,
+            "ID reuse notice drain did not forward the native terminal/preemption IDs",
+        )
+        d.consume()
+    raise RuntimeError(f"{phase}: finite ID reuse notification drain limit exceeded")
+
+
 def id_reuse_case(d, config, variant):
     old = req(config, "reuse", range(1000, 1033))
     d.add(old)
     d.drain("generation0")
+    drain_reuse_notifications(d, "generation0")
     d.event("reuse_boundary", pending_outputs=len(d.pending), state=d.state(full=True))
     d.at(1_000_000_000)
     fresh = req(config, "reuse", range(2000, 2033), arrival=-20)
@@ -894,6 +973,7 @@ def id_reuse_case(d, config, variant):
     d.schedule("cancel_generation0")
     d.cancel("cancel_reuse")
     d.drain("cancel_generation0")
+    drain_reuse_notifications(d, "cancel_generation0")
     d.event("reuse_boundary", pending_outputs=len(d.pending), state=d.state(full=True))
     d.at(2_000_000_000)
     d.add(req(config, "cancel_reuse", range(4000, 4033), arrival=-30))
@@ -910,6 +990,7 @@ def repeat_cycles_case(d, config):
             d.schedule(f"cycle_{cycle}")
             d.consume()
         d.drain(f"cycle_{cycle}_drain")
+        drain_reuse_notifications(d, f"cycle_{cycle}")
         require(not d.scheduler._wait_guard.records, "cycle retained protection metadata")
         d.event(
             "cycle_drained", cycle=cycle, pending_outputs=len(d.pending), state=d.state(full=True)
@@ -936,6 +1017,7 @@ def window_case(d, config, label):
         require(
             scheduler._wait_guard.fault_code == "missing_record", "missing age did not fail closed"
         )
+        verify_fault_retries(d, config, label)
         cancel_all(d)
         return
     historical._warm(d, config)

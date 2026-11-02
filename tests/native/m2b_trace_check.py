@@ -974,6 +974,96 @@ def audit_resources(state):
     }
 
 
+def audit_rejected_retries(events, *, schedule_phase, request_id, state):
+    """Require actual attempts and their exceptions, not merely absence of work."""
+    require(state in {"fault", "closed"}, "unknown rejected retry state")
+    schedules = [
+        (index, event)
+        for index, event in enumerate(events)
+        if event["event"] == "schedule_before" and event.get("phase") == schedule_phase
+    ]
+    adds = [
+        (index, event)
+        for index, event in enumerate(events)
+        if event["event"] == "enqueue_call" and event.get("request_id") == request_id
+    ]
+    require(schedules, "guard retry schedule attempt missing")
+    require(adds, "guard retry add attempt missing")
+    require(len(schedules) == 1, "guard retry schedule attempt duplicated")
+    require(len(adds) == 1, "guard retry add attempt duplicated")
+    for index, call in schedules:
+        guard = call.get("guard", {})
+        require(
+            guard.get("closed") is True
+            if state == "closed"
+            else guard.get("fault_code") is not None,
+            "retry schedule did not occur after fault/close",
+        )
+        completed = [
+            (j, event)
+            for j, event in enumerate(events)
+            if event["event"] == "schedule_raise"
+            and event.get("step") == call["step"]
+            and event.get("phase") == schedule_phase
+        ]
+        require(
+            len(completed) == 1
+            and completed[0][0] > index
+            and completed[0][1].get("error_type") == "WaitGuardError",
+            "guard retry schedule did not raise WaitGuardError",
+        )
+        require(
+            not any(
+                event["event"] in {"clock", "native_schedule_enter", "schedule_after"}
+                for event in events[index : completed[0][0] + 1]
+            ),
+            "rejected schedule entered protected/native work",
+        )
+    for index, call in adds:
+        guard = call.get("guard", {})
+        require(
+            guard.get("closed") is True
+            if state == "closed"
+            else guard.get("fault_code") is not None,
+            "retry add did not occur after fault/close",
+        )
+        completed = [
+            (j, event)
+            for j, event in enumerate(events)
+            if event["event"] == "enqueue_raise"
+            and event.get("request_id") == request_id
+            and event.get("object") == call["object"]
+            and event.get("step") == call["step"]
+        ]
+        require(
+            len(completed) == 1
+            and completed[0][0] > index
+            and completed[0][1].get("error_type") == "WaitGuardError",
+            "guard retry add did not raise WaitGuardError",
+        )
+        require(
+            not any(
+                event["event"] in {"clock", "native_add_call", "enqueue"}
+                for event in events[index : completed[0][0] + 1]
+            ),
+            "rejected add entered protected/native work",
+        )
+    return {"schedule_attempts": len(schedules), "add_attempts": len(adds)}
+
+
+def audit_reuse_boundary(event):
+    """A new ID generation requires drained ownership AND native notifications."""
+    require(event.get("pending_outputs") == 0, "ID reuse retains pending native outputs")
+    require(not event["guard"].get("records"), "ID reuse retains protection records")
+    audit_resources(event["state"])
+    lifecycle = event["state"]["full"]["scheduler_lifecycle"]
+    require(
+        lifecycle.get("finished_req_ids") == {"set": []}
+        and lifecycle.get("reset_preempted_req_ids") == {"set": []},
+        "ID reuse retains native terminal/preemption notifications",
+    )
+
+
 def audit_fault_cause(events, metadata, oracle):
     variant = metadata["variant"]
     faults = {
@@ -1039,6 +1129,16 @@ def audit_fault_cause(events, metadata, oracle):
         and not rows(later, "native_add_call")
         and not rows(later, "native_schedule_enter"),
         "latched retries entered clock or native work",
+    )
+    if metadata["scenario"] == "clock_thresholds" and variant.startswith("fault_"):
+        return audit_rejected_retries(
+            events,
+            schedule_phase="fault_retry_schedule",
+            request_id="blocked_after_fault",
+            state="fault",
+        )
+    return audit_rejected_retries(
+        events, schedule_phase=f"{variant}_retry", request_id="rejected_after_fault", state="fault"
     )
 
 
@@ -1342,7 +1442,7 @@ def audit_leaf(events, metadata, config):
     drained = rows(events, "fixture_drained")
     require(drained, "leaf has no complete native resource drain")
     resources = audit_resources(drained[-1]["state"])
-    audit_fault_cause(events, metadata, oracle)
+    retry_checks = audit_fault_cause(events, metadata, oracle)
     audit_exception_fixture(events, metadata, oracle)
     scenario, mode = metadata["scenario"], metadata["mode"]
     if scenario in {"bc_pressure", "bc_ample"}:
@@ -1465,6 +1565,8 @@ def audit_leaf(events, metadata, config):
             ),
             "ID reused before prior native outputs drained",
         )
+        for event in boundaries:
+            audit_reuse_boundary(event)
         for rid in ("reuse", "cancel_reuse"):
             enqueues = [e for e in rows(events, "enqueue") if e["ids"] == [rid]]
             require(
@@ -1657,6 +1759,14 @@ def audit_leaf(events, metadata, config):
             and not rows(events, "clock"),
             "off/prefix consulted protection state or clock",
         )
+        require(
+            rows(events, "native_add_return")
+            and rows(events, "native_schedule_return")
+            and {e["request_id"] for e in rows(events, "cancel")}
+            == {"waiting_cancel", "running_cancel"}
+            and {"A@0", "B@0", "C@0", "running_cancel@0", "survivor@0"} <= set(counts),
+            "clock absence lacks actual admission/scheduling/cancellation controls",
+        )
     elif scenario == "enqueue_identity" and not metadata["variant"].startswith("add_failure_"):
         variant = metadata["variant"]
         if variant in {"same_object_duplicate", "different_object_duplicate"}:
@@ -1773,10 +1883,8 @@ def audit_leaf(events, metadata, config):
                 rows(events, "native_shutdown_raise"),
                 "exceptional native shutdown was not observed",
             )
-        require(
-            {e["name"] for e in rows(events, "expected_error")}
-            >= {"closed_add", "closed_schedule"},
-            "closed scheduler reuse was not tested",
+        retry_checks = audit_rejected_retries(
+            events, schedule_phase="after_shutdown", request_id="after_closed", state="closed"
         )
     elif scenario == "repeat_cycles":
         cycles = rows(events, "cycle_drained")
@@ -1788,6 +1896,8 @@ def audit_leaf(events, metadata, config):
             all(not e["guard"]["records"] and e["pending_outputs"] == 0 for e in cycles),
             "repeated cycles accumulated protected/pending history",
         )
+        for event in cycles:
+            audit_reuse_boundary(event)
         require(
             oracle.generations.get("cycled") == 7 and oracle.sequence == 8,
             "repeated ID reuse did not form fresh monotonically sequenced objects",
@@ -1852,6 +1962,7 @@ def audit_leaf(events, metadata, config):
         "maximum_pending": maximum,
         "guard": guard,
         "native_resources": resources,
+        "rejected_retry_attempts": retry_checks,
     }
 
 

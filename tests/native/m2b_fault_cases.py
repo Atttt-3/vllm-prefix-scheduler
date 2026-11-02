@@ -462,6 +462,7 @@ def _weakref_release(d, config, variant):
             "clock fault did not follow actual native admission",
         )
         require(not d.scheduler._wait_guard.records, "bad enqueue clock registered actual Request")
+        _check_latched(d, config, variant, "clock_provider")
         d.event(
             "weakref_probe",
             object=token,

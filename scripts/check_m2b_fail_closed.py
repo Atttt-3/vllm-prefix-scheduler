@@ -65,6 +65,88 @@ def child_check(kind, payload, config):
         raise ValueError("unknown negative child operation")
 
 
+# These exercise distinct fault/close entry paths using their original native
+# leaves. Every leaf receives its own successful child-process positive control.
+RETRY_SOURCES = {
+    "clock_fault": ("fault_backward", "fault_retry_schedule", "blocked_after_fault", "fault_retry"),
+    "native_fault": (
+        "schedule_after_update_error",
+        "schedule_after_update_error_retry",
+        "rejected_after_fault",
+        "schedule_after_update_error_retry",
+    ),
+    "singleton_fault": (
+        "missing_singleton",
+        "missing_singleton_retry",
+        "rejected_after_fault",
+        "missing_singleton_retry",
+    ),
+    "window_one_fault": (
+        "missing_window_one",
+        "missing_window_one_retry",
+        "rejected_after_fault",
+        "missing_window_one_retry",
+    ),
+    "free_fault": ("free_error", "free_error_retry", "rejected_after_fault", "free_error_retry"),
+    "weakref_fault": (
+        "fault_weakref_release",
+        "fault_weakref_release_retry",
+        "rejected_after_fault",
+        "fault_weakref_release_retry",
+    ),
+    "closed": ("running", "after_shutdown", "after_closed", "closed"),
+}
+
+
+def remove_retry(events, index, *, operation, error_prefix):
+    call = events[index]
+    if operation == "schedule":
+
+        def belongs(event):
+            return (
+                event["event"] in {"schedule_before", "schedule_raise"}
+                and event.get("phase") == call["phase"]
+                and event.get("step") == call["step"]
+            )
+    else:
+
+        def belongs(event):
+            return (
+                event["event"] in {"enqueue_call", "enqueue_raise"}
+                and event.get("request_id") == call["request_id"]
+                and event.get("object") == call["object"]
+            )
+
+    events[:] = [
+        event
+        for event in events
+        if not belongs(event)
+        and not (
+            event["event"] == "expected_error"
+            and event.get("name") == f"{error_prefix}_{operation}"
+        )
+    ]
+
+
+def retry_definitions():
+    definitions = []
+    for name, (variant, phase, request_id, prefix) in RETRY_SOURCES.items():
+        for operation in ("schedule", "add"):
+
+            def predicate(event, v=variant, p=phase, rid=request_id, op=operation):
+                return event.get("variant") == v and (
+                    event["event"] == "schedule_before" and event.get("phase") == p
+                    if op == "schedule"
+                    else event["event"] == "enqueue_call" and event.get("request_id") == rid
+                )
+
+            def mutate(events, index, op=operation, p=prefix):
+                remove_retry(events, index, operation=op, error_prefix=p)
+
+            definitions.append((f"{name}_retry_{operation}_missing", predicate, mutate))
+    return definitions
+
+
 def primitive_definitions():
     """Each corruption changes a raw fact or required identity, never a summary label."""
     return [
@@ -165,7 +247,43 @@ def primitive_definitions():
             lambda e: e["event"] == "case_begin",
             lambda es, i: es[i].update(variant="invented"),
         ),
-    ]
+        (
+            "reuse_terminal_notifications",
+            lambda e: e["event"] == "reuse_boundary",
+            lambda es, i: es[i]["state"]["full"]["scheduler_lifecycle"].update(
+                finished_req_ids={"set": ["old_generation"]}
+            ),
+        ),
+        (
+            "cycle_preemption_notifications",
+            lambda e: e["event"] == "cycle_drained",
+            lambda es, i: es[i]["state"]["full"]["scheduler_lifecycle"].update(
+                reset_preempted_req_ids={"set": ["old_generation"]}
+            ),
+        ),
+        (
+            "retry_schedule_wrong_error",
+            lambda e: e["event"] == "schedule_raise" and e.get("phase") == "fault_retry_schedule",
+            lambda es, i: es[i].update(error_type="RuntimeError"),
+        ),
+        (
+            "retry_add_wrong_error",
+            lambda e: (
+                e["event"] == "enqueue_raise" and e.get("request_id") == "blocked_after_fault"
+            ),
+            lambda es, i: es[i].update(error_type="RuntimeError"),
+        ),
+        (
+            "retry_schedule_duplicate_call",
+            lambda e: e["event"] == "schedule_before" and e.get("phase") == "fault_retry_schedule",
+            lambda es, i: es.insert(i, copy.deepcopy(es[i])),
+        ),
+        (
+            "retry_add_duplicate_call",
+            lambda e: e["event"] == "enqueue_call" and e.get("request_id") == "blocked_after_fault",
+            lambda es, i: es.insert(i, copy.deepcopy(es[i])),
+        ),
+    ] + retry_definitions()
 
 
 PRIMITIVE_ERRORS = {
@@ -188,7 +306,20 @@ PRIMITIVE_ERRORS = {
     "parallel_fields_missing": "effective native parallel semantics changed",
     "false_fault": "fault state differs from causal events",
     "wrong_case_label": "excerpt case mislabeled",
+    "reuse_terminal_notifications": "ID reuse retains native terminal/preemption notifications",
+    "cycle_preemption_notifications": "ID reuse retains native terminal/preemption notifications",
+    "retry_schedule_wrong_error": "guard retry schedule did not raise WaitGuardError",
+    "retry_add_wrong_error": "guard retry add did not raise WaitGuardError",
+    "retry_schedule_duplicate_call": "guard retry schedule attempt duplicated",
+    "retry_add_duplicate_call": "guard retry add attempt duplicated",
 }
+PRIMITIVE_ERRORS.update(
+    {
+        f"{name}_retry_{operation}_missing": f"guard retry {operation} attempt missing"
+        for name in RETRY_SOURCES
+        for operation in ("schedule", "add")
+    }
+)
 
 
 def select_primitive_sources(trace, expected):
@@ -198,10 +329,11 @@ def select_primitive_sources(trace, expected):
     definitions = primitive_definitions()
     selected = {}
     for case, events in iter_case_groups(trace, expected):
-        if any(e["event"] in {"expected_error", "fault_injection"} for e in events):
-            continue
+        exceptional = any(e["event"] in {"expected_error", "fault_injection"} for e in events)
         for label, predicate, _ in definitions:
             if label in selected:
+                continue
+            if exceptional and "retry_" not in label:
                 continue
             for index, event in enumerate(events):
                 if predicate(event):
