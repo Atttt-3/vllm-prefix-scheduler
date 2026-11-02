@@ -1,5 +1,5 @@
 {
-  "implementation_status": "planned_not_implemented",
+  "implementation_status": "m2a_implemented_native_verified_pending_project_acceptance",
   "scheduler_base": "vllm.v1.core.sched.async_scheduler.AsyncScheduler",
   "configuration_container": "additional_config.prefix_scheduler",
   "default": {
@@ -7,5 +7,9 @@
     "window": 16,
     "max_wait_ms": 500
   },
-  "planned_modes": ["off", "prefix", "guarded"]
+  "implemented_modes": ["off", "prefix"],
+  "planned_modes": ["guarded"],
+  "max_wait_ms_status": "validated_contract_only_no_protection",
+  "native_tested_commit": "1091037dcc2a3a9c31d9692841faebff1f063808",
+  "m2b_status": "monotonic_wait_protection_and_metadata_lifecycle_not_implemented"
 }

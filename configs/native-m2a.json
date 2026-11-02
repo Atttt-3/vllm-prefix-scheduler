@@ -1,0 +1,270 @@
+{
+  "task_id": "M2A-prefix-scheduler",
+  "schema_version": 1,
+  "seed": 42,
+  "vllm_version": "0.32.0",
+  "vllm_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "block_size": 16,
+  "capacities": {
+    "pressure": 5,
+    "ample": 10
+  },
+  "max_num_batched_tokens": 64,
+  "max_num_seqs": 2,
+  "max_num_active_seqs": 2,
+  "max_model_len": 128,
+  "enable_chunked_prefill": true,
+  "watermark": 0.0,
+  "max_tokens": 3,
+  "ignore_eos": true,
+  "synthetic_output_token_id": 9001,
+  "pending_output_depth": 2,
+  "max_steps_per_phase": 64,
+  "repeats": 3,
+  "requests": [
+    {
+      "id": "A",
+      "arrival_time": 0.0,
+      "enqueue_phase": "warmup",
+      "tokens": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        200
+      ]
+    },
+    {
+      "id": "B",
+      "arrival_time": 1.0,
+      "enqueue_phase": "after_A_drained",
+      "tokens": [
+        300,
+        301,
+        302,
+        303,
+        304,
+        305,
+        306,
+        307,
+        308,
+        309,
+        310,
+        311,
+        312,
+        313,
+        314,
+        315,
+        316,
+        317,
+        318,
+        319,
+        320,
+        321,
+        322,
+        323,
+        324,
+        325,
+        326,
+        327,
+        328,
+        329,
+        330,
+        331,
+        332,
+        333,
+        334,
+        335,
+        336,
+        337,
+        338,
+        339,
+        340,
+        341,
+        342,
+        343,
+        344,
+        345,
+        346,
+        347,
+        348
+      ]
+    },
+    {
+      "id": "C",
+      "arrival_time": 2.0,
+      "enqueue_phase": "after_A_drained",
+      "tokens": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        201
+      ]
+    }
+  ],
+  "metric": "scheduled/dispatched tokens; no KV tensors or GPU execution",
+  "source_sha256": {
+    "vllm/config/scheduler.py": "2fb86b1572a4925be59f304d13b4f6ec03d496b67a7c4abbb976ecda2232839a",
+    "vllm/config/vllm.py": "573692a80364d5c373321754c6213b4792ae292ba6aea7d6573ae013c2c71ae9",
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/core/sched/async_scheduler.py": "38d296e77e4d612e696241c67298eb1ca9b6a48b483cd33d35495bf31691032e",
+    "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae",
+    "vllm/v1/core/sched/request_queue.py": "db8d25daf9580d581f18c6b631a6576dfaa7d1474398cd8dc4db1d29745c214d",
+    "vllm/v1/core/kv_cache_manager.py": "d08315437c6b07040d1b7e12d7bd7d6e966c976a286f05a9788098cfdd9754c7",
+    "vllm/v1/core/kv_cache_coordinator.py": "efd7193391197c555ebc0c8f2b593a6c4cb5b7da2978cd57414c0b71170f5971",
+    "vllm/v1/core/single_type_kv_cache_manager.py": "fe38816a388bb5b615231f621adc208e3893d20349865d041cc4f646d4d89b0a",
+    "vllm/v1/core/block_pool.py": "6d1e0d89b43e3b2ae396906b9c2f0551dbe192b60d05f8c1ca2d93a91bbbeea3",
+    "vllm/v1/core/kv_cache_utils.py": "af4164bca819f1cdc416077522a7019936fd38a523a482283eb91b08dae0e57a",
+    "vllm/v1/kv_cache_interface.py": "39ea5be3054f97238f81ba070ea661f1b5975a6268ced5f413d4a057ea449d4a",
+    "vllm/v1/request.py": "dd7c30bf8b0894dc123a739c299c0133566f8cc075b081e45905f1c29506e69d",
+    "vllm/v1/outputs.py": "40b3aec867bca3a419f7b5ed8a33bfebe431f1085a09ff9d45ca4c4640377b19",
+    "vllm/utils/hashing.py": "2e8fcc81dd675ed0fba49de8fd8658b4dab9ae26a917edaf5164bf266c56b4df",
+    "vllm/config/kv_events.py": "b1dbaee3e6830e381e9157fe3bab0d65c357da88ff7cdf8b1e4b3a4e75c82a87",
+    "vllm/distributed/kv_events.py": "fc73fe6a4b52b05183a9b7bb7696e3c468f7ec9d7c37ec08f1cbee989298e949",
+    "vllm/v1/core/kv_cache_metrics.py": "efedec04feff5f04a6d51c6c464290b52ab8c249d65121a9ab9f1370d6b67f47",
+    "vllm/config/offload.py": "1dbcc23fedee34e09fe275b5889c43d77bbbafed7b36d097a620fb3e905c7aab",
+    "vllm/config/parallel.py": "e8dcfb67c1ace957dcc7e12569ee62eb0f983aec3901fdef27c13014cea4b760",
+    "vllm/config/observability.py": "6ebc5cad34ab04e8a060c482e2f1267d996d909fa045b8cb055c3a7b96cd7657",
+    "vllm/config/device.py": "ac7d153000e76d6d6b554fa26eb947c51c62c4295f40fabe13294bc35ba3c066",
+    "vllm/config/model.py": "04ca37ea1d50128a7ddede30e7baa4e0a56bccec85091577a2c81c5de1a8fab8",
+    "vllm/config/aux_output.py": "fb23313546ab0f6302888fc5b7e95ae2eb6f8d222f98b00bcb9aea53238b4a32",
+    "vllm/config/lora.py": "74281df97da18a86591997b26ba962ef31acf4ec2a13b9f8e7d8a14037b2ce66",
+    "vllm/config/multimodal.py": "c30971531e7d10c276ac9d01b0080833f1aa5218880a43e43243414a139e96a8",
+    "vllm/config/speculative.py": "ce135651a7a0343ff526f72e9545932617378161abd03135d67eda6de89c617c",
+    "vllm/config/kv_transfer.py": "6c1aee67cd39507cd52df37725e88ced5baa63037c6912be011c8aa36ca55bfa",
+    "vllm/config/ec_transfer.py": "1e30f1e86d082ab72fb075362abf16598c0d6d6025701a7e39fd7df0fcbbc27f"
+  },
+  "scheduler_reserve_full_isl": true,
+  "long_prefill_token_threshold": 0,
+  "long_prefill_token_threshold_adaptive": false,
+  "model_config_sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+  "modes": [
+    "native",
+    "off",
+    "prefix"
+  ],
+  "window": 16,
+  "max_wait_ms": 500,
+  "scenarios": {
+    "bc_pressure": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "bc_ample": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "apc_off": [
+      "native",
+      "off"
+    ],
+    "probe": [
+      "prefix"
+    ],
+    "window": [
+      "prefix"
+    ],
+    "chunk": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "preemption": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "cancellation": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "id_reuse": [
+      "native",
+      "off",
+      "prefix"
+    ],
+    "score_eviction": [
+      "prefix"
+    ],
+    "global_rejection": [
+      "prefix"
+    ]
+  },
+  "lifecycle": {
+    "chunk": {
+      "num_blocks": 10,
+      "max_num_batched_tokens": 16,
+      "max_num_active_seqs": 1,
+      "prompt_length": 65
+    },
+    "preempt": {
+      "num_blocks": 5,
+      "max_num_batched_tokens": 64,
+      "max_num_active_seqs": 2,
+      "prompt_length": 32,
+      "max_tokens": 3,
+      "watermark": 0.0,
+      "pending_output_depth": 2
+    }
+  }
+}

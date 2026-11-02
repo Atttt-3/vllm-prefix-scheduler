@@ -4,7 +4,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_PROJECT_ENVIRONMENT := $(CURDIR)/.venv
 
-.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence native-replay native-trace-check
+.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence native-replay native-trace-check native-m2a native-m2a-trace-check
 
 dev:
 	"$(UV)" sync --locked --dev
@@ -37,6 +37,13 @@ native-replay:
 
 native-trace-check:
 	"$(NATIVE_PYTHON)" tests/native/test_native_replay.py $(value ARGS)
+
+# M2A has its own factory, complete matrix contract and independent trace auditor.
+native-m2a:
+	"$(NATIVE_PYTHON)" scripts/replay_m2a.py $(value ARGS)
+
+native-m2a-trace-check:
+	"$(NATIVE_PYTHON)" tests/native/m2a_trace_check.py $(value ARGS)
 
 build:
 	"$(UV)" build --no-sources
