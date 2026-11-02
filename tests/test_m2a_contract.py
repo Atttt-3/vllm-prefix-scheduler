@@ -215,3 +215,69 @@ def test_case_labels_and_success_flags_cannot_replace_native_trace(tmp_path, con
     trace.write_text("\n".join(json.dumps(event) for event in events))
     with pytest.raises(ValueError, match="native_objects"):
         auditor.assert_trace(trace, config)
+
+
+@pytest.fixture
+def global_rejection_events(auditor):
+    events = []
+    for name, (expected, fragment) in auditor.REJECTION_EXPECTATIONS.items():
+        events.append(
+            {
+                "event": "negative_config",
+                "name": name,
+                "effective": copy.deepcopy(expected),
+                "expected": copy.deepcopy(expected),
+                "error_fragment": fragment,
+            }
+        )
+        events.append(
+            {
+                "event": "check",
+                "name": name,
+                "rejected": True,
+                "error": (
+                    "prefix_scheduler guarded mode is not implemented in M2A"
+                    if name == "guarded"
+                    else f"prefix_scheduler: {fragment}"
+                ),
+            }
+        )
+    return events
+
+
+def test_guarded_uses_its_explicit_unimplemented_error(auditor, global_rejection_events):
+    assert len(auditor.audit_global_rejections(global_rejection_events)["rejected"]) == 33
+    guarded = next(
+        e for e in global_rejection_events if e["event"] == "check" and e["name"] == "guarded"
+    )
+    guarded["error"] = "prefix_scheduler: unrelated configuration error"
+    with pytest.raises(ValueError, match="guarded"):
+        auditor.audit_global_rejections(global_rejection_events)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing", "duplicate", "inactive", "bool", "reason", "order"]
+)
+def test_global_rejection_gate_requires_effective_target_input(
+    auditor, global_rejection_events, mutation
+):
+    events = global_rejection_events
+    observation = next(
+        e for e in events if e["event"] == "negative_config" and e["name"] == "apc_off"
+    )
+    check = next(e for e in events if e["event"] == "check" and e["name"] == "apc_off")
+    if mutation == "missing":
+        events.remove(observation)
+    elif mutation == "duplicate":
+        events.append(copy.deepcopy(observation))
+    elif mutation == "inactive":
+        observation["effective"] = observation["expected"] = True
+    elif mutation == "bool":
+        observation["effective"] = 0
+    elif mutation == "reason":
+        check["error"] = "prefix_scheduler: unrelated configuration error"
+    else:
+        events.remove(observation)
+        events.append(observation)
+    with pytest.raises(ValueError):
+        auditor.audit_global_rejections(events)

@@ -360,41 +360,87 @@ def assert_trace(trace_path, config=None):
 
 NATIVE_CLASS = "vllm.v1.core.sched.async_scheduler.AsyncScheduler"
 CUSTOM_CLASS = "vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler"
-REJECTION_NAMES = {
-    "apc_off",
-    "async_off",
-    "priority",
-    "tensor_parallel",
-    "pipeline_parallel",
-    "data_parallel",
-    "decode_parallel",
-    "prefill_parallel",
-    "aux_output",
-    "hash_block",
-    "multiple_groups",
-    "noncausal",
-    "window1_apc_off",
-    "guarded",
-    "cuda_only",
-    "lora",
-    "kv_offload",
-    "cpu_offload",
-    "prefetch_offload",
-    "pooling",
-    "expert_parallel",
-    "dbo",
-    "sliding_window",
-    "attention_chunk",
-    "speculative",
-    "multimodal",
-    "kv_connector",
-    "ec_connector",
-    "encoder_decoder",
-    "diffusion",
-    "nonfull_spec",
-    "external_lb",
-    "hybrid_lb",
+REJECTION_EXPECTATIONS = {
+    "apc_off": (False, "APC enabled"),
+    "async_off": (False, "effective async_scheduling=True"),
+    "priority": ("priority", "FCFS"),
+    "tensor_parallel": (2, "tensor_parallel_size"),
+    "pipeline_parallel": (2, "pipeline_parallel_size"),
+    "data_parallel": (2, "data_parallel_size"),
+    "decode_parallel": (2, "decode_context_parallel_size"),
+    "prefill_parallel": (2, "prefill_context_parallel_size"),
+    "aux_output": (True, "auxiliary output"),
+    "hash_block": (8, "identical scheduler, hash and physical"),
+    "multiple_groups": (2, "exactly one"),
+    "noncausal": (True, "causal full attention"),
+    "window1_apc_off": ({"mode": "prefix", "window": 1, "apc": False}, "APC enabled"),
+    "guarded": ({"mode": "guarded", "window": 16, "apc": False}, "guarded"),
+    "cuda_only": ("cpu", "CUDA"),
+    "lora": (True, "lora_config"),
+    "kv_offload": (1.0, "KV offloading"),
+    "cpu_offload": (1.0, "CPU offload"),
+    "prefetch_offload": (1, "prefetch offload"),
+    "pooling": ("pooling", "ordinary text generation"),
+    "expert_parallel": (True, "enable_expert_parallel"),
+    "dbo": (True, "enable_dbo"),
+    "sliding_window": (16, "causal full attention"),
+    "attention_chunk": (16, "causal full attention"),
+    "speculative": (True, "speculative_config"),
+    "multimodal": (True, "multimodal"),
+    "kv_connector": (True, "kv_transfer_config"),
+    "ec_connector": (True, "ec_transfer_config"),
+    "encoder_decoder": (True, "is_encoder_decoder"),
+    "diffusion": (True, "is_diffusion"),
+    "nonfull_spec": ("SlidingWindowSpec", "exact FullAttentionSpec"),
+    "external_lb": (True, "data_parallel_external_lb"),
+    "hybrid_lb": (True, "data_parallel_hybrid_lb"),
 }
+REJECTION_NAMES = set(REJECTION_EXPECTATIONS)
+
+
+def audit_global_rejections(events):
+    checks, configurations = rows(events, "check"), rows(events, "negative_config")
+    for records in (checks, configurations):
+        names = [e["name"] for e in records]
+        require(
+            set(names) == REJECTION_NAMES and len(names) == len(set(names)),
+            "global rejection cases or effective configurations missing or duplicated",
+        )
+    observations = {e["name"]: e for e in configurations}
+    for check in checks:
+        name = check["name"]
+        observation = observations[name]
+        value, fragment = REJECTION_EXPECTATIONS[name]
+        # JSON spelling also distinguishes nested bool/int and float/int values.
+        expected_json = json.dumps(value, sort_keys=True)
+        require(
+            all(
+                json.dumps(observation.get(key), sort_keys=True) == expected_json
+                for key in ("effective", "expected")
+            )
+            and observation.get("error_fragment") == fragment,
+            f"negative configuration {name} did not take effect at the intended field",
+        )
+        require(
+            events.index(observation) < events.index(check),
+            f"negative configuration {name} was not observed before rejection",
+        )
+        error = check.get("error")
+        require(
+            check.get("rejected") is True and isinstance(error, str),
+            f"incompatible configuration {name} was accepted",
+        )
+        if name == "guarded":
+            require(
+                error == "prefix_scheduler guarded mode is not implemented in M2A",
+                "guarded did not explicitly reject its unimplemented mode",
+            )
+        else:
+            require(
+                error.startswith("prefix_scheduler:") and fragment in error,
+                f"incompatible configuration {name} rejected for an unrelated reason",
+            )
+    return {"rejected": [e["name"] for e in checks]}
 
 
 def audit_native_identity(events, metadata, config):
@@ -749,22 +795,7 @@ def audit_probe(events):
 def audit_scenario(events, metadata, config, counts, pairs, maximum):
     scenario, mode = metadata["scenario"], metadata["mode"]
     if scenario == "global_rejection":
-        checks = rows(events, "check")
-        names = [e["name"] for e in checks]
-        require(
-            set(names) == REJECTION_NAMES and len(names) == len(set(names)),
-            "global rejection cases missing or duplicated",
-        )
-        require(
-            all(
-                e.get("rejected") is True
-                and isinstance(e.get("error"), str)
-                and "prefix_scheduler:" in e["error"]
-                for e in checks
-            ),
-            "incompatible global configuration was accepted",
-        )
-        return {"rejected": names}
+        return audit_global_rejections(events)
     native = audit_native_identity(events, metadata, config)
     audit_windows(events, mode)
     drained = rows(events, "drained")
