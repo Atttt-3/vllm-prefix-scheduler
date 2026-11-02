@@ -1,0 +1,136 @@
+{
+  "additional_limits": [
+    "No actual chunk dispatch occurred although chunked prefill was enabled.",
+    "No native preemption; overlap accounting has local unit coverage only."
+  ],
+  "allocation_release": {
+    "accounting_available": false,
+    "allocated_gpus": 1,
+    "elapsed_seconds": 350,
+    "exit_code": "0:0",
+    "gpu": "RTX 3090",
+    "gpu_after_sha256": "548d6fb50c7f909734ac333c09f378f1a61d750c55eb2a1412756bf5c04d4a79",
+    "limit_seconds": 1200,
+    "memory_after_mib": 1,
+    "source_sha256": "0c52e3ff937c75b037d37da355d12471637911a113f06af31423019fec9e34b1",
+    "squeue_empty": true,
+    "state": "COMPLETED"
+  },
+  "criteria": [
+    {
+      "description": "A: Pinned native call chain and runtime source hashes, supported by actual trace.",
+      "evidence": [
+        "artifacts/000-runtime.json",
+        "artifacts/002-trace.jsonl"
+      ],
+      "id": "C1",
+      "note": "Pinned child Python 3.12.16/vLLM 0.32.0 and all 15 source SHA256 independently matched fixed upstream bytes; actual native class identities and call-chain trace match.",
+      "status": "passed"
+    },
+    {
+      "description": "B: Four independently reconstructed pressure/ample and BC/CB conditions; identical requests/arrivals; one test-only permutation; capacity-only negative control.",
+      "evidence": [
+        "artifacts/001-inputs.json",
+        "artifacts/002-trace.jsonl"
+      ],
+      "id": "C2",
+      "note": "12 independent cases; identical warm state per capacity and shared hashes across capacities; unchanged B/C arrivals and enqueue order, exactly one CB fixture permutation; only capacity differs.",
+      "status": "passed"
+    },
+    {
+      "description": "C: Trace directly links B native allocation to A hash eviction before C lookup and increased dispatched prompt work; ample negative control removes this difference.",
+      "evidence": [
+        "artifacts/002-trace.jsonl",
+        "artifacts/003-summary.json"
+      ],
+      "id": "C3",
+      "note": "Pressure BC: native B allocation evicts A blocks 2/1 before C lookup=0 and prompt dispatch33. CB: hit32/touch then dispatch1; B may evict later after C completes. Ample both hit32/dispatch1 with no A eviction.",
+      "status": "passed"
+    },
+    {
+      "description": "D: FIFO asynchronous output consumption, finite completion, empty pending outputs and released references/resources.",
+      "evidence": [
+        "artifacts/002-trace.jsonl",
+        "artifacts/003-summary.json"
+      ],
+      "id": "C4",
+      "note": "144 scheduler outputs consumed FIFO; max pending2/final0; all requests length-complete, counters0, waiting/running/request blocks empty, non-null refs0/free4 or9. Separate resource-release.txt records COMPLETED exit0:0, 350s of1200s limit; GPU after1MiB.",
+      "status": "passed"
+    },
+    {
+      "description": "E: Per-request per-step dispatch intervals and optimistic progress, prompt/decode/repeated dispatch separated; no tensor execution or performance claims.",
+      "evidence": [
+        "artifacts/002-trace.jsonl",
+        "artifacts/003-summary.json"
+      ],
+      "id": "C5",
+      "note": "Intervals captured after hit admission before optimistic advance. Independently recomputed prompt/decode/repeated positions match; each request decode2, no preemptions or repeats. Host dispatch metadata only, no KV tensors or performance claim.",
+      "status": "passed"
+    },
+    {
+      "description": "F: At least three fixed-input repeats reproduce mechanism and counts; local check is separately reported and native entry fails on missing dependencies.",
+      "evidence": [
+        "artifacts/001-inputs.json",
+        "artifacts/003-summary.json"
+      ],
+      "id": "C6",
+      "note": "Three full traces per condition identical after case label removal. Stable source/config. Supplementary local-check-network fully passes make check (71 passed/1 native skip); fail-closed rejects hidden native dependency with exit1 and no summary. Original failed attempts retained.",
+      "status": "passed"
+    }
+  ],
+  "decision": "accepted",
+  "findings_and_fixes": [
+    "Static review initially missed required is_encoder_decoder InitVar; native failure exposed it, then AST field review and native rerun confirmed minimal fix.",
+    "Explicitly froze reserve-full-ISL and long-prefill threshold; added effective config events.",
+    "Added independent causal trace audit; aggregate dispatch counts alone are not mechanism acceptance.",
+    "Independent review caught test-pass/build-fail distinction; separate complete make check rerun succeeded."
+  ],
+  "limitations": [
+    "Synthetic ModelRunnerOutput; no KV tensor computation, model inference, TTFT or GPU execution work measured.",
+    "No actual chunking or native preemption occurred; ledger overlap unit tests do not establish native preemption regression.",
+    "One test-only candidate permutation; no custom scheduler, scoring, waiting protection or production ordering policy.",
+    "Slurm accounting storage disabled; release verified via squeue, scontrol and GPU snapshot."
+  ],
+  "local_check": {
+    "command": "make check",
+    "manifest_sha256": "23be3060e4d0488ef4c033668b069cf9dd1afe578b760adfc83cd2d972a2967f",
+    "native_skipped": 1,
+    "passed": 71,
+    "status": "succeeded",
+    "wheel_and_sdist_built": true
+  },
+  "missing_dependency_test": {
+    "child_exit_code": 1,
+    "error": "ModuleNotFoundError: vllm",
+    "manifest_sha256": "cfebe60d36a2dcd236fd9936a6e4e4180f12506991f61ffec74e6d9f864a3692",
+    "method": "Same Linux interpreter with python -S",
+    "success_summary_created": false
+  },
+  "retained_failures": [
+    {
+      "commit": "57d6590",
+      "failure": "Missing required is_encoder_decoder during native SchedulerConfig construction",
+      "manifest_sha256": "e9341c7cb63d5e07b23485f9d2e33ba9ef378f440d701ac4a6c71ec1bf6f8f3a",
+      "returncode": 1,
+      "run": "attempt-01",
+      "schedule_events": 0,
+      "summary_missing": true
+    },
+    {
+      "failure": "Tests passed; packaging dependency fetch blocked by network sandbox. Entire make check failed.",
+      "manifest_sha256": "db691262de719dfc82485fd27675805c564804c25739b3ee9220c7042ea333b3",
+      "returncode": 2,
+      "run": "local-check"
+    }
+  ],
+  "reviewers": [
+    "root coordinator",
+    "independent source_audit",
+    "independent counterexample_review"
+  ],
+  "trace_audit": {
+    "cases": 12,
+    "manifest_sha256": "92a0504d5124c808b8fcfb3484f7efd3f7c4ce4d59eab69209586f3182ba905c",
+    "status": "succeeded"
+  }
+}

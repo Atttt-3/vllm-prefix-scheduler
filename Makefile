@@ -1,9 +1,10 @@
 UV ?= $(if $(wildcard .tools/bin/uv),.tools/bin/uv,uv)
+NATIVE_PYTHON ?= .venv-gpu/bin/python
 export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_PROJECT_ENVIRONMENT := $(CURDIR)/.venv
 
-.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence
+.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence native-replay native-trace-check
 
 dev:
 	"$(UV)" sync --locked --dev
@@ -29,6 +30,13 @@ run-evidence:
 
 check-run-evidence:
 	"$(UV)" run --frozen python scripts/check_run_evidence.py $(value ARGS)
+
+# Use the existing Linux interpreter directly; never sync the dev lock into it.
+native-replay:
+	"$(NATIVE_PYTHON)" scripts/replay_bc.py $(value ARGS)
+
+native-trace-check:
+	"$(NATIVE_PYTHON)" tests/native/test_native_replay.py $(value ARGS)
 
 build:
 	"$(UV)" build --no-sources
