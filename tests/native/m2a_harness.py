@@ -652,10 +652,38 @@ def probe_case(d, config):
         after = d.state(full=True)
         d.event("probe_after", probe_id=label, state=after, score=score, expected=expected)
         require(before == after and score == expected, f"probe {label} changed state or score")
-    # Native-effect positive controls prove snapshots can see each mutation.
+    # Prove normal native reporting AFTER the probes and BEFORE positive controls.
+    # Warmup has already drained its events. No observer calls a draining API.
+    normal = d.requests["full"]
+    d.requests = {"A": d.requests["A"]}
+    published_before, updates_before = len(d.published), len(d.output_stats)
+    begin = d.state(full=True)
+    require(begin["full"]["events"] == [], "old events would contaminate post-probe proof")
+    d.event(
+        "post_probe_begin",
+        state=begin,
+        published_count=published_before,
+        output_count=updates_before,
+    )
+    d.add(normal)
+    d.drain("post_probe_native")
+    require(
+        len(d.published) > published_before and len(d.output_stats) > updates_before,
+        "native post-probe event/stat output missing",
+    )
+    d.event(
+        "post_probe_end",
+        state=d.state(full=True),
+        published_delta=len(d.published) - published_before,
+        output_delta=len(d.output_stats) - updates_before,
+    )
+
+    # Native-effect positive controls use a separate detached Request. Their
+    # effects cannot be mistaken for the normal reporting proved above.
     manager = d.scheduler.kv_cache_manager
     pool = manager.block_pool
-    r = d.requests["full"]
+    r = request(config, "sensitivity_control", common + [201])
+    d.requests[r.request_id] = r
     before = d.state(full=True)
     blocks, hit, _ = manager.get_computed_blocks(r)
     after = d.state(full=True)
@@ -675,12 +703,11 @@ def probe_case(d, config):
     after = d.state(full=True)
     require(before["full"]["stats"] != after["full"]["stats"], "stats sensitivity")
     d.event("check", name="sensitivity_stats", before=before, after=after)
-    # Detached lookup requests never entered native lifetime; remove them from
-    # the driver's terminal registry, then schedule the same ordinary full request.
-    d.requests = {"A": d.requests["A"]}
+    # Consume controls through another ordinary native lifetime; never clear
+    # statistics or event buffers just to make the final state appear drained.
+    d.requests.pop(r.request_id)
     d.add(r)
-    d.drain("post_probe_native")
-    require(d.published and d.output_stats, "native legal event/stat output missing")
+    d.drain("sensitivity_controls_native_drain")
 
 
 def chunk_case(d, config):
@@ -940,6 +967,21 @@ def window_case(config, model_path, emit):
     return {"status": "passed", "subcases": labels, "results": results}
 
 
+def _mutate_model_flag(vconfig, hf_field, value, cached_field):
+    """Negative fixture: change HF source, invalidate its native cached property.
+
+    ModelConfig already evaluates these cached properties during construction.
+    Mutating HF config alone would leave the effective model flag unchanged.
+    This is setup of an incompatible input, never production cache mutation.
+    """
+    model = vconfig.model_config
+    setattr(model.hf_config, hf_field, value)
+    model.__dict__.pop(cached_field, None)
+    require(
+        getattr(model, cached_field) is True, f"negative fixture {cached_field} did not take effect"
+    )
+
+
 def global_rejection_case(config, model_path, emit):
     import torch
     from vllm.config import (
@@ -975,10 +1017,12 @@ def global_rejection_case(config, model_path, emit):
             "ec_transfer_config",
             ECTransferConfig(ec_connector="ECExampleConnector", ec_role="ec_both"),
         ),
-        "encoder_decoder": lambda vc, kv, args: setattr(
-            vc.model_config.hf_config, "is_encoder_decoder", True
+        "encoder_decoder": lambda vc, kv, args: _mutate_model_flag(
+            vc, "is_encoder_decoder", True, "is_encoder_decoder"
         ),
-        "diffusion": lambda vc, kv, args: setattr(vc.model_config.hf_config, "canvas_length", 1),
+        "diffusion": lambda vc, kv, args: _mutate_model_flag(
+            vc, "canvas_length", 1, "is_diffusion"
+        ),
         "nonfull_spec": lambda vc, kv, args: setattr(
             kv.kv_cache_groups[0],
             "kv_cache_spec",
@@ -1035,30 +1079,219 @@ def global_rejection_case(config, model_path, emit):
             kv.kv_cache_groups[0].kv_cache_spec, "non_causal", True
         ),
     }
+    # Every mutation is checked at its effective read location before resolving
+    # or constructing the production class. Also bind the specific rejection
+    # reason, so an unrelated setup error cannot count as a successful negative.
+    expectations = {
+        "speculative": (
+            lambda vc, kv, args: vc.speculative_config is not None,
+            True,
+            "speculative_config",
+        ),
+        "multimodal": (
+            lambda vc, kv, args: vc.model_config.multimodal_config is not None,
+            True,
+            "multimodal",
+        ),
+        "kv_connector": (
+            lambda vc, kv, args: vc.kv_transfer_config is not None,
+            True,
+            "kv_transfer_config",
+        ),
+        "ec_connector": (
+            lambda vc, kv, args: vc.ec_transfer_config is not None,
+            True,
+            "ec_transfer_config",
+        ),
+        "encoder_decoder": (
+            lambda vc, kv, args: vc.model_config.is_encoder_decoder,
+            True,
+            "is_encoder_decoder",
+        ),
+        "diffusion": (lambda vc, kv, args: vc.model_config.is_diffusion, True, "is_diffusion"),
+        "nonfull_spec": (
+            lambda vc, kv, args: type(kv.kv_cache_groups[0].kv_cache_spec).__name__,
+            "SlidingWindowSpec",
+            "exact FullAttentionSpec",
+        ),
+        "external_lb": (
+            lambda vc, kv, args: vc.parallel_config.data_parallel_external_lb,
+            True,
+            "data_parallel_external_lb",
+        ),
+        "hybrid_lb": (
+            lambda vc, kv, args: vc.parallel_config.data_parallel_hybrid_lb,
+            True,
+            "data_parallel_hybrid_lb",
+        ),
+        "cuda_only": (lambda vc, kv, args: vc.device_config.device_type, "cpu", "CUDA"),
+        "lora": (lambda vc, kv, args: vc.lora_config is not None, True, "lora_config"),
+        "kv_offload": (
+            lambda vc, kv, args: vc.cache_config.kv_offloading_size,
+            1.0,
+            "KV offloading",
+        ),
+        "cpu_offload": (
+            lambda vc, kv, args: vc.offload_config.uva.cpu_offload_gb,
+            1.0,
+            "CPU offload",
+        ),
+        "prefetch_offload": (
+            lambda vc, kv, args: vc.offload_config.prefetch.offload_group_size,
+            1,
+            "prefetch offload",
+        ),
+        "pooling": (
+            lambda vc, kv, args: vc.model_config.runner_type,
+            "pooling",
+            "ordinary text generation",
+        ),
+        "expert_parallel": (
+            lambda vc, kv, args: vc.parallel_config.enable_expert_parallel,
+            True,
+            "enable_expert_parallel",
+        ),
+        "dbo": (lambda vc, kv, args: vc.parallel_config.enable_dbo, True, "enable_dbo"),
+        "sliding_window": (
+            lambda vc, kv, args: kv.kv_cache_groups[0].kv_cache_spec.sliding_window,
+            16,
+            "causal full attention",
+        ),
+        "attention_chunk": (
+            lambda vc, kv, args: kv.kv_cache_groups[0].kv_cache_spec.attention_chunk_size,
+            16,
+            "causal full attention",
+        ),
+        "apc_off": (
+            lambda vc, kv, args: vc.cache_config.enable_prefix_caching,
+            False,
+            "APC enabled",
+        ),
+        "async_off": (
+            lambda vc, kv, args: vc.scheduler_config.async_scheduling,
+            False,
+            "effective async_scheduling=True",
+        ),
+        "priority": (lambda vc, kv, args: vc.scheduler_config.policy, "priority", "FCFS"),
+        "tensor_parallel": (
+            lambda vc, kv, args: vc.parallel_config.tensor_parallel_size,
+            2,
+            "tensor_parallel_size",
+        ),
+        "pipeline_parallel": (
+            lambda vc, kv, args: vc.parallel_config.pipeline_parallel_size,
+            2,
+            "pipeline_parallel_size",
+        ),
+        "data_parallel": (
+            lambda vc, kv, args: vc.parallel_config.data_parallel_size,
+            2,
+            "data_parallel_size",
+        ),
+        "decode_parallel": (
+            lambda vc, kv, args: vc.parallel_config.decode_context_parallel_size,
+            2,
+            "decode_context_parallel_size",
+        ),
+        "prefill_parallel": (
+            lambda vc, kv, args: vc.parallel_config.prefill_context_parallel_size,
+            2,
+            "prefill_context_parallel_size",
+        ),
+        "aux_output": (lambda vc, kv, args: vc.aux_output_config.enabled, True, "auxiliary output"),
+        "hash_block": (
+            lambda vc, kv, args: args["hash_block_size"],
+            8,
+            "identical scheduler, hash and physical",
+        ),
+        "multiple_groups": (lambda vc, kv, args: len(kv.kv_cache_groups), 2, "exactly one"),
+        "noncausal": (
+            lambda vc, kv, args: kv.kv_cache_groups[0].kv_cache_spec.non_causal,
+            True,
+            "causal full attention",
+        ),
+    }
+    require(set(expectations) == set(tests), "negative fixture observations incomplete")
     rejected = []
     for label, mutate in tests.items():
+        read_effective, expected, fragment = expectations[label]
+
+        def checked_mutation(
+            vc,
+            kv,
+            args,
+            mutate=mutate,
+            read_effective=read_effective,
+            expected=expected,
+            label=label,
+            fragment=fragment,
+        ):
+            mutate(vc, kv, args)
+            effective = read_effective(vc, kv, args)
+            require(
+                type(effective) is type(expected) and effective == expected,
+                f"negative fixture {label} did not take effect: {effective}",
+            )
+            emit(
+                {
+                    "event": "negative_config",
+                    "step": 0,
+                    "name": label,
+                    "effective": effective,
+                    "expected": expected,
+                    "error_fragment": fragment,
+                }
+            )
+
         caught = None
         try:
-            scheduler = create_scheduler(config, "prefix", model_path, mutate=mutate)
+            scheduler = create_scheduler(config, "prefix", model_path, mutate=checked_mutation)
         except (ValueError, RuntimeError, NotImplementedError) as error:
             caught = str(error)
         else:
             scheduler.shutdown()
         require(
-            caught is not None and "prefix_scheduler:" in caught,
+            caught is not None and "prefix_scheduler:" in caught and fragment in caught,
             f"incompatible config {label} did not fail in the extension: {caught}",
         )
         rejected.append(label)
         emit({"event": "check", "step": 0, "name": label, "rejected": True, "error": caught})
     for mode, window in [("prefix", 1), ("guarded", 16)]:
+        label = "window1_apc_off" if window == 1 else "guarded"
+        fragment = "APC enabled" if window == 1 else "guarded"
+
+        def checked_special(vc, kv, args, mode=mode, window=window, label=label, fragment=fragment):
+            effective = {
+                "mode": vc.additional_config["prefix_scheduler"]["mode"],
+                "window": vc.additional_config["prefix_scheduler"]["window"],
+                "apc": vc.cache_config.enable_prefix_caching,
+            }
+            expected = {"mode": mode, "window": window, "apc": False}
+            require(effective == expected, "negative fast-path fixture did not take effect")
+            emit(
+                {
+                    "event": "negative_config",
+                    "step": 0,
+                    "name": label,
+                    "effective": effective,
+                    "expected": expected,
+                    "error_fragment": fragment,
+                }
+            )
+
         caught = None
         try:
-            scheduler = create_scheduler(config, mode, model_path, apc=False, window=window)
+            scheduler = create_scheduler(
+                config, mode, model_path, apc=False, window=window, mutate=checked_special
+            )
         except (ValueError, RuntimeError, NotImplementedError) as error:
             caught = str(error)
         else:
             scheduler.shutdown()
-        require(caught is not None, "fast-path configuration bypassed validation")
+        require(
+            caught is not None and fragment in caught,
+            "fast-path configuration bypassed target validation",
+        )
         label = "window1_apc_off" if window == 1 else "guarded"
         rejected.append(label)
         emit({"event": "check", "step": 0, "name": label, "rejected": True, "error": caught})

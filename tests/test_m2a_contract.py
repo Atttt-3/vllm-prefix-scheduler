@@ -1,6 +1,7 @@
 """Local gate regressions; these are not native scheduler evidence."""
 
 import copy
+import importlib.util
 import json
 import os
 import subprocess
@@ -147,3 +148,70 @@ def test_empty_trace_and_invalid_config_never_pass(tmp_path, config):
         )
         assert result.returncode != 0
         assert 'verified": true' not in result.stdout
+
+
+@pytest.fixture(scope="module")
+def auditor():
+    spec = importlib.util.spec_from_file_location(
+        "m2a_audit_gate_tests", ROOT / "tests/native/m2a_trace_check.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_clock_normalization_preserves_aliases_and_nonclock_content(auditor):
+    def event(lifetime, aliases):
+        return {
+            "type": "vllm.v1.metrics.stats.KVCacheEvictionEvent",
+            "fields": {
+                "lifetime_seconds": lifetime,
+                "idle_seconds": lifetime,
+                "reuse_gaps_seconds": {"ref": aliases},
+            },
+        }
+
+    assert auditor.normalized(event(1.5, 12)) == auditor.normalized(event(2.5, 12))
+    assert auditor.normalized(event(1.5, 12)) != auditor.normalized(event(1.5, 13))
+    assert auditor.normalized({"timestamp": 1}) != auditor.normalized({"timestamp": 2})
+    with pytest.raises(ValueError, match="alias"):
+        auditor.normalized(event(1.5, -1))
+    enum_field = {"type": {"enum": "vllm.v1.engine.EngineCoreEventType", "name": "QUEUED"}}
+    assert auditor.normalized(enum_field) == enum_field
+
+
+def test_identity_normalization_preserves_alias_relationships(auditor):
+    first = {"identities": {"request": 10, "view": 10}}
+    same = {"identities": {"request": 20, "view": 20}}
+    changed = {"identities": {"request": 20, "view": 30}}
+    assert auditor.normalized(first) == auditor.normalized(same)
+    assert auditor.normalized(first) != auditor.normalized(changed)
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [{"event": "output_after", "output_step": 1, "pending_outputs": 0}],
+        [{"event": "schedule_after", "step": 1, "pending_outputs": 1}],
+        [
+            {"event": "schedule_after", "step": 1, "pending_outputs": 1},
+            {"event": "output_after", "output_step": 2, "pending_outputs": 0},
+        ],
+    ],
+)
+def test_fifo_gate_rejects_orphan_pending_and_reordered_outputs(auditor, events):
+    with pytest.raises(ValueError):
+        auditor.audit_fifo(events)
+
+
+def test_case_labels_and_success_flags_cannot_replace_native_trace(tmp_path, config, auditor):
+    events = []
+    for case, metadata in expected_cases(config).items():
+        events.append({"case": case, **metadata, "event": "case_begin"})
+        events.append(
+            {"case": case, **metadata, "event": "case_end", "result": {"status": "passed"}}
+        )
+    trace = tmp_path / "claims-only.jsonl"
+    trace.write_text("\n".join(json.dumps(event) for event in events))
+    with pytest.raises(ValueError, match="native_objects"):
+        auditor.assert_trace(trace, config)

@@ -354,6 +354,7 @@ def assert_trace(trace_path, config=None):
             result = audit_scenario(events, metadata, config, counts, pairs, maximum)
             results[case] = {"dispatch": counts, "maximum_pending": maximum, **result}
     audit_equivalence(cases, expected)
+    audit_warm_states(cases, expected)
     return {"matrix_verified": True, "case_count": len(results), "cases": results}
 
 
@@ -598,6 +599,17 @@ def audit_window_case(events, name, config):
     return {"checks": counts, "restored_or_ordered": True}
 
 
+def typed_values(obj, type_name):
+    if isinstance(obj, list):
+        for value in obj:
+            yield from typed_values(value, type_name)
+    elif isinstance(obj, dict):
+        if obj.get("type") == type_name:
+            yield obj
+        for value in obj.values():
+            yield from typed_values(value, type_name)
+
+
 def audit_probe(events):
     before = {e["probe_id"]: e for e in rows(events, "probe_before")}
     after = {e["probe_id"]: e for e in rows(events, "probe_after")}
@@ -624,6 +636,7 @@ def audit_probe(events):
         full = first["state"]["full"]
         required_full = {
             "requests",
+            "graph",
             "identities",
             "blocks",
             "hash_mapping_ordered",
@@ -674,9 +687,61 @@ def audit_probe(events):
         != controls["sensitivity_touch"]["after"]["free_queue"],
         "snapshot cannot detect touch",
     )
+    start, finish = one(events, "post_probe_begin"), one(events, "post_probe_end")
+    start_index, end_index = events.index(start), events.index(finish)
+    require(start_index < end_index, "post-probe native lifecycle boundaries reversed")
     require(
-        rows(events, "published") and rows(events, "output_stats"),
-        "legal native statistics/events were not preserved",
+        start["state"]["full"]["events"] == [],
+        "post-probe native phase starts with unrelated buffered events",
+    )
+    native_phase = events[start_index + 1 : end_index]
+    require(
+        all(e.get("event") != "check" for e in native_phase),
+        "sensitivity controls contaminated native post-probe evidence",
+    )
+    published = rows(native_phase, "published")
+    outputs = rows(native_phase, "output_stats")
+    require(
+        published and outputs, "post-probe native phase lacks its own published events/statistics"
+    )
+    stored = [
+        obj
+        for event in published
+        for obj in typed_values(event["batch"], "vllm.distributed.kv_events.BlockStored")
+    ]
+    require(
+        any(
+            obj["fields"]["block_size"] == 16
+            and obj["fields"]["token_ids"] == list(range(100, 132))
+            for obj in stored
+        ),
+        "post-probe normal lookup did not publish the reused prefix",
+    )
+    stats = [
+        obj["fields"]
+        for event in outputs
+        for obj in typed_values(event["outputs"], "vllm.v1.metrics.stats.PrefixCacheStats")
+    ]
+    require(
+        sum(v["requests"] for v in stats) == 1
+        and sum(v["queries"] for v in stats) == 33
+        and sum(v["hits"] for v in stats) == 32,
+        "post-probe native statistics were lost or duplicated",
+    )
+    normal_dispatch = [
+        i
+        for e in rows(native_phase, "dispatch")
+        for i in e["intervals"]
+        if i["request_id"] == "full"
+    ]
+    require(
+        normal_dispatch and sum(i["prefill_tokens"] for i in normal_dispatch) == 1,
+        "post-probe request did not use native last-token dispatch",
+    )
+    require(rows(native_phase, "drained"), "post-probe request did not complete native lifecycle")
+    require(
+        all(events.index(control) > end_index for control in controls.values()),
+        "sensitivity controls ran before the isolated normal phase",
     )
     return {"probe_scores": expected, "exact_state_preserved": True}
 
@@ -904,6 +969,11 @@ def clock_shape(obj):
         return None
     if isinstance(obj, list):
         return [clock_shape(v) for v in obj]
+    if isinstance(obj, dict) and set(obj) == {"ref"}:
+        require(
+            type(obj["ref"]) is int and obj["ref"] >= 0, "invalid serialized clock-vector alias"
+        )
+        return obj.copy()
     require(
         type(obj) in (int, float) and math.isfinite(obj) and obj >= 0, "invalid native clock value"
     )
@@ -917,7 +987,8 @@ def normalized(obj):
     if not isinstance(obj, dict):
         return obj
     output = {}
-    typed_clock_fields = CLOCK_FIELDS.get(obj.get("type"), set())
+    typename = obj.get("type")
+    typed_clock_fields = CLOCK_FIELDS.get(typename, set()) if type(typename) is str else set()
     for key, val in obj.items():
         if key == "fields" and typed_clock_fields:
             output[key] = {
@@ -993,6 +1064,24 @@ def audit_equivalence(cases, expected):
             raise ValueError(
                 f"M2A off/native behavior differs for {case} at normalized event {first}"
             )
+
+
+def audit_warm_states(cases, expected):
+    """All three modes and repeats start BC from the same full cache state."""
+    initial = {}
+    for case, meta in expected.items():
+        if meta["scenario"] not in {"bc_pressure", "bc_ample"}:
+            continue
+        state = normalized(one(cases[case], "A_cached_and_evictable")["state"])
+        scenario = meta["scenario"]
+        if scenario in initial:
+            require(state == initial[scenario], f"{scenario} warm state differs across mode/repeat")
+        else:
+            initial[scenario] = state
+    require(
+        set(initial) == {"bc_pressure", "bc_ample"},
+        "BC capacity controls have no complete initial states",
+    )
 
 
 def main():
