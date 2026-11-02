@@ -699,9 +699,19 @@ def audit_identity(events, metadata, config):
         and native["effective_config"]["active"] == active,
         "effective native fixture geometry differs",
     )
+    expected_parallel = {
+        "tensor_parallel_size": 1,
+        "pipeline_parallel_size": 1,
+        "data_parallel_size": 1,
+        "decode_context_parallel_size": 1,
+        "prefill_context_parallel_size": 1,
+    }
+    actual_parallel = native["effective_config"].get("parallel")
     require(
-        all(type(v) is int and v == 1 for v in native["effective_config"]["parallel"].values()),
-        "unsupported native parallel shape",
+        type(actual_parallel) is dict
+        and set(actual_parallel) == set(expected_parallel)
+        and all(type(value) is int and value == 1 for value in actual_parallel.values()),
+        "effective native parallel semantics changed",
     )
     if metadata["mode"] != "native":
         window = (

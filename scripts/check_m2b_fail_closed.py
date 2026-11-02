@@ -151,6 +151,11 @@ def primitive_definitions():
             ].update(sha256="0" * 64),
         ),
         (
+            "parallel_fields_missing",
+            lambda e: e["event"] == "native_objects",
+            lambda es, i: es[i]["effective_config"].update(parallel={}),
+        ),
+        (
             "false_fault",
             lambda e: e.get("guard", {}).get("present") is True,
             lambda es, i: es[i]["guard"].update(fault_code="native_schedule"),
@@ -180,6 +185,7 @@ PRIMITIVE_ERRORS = {
     "native_return_missing": "unfinished native call",
     "native_dispatch_return_missing": "actual native return/dispatch/outer output steps differ",
     "native_source_hash": "unverified native class source",
+    "parallel_fields_missing": "effective native parallel semantics changed",
     "false_fault": "fault state differs from causal events",
     "wrong_case_label": "excerpt case mislabeled",
 }

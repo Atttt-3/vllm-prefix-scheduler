@@ -214,3 +214,58 @@ def test_compat_suite_cannot_be_used_to_shrink_frozen_config(config):
     config["scenarios"].pop("hot_flow")
     with pytest.raises(ValueError, match="50-combination"):
         expected_cases(config, suite="compat")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda value: value.clear(),
+        lambda value: value.pop("data_parallel_size"),
+        lambda value: value.update(unreviewed_parallel_size=1),
+        lambda value: value.update(tensor_parallel_size=True),
+        lambda value: value.update(pipeline_parallel_size=1.0),
+        lambda value: value.update(prefill_context_parallel_size=2),
+    ],
+)
+def test_native_parallel_observation_requires_exact_nonempty_fields(auditor, config, mutation):
+    """A valid read-only identity record is the control for each raw-field corruption."""
+    native = {
+        "event": "native_objects",
+        "class": auditor.legacy.NATIVE_CLASS,
+        "mro": [auditor.legacy.NATIVE_CLASS, "vllm.v1.core.sched.scheduler.Scheduler"],
+        "async_scheduling": True,
+        "use_v2_model_runner": True,
+        "log_stats": True,
+        "kv_events": True,
+        "kv_metrics": True,
+        "apc": True,
+        "block_size": 16,
+        "publisher": "NullEventPublisher",
+        "max_concurrent_batches": 2,
+        "capacity": 10,
+        "effective_config": {
+            "budget": 64,
+            "active": 2,
+            "parallel": {
+                "tensor_parallel_size": 1,
+                "pipeline_parallel_size": 1,
+                "data_parallel_size": 1,
+                "decode_context_parallel_size": 1,
+                "prefill_context_parallel_size": 1,
+            },
+        },
+        "sources": {
+            auditor.legacy.NATIVE_CLASS: {
+                "sha256": config["source_sha256"]["vllm/v1/core/sched/async_scheduler.py"]
+            },
+            "vllm.v1.core.sched.scheduler.Scheduler": {
+                "sha256": config["source_sha256"]["vllm/v1/core/sched/scheduler.py"]
+            },
+        },
+        "instance_fields": [],
+    }
+    metadata = {"scenario": "bc_ample", "mode": "native", "variant": "default"}
+    assert auditor.audit_identity([native], metadata, config) is native
+    mutation(native["effective_config"]["parallel"])
+    with pytest.raises(ValueError, match="effective native parallel semantics changed"):
+        auditor.audit_identity([native], metadata, config)
