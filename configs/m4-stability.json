@@ -1,0 +1,1306 @@
+{
+  "schema_version": 1,
+  "task_id": "M4-scheduler-stability",
+  "baseline_commit": "12705a8e392eaa90c019de8e347ee31134ab3ca4",
+  "upstream_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "tokenizer_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "window": 16,
+  "max_wait_ms": 500,
+  "seeds": [
+    17,
+    29,
+    43
+  ],
+  "repeats": 3,
+  "native_rounds_per_seed": 100,
+  "gpu_profile_id": "capacity1025-v1-candidate",
+  "profile_status": "requires_real_calibration",
+  "gpu_profile": {
+    "dtype": "bfloat16",
+    "tensor_parallel_size": 1,
+    "max_model_len": 16384,
+    "max_num_seqs": 2,
+    "max_num_batched_tokens": 2048,
+    "gpu_memory_utilization": 0.85,
+    "enable_prefix_caching": true,
+    "async_scheduling": true,
+    "enable_chunked_prefill": true,
+    "enforce_eager": true,
+    "seed": 42,
+    "trust_remote_code": false,
+    "disable_log_stats": false,
+    "max_num_active_seqs": 2,
+    "num_gpu_blocks_override": 1025,
+    "long_prefill_token_threshold": 1024,
+    "long_prefill_token_threshold_adaptive": false,
+    "kv_events_config": {
+      "enable_kv_cache_events": true,
+      "publisher": "null"
+    },
+    "kv_cache_metrics": true,
+    "kv_cache_metrics_sample": 1.0
+  },
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 32,
+    "ignore_eos": true,
+    "seed": 42,
+    "extra_args": {
+      "kv_cache_report_mode": "full"
+    }
+  },
+  "inputs": {
+    "construction": "exact token-length crops of real fixed tokenizer output from distinct public synthetic text; token IDs frozen before collector",
+    "chunk_tokens": 8192,
+    "pressure_tokens_each": 8192,
+    "pressure_requests": 2,
+    "pending_cancel_tokens": 8192,
+    "pending_cancel_max_output": 512,
+    "short_tokens": 256,
+    "prefix_shared_tokens": 512
+  },
+  "environment": {
+    "PYTHONHASHSEED": "42",
+    "VLLM_USE_V2_MODEL_RUNNER": "1",
+    "VLLM_DISABLE_REQUEST_ID_RANDOMIZATION": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1"
+  },
+  "timing": {
+    "case_timeout_s": 90,
+    "drain_timeout_s": 15,
+    "engine_timeout_s": 300,
+    "allocation_work_timeout_s": 1110
+  },
+  "gpu_matrix": [
+    {
+      "scenario": "chunk_complete",
+      "mode": "native",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "native",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "native",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "off",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "off",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "off",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "prefix",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "prefix",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "prefix",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "guarded",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "guarded",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "chunk_complete",
+      "mode": "guarded",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "native",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "native",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "native",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "off",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "off",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "off",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "prefix",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "prefix",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "prefix",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "guarded",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "guarded",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "capacity_preempt_resume",
+      "mode": "guarded",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "native",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "native",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "native",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "off",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "off",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "off",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "waiting_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "native",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "native",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "native",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "off",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "off",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "off",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "prefix",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "pending_cancel_reuse",
+      "mode": "guarded",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "native",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "native",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "native",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "off",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "off",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "off",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "prefix",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "prefix",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "prefix",
+      "repeat": 2,
+      "seed": 43
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "guarded",
+      "repeat": 0,
+      "seed": 17
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "guarded",
+      "repeat": 1,
+      "seed": 29
+    },
+    {
+      "scenario": "full_events_probe",
+      "mode": "guarded",
+      "repeat": 2,
+      "seed": 43
+    }
+  ],
+  "native_matrix": {
+    "modes": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "seeds": [
+      17,
+      29,
+      43
+    ],
+    "rounds_per_seed": 100,
+    "guard_fault_closed_modes": [
+      "guarded"
+    ],
+    "prepend_recovery_modes": [
+      "prefix",
+      "guarded"
+    ],
+    "max_steps_per_phase": 256,
+    "leaves": [
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "native",
+        "seed": 17,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "native",
+        "seed": 29,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "native",
+        "seed": 43,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "off",
+        "seed": 17,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "off",
+        "seed": 29,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "off",
+        "seed": 43,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "prefix",
+        "seed": 17,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "prefix",
+        "seed": 29,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "prefix",
+        "seed": 43,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "guarded",
+        "seed": 17,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "guarded",
+        "seed": 29,
+        "rounds": 100
+      },
+      {
+        "scenario": "long_cycle",
+        "variant": "complete_cancel_reuse",
+        "mode": "guarded",
+        "seed": 43,
+        "rounds": 100
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "native",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "native",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "native",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "off",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "off",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "off",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "chunk_barrier",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "native",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "native",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "native",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "off",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "off",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "off",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "async_interleave",
+        "variant": "capacity_preempt_resume",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_head",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "blocked_middle",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "partial_prefill",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "in_flight",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "placeholder",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stale",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "preempted_zero",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "window_tail_age",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "stable_ties",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "prefix",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "prefix",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "prefix",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "barriers",
+        "variant": "prepend_failure",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_schedule_fault",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_schedule_fault",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_schedule_fault",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_free_fault",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_free_fault",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "native_free_fault",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "shutdown_closed",
+        "mode": "guarded",
+        "repeat": 0,
+        "seed": 17
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "shutdown_closed",
+        "mode": "guarded",
+        "repeat": 1,
+        "seed": 29
+      },
+      {
+        "scenario": "terminal_contract",
+        "variant": "shutdown_closed",
+        "mode": "guarded",
+        "repeat": 2,
+        "seed": 43
+      }
+    ]
+  },
+  "overhead": {
+    "modes": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "workloads": [
+      "cold",
+      "tied_hot",
+      "mixed"
+    ],
+    "windows": [
+      8,
+      16,
+      32
+    ],
+    "outside_lengths": [
+      0,
+      128,
+      4096
+    ],
+    "repeats": 5,
+    "samples_per_repeat": 100,
+    "warmup_samples": 20,
+    "clock": "perf_counter_ns",
+    "observer_io": false,
+    "snapshot_io": false,
+    "sampling_unit": "one local waiting-window transaction; separate native/off schedule calls"
+  },
+  "budget": {
+    "max_allocations": 3,
+    "gpus_per_allocation": 1,
+    "max_minutes_per_allocation": 20,
+    "max_requested_minutes": 60,
+    "serial": true,
+    "all_attempts_recorded": true,
+    "no_unknown_terminal_exception": true
+  },
+  "production_policy_change": false,
+  "regressions": {
+    "m2b_suite": "compat",
+    "m2b_cases": 432,
+    "m1_cases": 12,
+    "if_production_behavior_changes": "full M2B636 + relevant fail-closed + M3 complete20 + affected complete M4 at one new freeze"
+  },
+  "extra_upstream_sha256": {
+    "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/engine/core_client.py": "386b528a69029507f80a2df4d6df2a4fa6ba2ba811501dc3449ceea58b5cd90a",
+    "vllm/v1/engine/input_processor.py": "97f66659814177d3f7b72b959f09201cbdd1794de21ec1542fe8970f18a1a2b6",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/worker/gpu_worker.py": "e970aa29a738aa15cd963d9f9202ca6d3d504e98fd344959fd998e940472a5a0"
+  },
+  "model_files": {
+    "config.json": {
+      "size": 726,
+      "content_id": "e49eccdc32f36da9c09cfa0e737084f9e0105e5e",
+      "kind": "git_blob_sha1"
+    },
+    "generation_config.json": {
+      "size": 239,
+      "content_id": "20a8a9156fc8c3f25295ca067f61fdf120d517c5",
+      "kind": "git_blob_sha1"
+    },
+    "merges.txt": {
+      "size": 1671853,
+      "content_id": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+      "kind": "git_blob_sha1"
+    },
+    "model-00001-of-00003.safetensors": {
+      "size": 3957900840,
+      "content_id": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
+      "kind": "lfs_sha256"
+    },
+    "model-00002-of-00003.safetensors": {
+      "size": 3987450520,
+      "content_id": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
+      "kind": "lfs_sha256"
+    },
+    "model-00003-of-00003.safetensors": {
+      "size": 99630640,
+      "content_id": "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1",
+      "kind": "lfs_sha256"
+    },
+    "model.safetensors.index.json": {
+      "size": 32819,
+      "content_id": "95c0a0059df040d75dc6c396b174382cf61d2f91",
+      "kind": "git_blob_sha1"
+    },
+    "tokenizer.json": {
+      "size": 11422654,
+      "content_id": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+      "kind": "lfs_sha256"
+    },
+    "tokenizer_config.json": {
+      "size": 9732,
+      "content_id": "417d038a63fa3de29cfde265caedae14d1a58d92",
+      "kind": "git_blob_sha1"
+    },
+    "vocab.json": {
+      "size": 2776833,
+      "content_id": "4783fe10ac3adce15ac8f358ef5462739852c569",
+      "kind": "git_blob_sha1"
+    }
+  }
+}
