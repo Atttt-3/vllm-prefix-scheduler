@@ -6,7 +6,7 @@ Read `docs/state.md`, `docs/project-plan.md`, `docs/architecture.md`, and releva
 
 ## Current scope
 
-The custom scheduler is not implemented. The completed native run validates Python/vLLM installation, Qwen3-4B BF16 inference, APC reuse, and async configuration. Do not describe this as a scheduler optimization result. Begin scheduler work by reproducing the B/C cache-eviction counterexample in the pinned native Scheduler.
+M1 and M2A have passed project acceptance at their recorded commits. M2A validates off/prefix scheduling with host-side native metadata and dispatched tokens, not model execution or GPU performance. This branch adds M2B monotonic initial-wait protection and object-bound lifecycle metadata; its native acceptance must use the new M2B contract and evidence. Keep M1/M2A historical matrices unchanged. Do not advance to real-model or performance work or merge the stacked PRs automatically.
 
 ## Runtime and implementation boundaries
 
