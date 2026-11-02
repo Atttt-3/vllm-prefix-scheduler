@@ -123,3 +123,17 @@ M3完整20模型闭环。失败留存且不跨冻结拼case。raw独审不信pas
 新原件位于 `runs/m4-scheduler-stability/<run-id>/`；复用schema2采集器，原始pending acceptance不事后重绑。
 白名单导出绑定原件hash，排除连接/账号/内网/路径/PID/job身份/原始文本/权重。最终交接提供A–F行号、成本表、
 基线/实际被测/交付SHA及差异、失败、复放、预算释放、工作区保护与全部PR未合并证明，停在总站待验收。
+
+
+## B实现与封版前审查（2026-11-03）
+
+生产策略四文件未改。新增独立observer/弱代际原生driver/GPU fixture、raw contract及子进程正负控、CPU局部测量、M4 launcher和白名单导出。GPU仍无M4已验证结论。
+
+CPU-only guard阈值明确为3,600,000ms，使用真实monotonic保证本次样本为未过期评分分支；GPU仍500ms。
+恢复路径的deque原语绕过队列方法包装，因此另用counter-only profile重放，按真实C原语调用与队列长度变化计数，完全排除在计时样本外。off/native测PAUSED_ALL原生schedule，prefix/guarded测有限窗口事务，单位不同，不作直接差值加速结论。
+
+105叶中fault测试为窄分支；额外同提交跑原M2B完整636保留有存活对象的fault/closed/shutdown合同，与compat432/M1原12分别存档。未知/重复终止每长循环轮执行并存原输入，off/prefix构造及运行保护时钟实际计数且一读即拒绝。
+
+独审实际复现了旧通用collector两秒强杀启动器后可留下独立进程组子进程的边界。M4不改旧collector：新增先落持久owner、再ack、再exec引擎的窄握手，allocation在GPU步骤结束及finally独立清理所属组。本地真实子进程反例与修复验证均保留；启动失败也验证exit/checkpoint仍落盘。网络查询非零或未知均阻断；提交运输错误保留ambiguous，不当作未提交；watcher超时仅清理本watcher组，不据此声称GPU作业已结束。
+
+原始正负控派生输入永久保留，可按完整argv复放。子进程正控和本地合成契约测试不认证GPU。完整本地检查实际native opt-in三项skip须逐项披露；后续首次分配专用于真实校准，未触发前提的case保持失败。

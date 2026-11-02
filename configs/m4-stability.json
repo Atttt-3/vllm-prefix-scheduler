@@ -39,7 +39,10 @@
       "publisher": "null"
     },
     "kv_cache_metrics": true,
-    "kv_cache_metrics_sample": 1.0
+    "kv_cache_metrics_sample": 1.0,
+    "block_size": 16,
+    "scheduler_reserve_full_isl": true,
+    "watermark": 0.0
   },
   "sampling": {
     "temperature": 0,
@@ -1192,7 +1195,16 @@
         "repeat": 2,
         "seed": 43
       }
-    ]
+    ],
+    "required_round_actions": [
+      "complete",
+      "waiting_cancel",
+      "pending_cancel",
+      "unknown_finish",
+      "duplicate_finish",
+      "drained_id_reuse_complete"
+    ],
+    "off_prefix_require_no_guard_or_protection_clock": true
   },
   "overhead": {
     "modes": [
@@ -1222,7 +1234,9 @@
     "clock": "perf_counter_ns",
     "observer_io": false,
     "snapshot_io": false,
-    "sampling_unit": "one local waiting-window transaction; separate native/off schedule calls"
+    "sampling_unit": "one local waiting-window transaction; separate native/off schedule calls",
+    "guard_max_wait_ms": 3600000,
+    "guard_age_condition": "unexpired; real monotonic clock; one-hour CPU-only threshold"
   },
   "budget": {
     "max_allocations": 3,
@@ -1238,7 +1252,10 @@
     "m2b_suite": "compat",
     "m2b_cases": 432,
     "m1_cases": 12,
-    "if_production_behavior_changes": "full M2B636 + relevant fail-closed + M3 complete20 + affected complete M4 at one new freeze"
+    "if_production_behavior_changes": "full M2B636 + relevant fail-closed + M3 complete20 + affected complete M4 at one new freeze",
+    "supplemental_m2b_suite": "full",
+    "supplemental_m2b_cases": 636,
+    "supplemental_reason": "same-freeze active-object fault/closed/shutdown contract coverage; M4 fault leaves remain narrow"
   },
   "extra_upstream_sha256": {
     "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
@@ -1249,7 +1266,9 @@
     "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
     "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
     "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
-    "vllm/v1/worker/gpu_worker.py": "e970aa29a738aa15cd963d9f9202ca6d3d504e98fd344959fd998e940472a5a0"
+    "vllm/v1/worker/gpu_worker.py": "e970aa29a738aa15cd963d9f9202ca6d3d504e98fd344959fd998e940472a5a0",
+    "vllm/engine/arg_utils.py": "c10281277fd9a90dc8b22670db4f1af53708c5caa2aefee7aa861fa579329219",
+    "vllm/config/utils.py": "eb3f40bb32522dfdd802f9c456184c501d30dc0fcd36d0edebcb04b510e3ec8b"
   },
   "model_files": {
     "config.json": {
