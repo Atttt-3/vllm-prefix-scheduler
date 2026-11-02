@@ -39,7 +39,7 @@ flowchart TD
   F --> H[原生重新查找 分配 抢占及异步占位]
 ```
 
-M2B 在本分支启用 `guarded`，具体合同见 [M2B 设计](research/m2b-wait-guard.md)。只有 guarded 创建实际 Request 对象绑定的保护记录；首次成功入队后登记，父类 schedule 成功返回正 token 输出后定向清理，抢占和终止使用窄包装清理，shutdown 在 finally 清表并关闭保护状态。原生输出更新和模型执行不变；running 阶段可能改变评分时的缓存，后续原生重新查找和分配仍具有最终决定权。合成 runner 回归不运行模型或 KV tensor 计算。
+M2B 在本分支启用 `guarded`，新增 `wait_guard.py`；完整状态机见 [M2B 设计](research/m2b-wait-guard.md)，固定Linux验收与限制见 [M2B交接](research/m2b-handoff.md)。只有 guarded 创建实际 Request 对象绑定的保护记录；首次成功入队后登记，父类 schedule 成功返回正 token 输出后定向清理，抢占和终止使用窄包装清理，shutdown 在 finally 清表并关闭保护状态。原生输出更新和模型执行不变；running 阶段可能改变评分时的缓存，后续原生重新查找和分配仍具有最终决定权。合成 runner 回归不运行模型或 KV tensor 计算。
 
 ## 配置与回退
 
@@ -57,7 +57,7 @@ off 直接调用原生 schedule，不访问窗口、评分或等待时钟，支�
 
 guarded 的时钟错误、缺记录及可能部分修改原生状态的生命周期异常锁定实例；正常取消与清理仍可执行。故障只保存简单代码，不持有异常/traceback。shutdown 后不可重新 add/schedule；保护清零不等于原生请求、pending 或 KV 排空。详细状态机与失败合同见 M2B 设计。off/prefix 不创建保护表、不调用保护时钟。
 
-真实 chunk 保持 running 优先级；抢占即使进度归零也由抢占历史、in-flight/stale 等字段排除。窗口不修改 `running`、`kv_holding_waiting` 或 `deferred_waiting`。原生自身跳过 blocked 请求与插件跨屏障重排分别判定。取消时保留的历史对象字段不等同于活跃引用泄漏；ID 复用仅在旧代 pending 排空后验证。测试 generation ledger 不进入生产类。
+真实 chunk 保持 running 优先级；抢占即使进度归零也由抢占历史、in-flight/stale 等字段排除。窗口不修改 `running`、`kv_holding_waiting` 或 `deferred_waiting`。原生自身跳过 blocked 请求与插件跨屏障重排分别判定。取消时保留的历史对象字段不等同于活跃引用泄漏；ID 复用仅在旧代 pending、终止通知和资源排空后验证。固定原生has_requests包含finished通知，真实空输出沿原生FIFO消费；新增边界后置条件同时检查这些状态。测试 generation ledger 不进入生产类。
 
 ## 验证层次
 

@@ -6,7 +6,7 @@ Read `docs/state.md`, `docs/project-plan.md`, `docs/architecture.md`, and releva
 
 ## Current scope
 
-M1 and M2A have passed project acceptance at their recorded commits. M2A validates off/prefix scheduling with host-side native metadata and dispatched tokens, not model execution or GPU performance. This branch adds M2B monotonic initial-wait protection and object-bound lifecycle metadata; its native acceptance must use the new M2B contract and evidence. Keep M1/M2A historical matrices unchanged. Do not advance to real-model or performance work or merge the stacked PRs automatically.
+M1 and M2A have passed project acceptance at their recorded commits. M2A validates off/prefix scheduling with host-side native metadata and dispatched tokens, not model execution or GPU performance. This branch adds M2B monotonic initial-wait protection and object-bound lifecycle metadata. Its pinned native validation and independent review are complete at the commit recorded in docs/research/m2b-handoff.md; project acceptance is still pending. Current compatibility uses the new M2B contract and evidence. Keep M1/M2A historical matrices unchanged. Do not advance to real-model or performance work or merge the stacked PRs automatically.
 
 ## Runtime and implementation boundaries
 
