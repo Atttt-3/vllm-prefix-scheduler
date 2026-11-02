@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "record_type": "prospective_budget_authorization_only",
+  "task_id": "M3-real-model-integration",
+  "authorization_source": "User-approved M3 closeout plan in this conversation: four additional GPU allocations",
+  "prior_gpu_native_tested_commit": "403b7838e46ecf17a97cc14de0a1f048938dfbd8",
+  "original_runtime_config": "configs/m3-real-model.json",
+  "original_runtime_config_sha256": "ad0c99c8fa06d12e8f48921486029ab60da9e88c07497598186fa8a168e8e836",
+  "original_allocation_limit": 4,
+  "additional_allocation_limit": 4,
+  "cumulative_allocation_limit": 8,
+  "max_minutes_per_allocation": 20,
+  "gpus_per_allocation": 1,
+  "gpu_model": "RTX 3090",
+  "serial_execution_required": true,
+  "failed_allocations_and_retries_count": true,
+  "historical_allocations_must_be_retained": true,
+  "historical_terminal_evidence_required": true,
+  "allocate_while_waiting_for_historical_record": false,
+  "separate_frozen_supplemental_runtime_config_required": true,
+  "compatible_budget_auditor_and_exporter_required_before_new_allocation": true
+}

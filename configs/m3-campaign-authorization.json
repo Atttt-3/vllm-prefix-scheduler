@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "task_id": "M3-real-model-integration",
+  "prior_gpu_native_tested_commit": "403b7838e46ecf17a97cc14de0a1f048938dfbd8",
+  "original_runtime_config": "configs/m3-real-model.json",
+  "original_runtime_config_sha256": "ad0c99c8fa06d12e8f48921486029ab60da9e88c07497598186fa8a168e8e836",
+  "original_allocation_limit": 4,
+  "additional_allocation_limit": 4,
+  "cumulative_allocation_limit": 8,
+  "max_minutes_per_allocation": 20,
+  "gpus_per_allocation": 1,
+  "gpu_model": "RTX 3090",
+  "serial_execution_required": true,
+  "failed_allocations_and_retries_count": true,
+  "historical_allocations_must_be_retained": true,
+  "separate_frozen_supplemental_runtime_config_required": true,
+  "compatible_budget_auditor_and_exporter_required_before_new_allocation": true,
+  "record_type": "replacement_campaign_authorization",
+  "authorization_source": "User approved the complete replacement-campaign replay with permanent historical disclosure on 2026-11-03",
+  "previous_authorization": {
+    "path": "configs/m3-closeout-authorization.json",
+    "sha256": "99ff75d5553036b64fc4c3ebc56dbf7a324ae6eb8e6b03bc6f41e8e428f253b1"
+  },
+  "acceptance_scope": "replacement_campaign_with_retained_history_exception",
+  "historical_terminal_status": "unverifiable",
+  "original_full_history_gate": "blocked",
+  "new_campaign_terminal_evidence_required": true,
+  "old_unknown_cannot_cover_new_allocation": true,
+  "administrator_recovery_is_prerequisite": false
+}

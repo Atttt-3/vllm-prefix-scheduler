@@ -63,3 +63,14 @@ script-syntax:
 	@for script in scripts/*.sh scripts/*.sbatch; do bash -n "$$script" || exit; done
 
 check: lint script-syntax test evidence build
+
+# M3 integration uses the existing runtime; these targets never install GPU dependencies.
+.PHONY: m3-real-model m3-trace-check m3-fail-closed
+m3-real-model:
+	"$(NATIVE_PYTHON)" scripts/run_m3_suite.py $(value ARGS)
+
+m3-trace-check:
+	"$(NATIVE_PYTHON)" scripts/check_m3_trace.py $(value ARGS)
+
+m3-fail-closed:
+	"$(NATIVE_PYTHON)" scripts/check_m3_fail_closed.py $(value ARGS)
