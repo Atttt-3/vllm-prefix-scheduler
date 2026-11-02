@@ -86,7 +86,13 @@ def batch_fixture():
         envelope("runner_sample_success", 5, **common, result_kind="async"),
         envelope("model_output_materialized", 6, **common, **output),
         envelope("update_from_output_start", 7, **common, **output),
-        envelope("update_from_output_success", 8, **common, **output),
+        envelope(
+            "update_from_output_success",
+            8,
+            **common,
+            **output,
+            engine_outputs=[{"request_id": rid, "new_token_ids": [7], "finish_reason": None}],
+        ),
     ]
 
 
@@ -238,3 +244,31 @@ def test_real_subprocess_contract_positive_and_negatives(tmp_path):
                 "optimized": "assertions enabled",
             }[name]
             assert expected in result.stderr
+
+
+def test_complete_fixture_real_subprocess_controls(tmp_path):
+    """All cases and chains, explicitly synthetic; this is contract validation only."""
+    from m3_trace_fixture import build_fixture
+
+    fixture = build_fixture(tmp_path / "fixture")
+    command = [
+        sys.executable,
+        str(ROOT / "scripts/check_m3_fail_closed.py"),
+        "--config",
+        str(fixture["config_path"]),
+        "--inputs",
+        str(fixture["inputs_path"]),
+        "--trace-dir",
+        str(fixture["trace_path"]),
+        "--resources",
+        str(fixture["resources_path"]),
+        "--output",
+        str(tmp_path / "controls"),
+        "--contract-fixture",
+    ]
+    result = subprocess.run(command, text=True, capture_output=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads((tmp_path / "controls/results.json").read_text())
+    assert report["input_kind"] == "synthetic_contract_fixture"
+    assert len(report["results"]) >= 27
+    assert all(item["passed"] for item in report["results"])

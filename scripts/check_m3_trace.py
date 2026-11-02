@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--trace-dir", type=Path, required=True)
     parser.add_argument("--resources", type=Path)
+    parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument(
         "--engine-id", help="Partial engine precheck only; never complete M3 acceptance"
     )
@@ -27,6 +28,8 @@ def main():
         resources=None if args.resources is None else json.loads(args.resources.read_text()),
         engine_id=args.engine_id,
         config_sha256=sha256(args.config),
+        frozen_inputs=json.loads(args.inputs.read_text()),
+        inputs_sha256=sha256(args.inputs),
     )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

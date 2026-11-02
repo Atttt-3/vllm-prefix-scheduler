@@ -55,6 +55,16 @@ def digest(path):
     return m3_contract.sha256(path)
 
 
+def raw_trace_files(path):
+    """Match the auditor's canonical-file selection, including direct files."""
+    path = Path(path)
+    if path.is_file():
+        return [path]
+    if (path / "trace.jsonl").is_file():
+        return [path / "trace.jsonl"]
+    return sorted(path.rglob("*.jsonl"))
+
+
 def integer(value, name, minimum=0):
     require(type(value) is int and value >= minimum, f"invalid public number: {name}")
     return value
@@ -99,9 +109,13 @@ def normalized_audit(value):
     return value
 
 
-def public_source_manifest(sources, config):
+def public_source_manifest(sources, config, native_pins):
     native = sources["upstream_sha256"]
     require(type(native) is dict and native, "native source manifest missing")
+    require(
+        native == {**native_pins, **config["extra_upstream_sha256"]},
+        "native source catalog differs from frozen public allowlist",
+    )
     for name, value in native.items():
         require(
             re.fullmatch(r"vllm/[A-Za-z0-9_/]+\.py", name) is not None and ".." not in name,
@@ -245,10 +259,47 @@ def public_summary(audit, sources, config):
         cases[name] = public_case
     batches = audit["batch_audit"]
     require(
-        set(batches) == {"batches", "positive_batches", "scheduled_tokens", "physical_gpu_work"},
+        set(batches)
+        == {
+            "batches",
+            "positive_batches",
+            "scheduled_tokens",
+            "physical_gpu_work",
+            "runner_forward_tokens",
+            "runner_forward_tokens_padded",
+            "dispatch_by_request",
+        },
         "unknown batch audit fields",
     )
-    require(batches["physical_gpu_work"] == "unmeasured", "unreviewed GPU workload claim")
+    require(
+        batches["physical_gpu_work"]
+        == "runner input token counts observed; FLOPs and speedup unmeasured",
+        "unreviewed GPU workload claim",
+    )
+    forward = integer(batches["runner_forward_tokens"], "runner input tokens", 1)
+    padded = integer(batches["runner_forward_tokens_padded"], "runner padded input tokens", 1)
+    require(padded >= forward, "runner padded count is smaller than valid input count")
+    dispatch = batches["dispatch_by_request"]
+    expected_requests = {
+        f"{name}::{role}"
+        for name, metadata in expected.items()
+        if metadata["scenario"] != "smoke"
+        for role in cases[name]["requests"]
+    }
+    require(
+        type(dispatch) is dict and set(dispatch) == expected_requests,
+        "diagnostic dispatch request catalog differs",
+    )
+    for request_id, record in dispatch.items():
+        case_name, role = request_id.rsplit("::", 1)
+        require(
+            type(record) is dict and set(record) == {"prompt", "decode", "repeated", "intervals"},
+            "dispatch accounting fields differ",
+        )
+        cases[case_name]["requests"][role]["scheduler_dispatch"] = {
+            key: integer(record[key], f"scheduler {key}")
+            for key in ("prompt", "decode", "repeated")
+        }
     guard = audit["guard_lifecycle"]
     require(set(guard) == {"diagnostic-guarded"}, "guard engine catalog differs")
     guard = guard["diagnostic-guarded"]
@@ -302,6 +353,8 @@ def public_summary(audit, sources, config):
             key: integer(batches[key], key, 1)
             for key in ("batches", "positive_batches", "scheduled_tokens")
         },
+        "runner_forward_input_tokens": forward,
+        "runner_forward_input_tokens_padded": padded,
         "guard_lifecycle": {
             key: integer(guard[key], key, 1) for key in ("registered", "first_dispatch_cleared")
         },
@@ -312,7 +365,7 @@ def public_summary(audit, sources, config):
         "limits": {
             "natural_queue_fairness": "unmeasured",
             "ttft_or_throughput_improvement": "unmeasured",
-            "physical_gpu_work_or_flops": "unmeasured",
+            "flops_or_speedup": "unmeasured",
             "pause_and_wait_are_controlled_interventions": True,
             "raw_internal_evidence_published": False,
         },
@@ -322,6 +375,10 @@ def public_summary(audit, sources, config):
 def export(args):
     m3_contract.require_assertions()
     require(not args.output.exists(), "existing public evidence must not be overwritten")
+    bound_files = {
+        name: getattr(args, name) for name in ("config", "sources", "inputs", "audit", "resources")
+    }
+    bound_hashes = {name: digest(path) for name, path in bound_files.items()}
     config = json.loads(args.config.read_text())
     sources = json.loads(args.sources.read_text())
     saved = json.loads(args.audit.read_text())
@@ -339,7 +396,14 @@ def export(args):
         source_hashes.get("configs/m3-real-model.json") == digest(args.config),
         "config differs from frozen Git tree",
     )
+    raw_files = raw_trace_files(args.trace_dir)
+    require(raw_files, "raw trace catalog empty")
+    raw_hashes = {path: digest(path) for path in raw_files}
     events = m3_contract.read_events(args.trace_dir)
+    require(
+        {Path(event["_source"]) for event in events} == set(raw_files),
+        "audited raw trace catalog changed",
+    )
     ready_sources = [
         event.get("sources") for event in events if event.get("event") == "engine_ready"
     ]
@@ -348,22 +412,47 @@ def export(args):
         "provided source report differs from raw engine evidence",
     )
     resources = json.loads(args.resources.read_text())
+    frozen_inputs = json.loads(args.inputs.read_text())
     rebuilt = m3_contract.audit_trace(
-        events, config, resources=resources, config_sha256=digest(args.config)
+        events,
+        config,
+        resources=resources,
+        config_sha256=digest(args.config),
+        frozen_inputs=frozen_inputs,
+        inputs_sha256=digest(args.inputs),
     )
     require(
         normalized_audit(rebuilt) == normalized_audit(saved),
         "saved audit differs from fresh raw-event audit",
     )
     summary = public_summary(rebuilt, sources, config)
-    raw_files = sorted(args.trace_dir.rglob("*.jsonl"))
-    require(raw_files, "raw trace catalog empty")
+    require(
+        all(digest(path) == value for path, value in raw_hashes.items()),
+        "raw trace changed during audit",
+    )
+    require(
+        all(digest(path) == bound_hashes[name] for name, path in bound_files.items()),
+        "bound input changed during audit",
+    )
+    native_config = json.loads(
+        subprocess.check_output(
+            [
+                "git",
+                "-C",
+                str(ROOT),
+                "cat-file",
+                "blob",
+                f"{sources['project_commit']}:configs/native-m2b.json",
+            ]
+        )
+    )
     provenance = {
         "schema_version": 1,
         "project_commit": sources["project_commit"],
         "source_sha256": source_hashes,
-        **public_source_manifest(sources, config),
+        **public_source_manifest(sources, config, native_config["source_sha256"]),
         "config_sha256": digest(args.config),
+        "frozen_inputs_sha256": digest(args.inputs),
         "private_sources_sha256": digest(args.sources),
         "private_complete_audit_sha256": digest(args.audit),
         "private_resources_sha256": digest(args.resources),
@@ -383,7 +472,7 @@ def export(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("config", "trace-dir", "resources", "sources", "audit", "output"):
+    for name in ("config", "trace-dir", "resources", "sources", "inputs", "audit", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     summary = export(parser.parse_args())
     print(

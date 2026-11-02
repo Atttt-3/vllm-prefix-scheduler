@@ -496,6 +496,7 @@ def audit_batches(events):
     )
     catalog = {}
     gpu_tokens, padded_tokens = 0, 0
+    dispatch_by_request = {}
     descriptor_fields = (
         "num_scheduled_tokens",
         "total_num_scheduled_tokens",
@@ -546,6 +547,24 @@ def audit_batches(events):
                 and interval["end"] - interval["start"] == counts[interval["request_id"]],
                 "dispatch interval length differs from native output",
             )
+        for interval in intervals:
+            rid = interval["request_id"]
+            start, end, prompt = interval["start"], interval["end"], interval["prompt_length"]
+            record = dispatch_by_request.setdefault(
+                rid, {"prompt": 0, "decode": 0, "repeated": 0, "intervals": []}
+            )
+            record["prompt"] += max(0, min(end, prompt) - min(start, prompt))
+            record["decode"] += max(0, end - max(start, prompt))
+            prior = sorted(
+                (max(start, left), min(end, right))
+                for left, right in record["intervals"]
+                if max(start, left) < min(end, right)
+            )
+            covered_end = start
+            for left, right in prior:
+                record["repeated"] += max(0, right - max(left, covered_end))
+                covered_end = max(covered_end, right)
+            record["intervals"].append([start, end])
         local = [e for e in events if e.get("batch_id") == batch]
         chain = {name: one(local, name) for name in required}
         require(
@@ -596,6 +615,30 @@ def audit_batches(events):
             set(consumed["req_ids"]) == set(counts) and len(consumed["req_ids"]) == len(counts),
             "model return request set differs from scheduled requests",
         )
+        require(
+            len(consumed["sampled_token_ids"]) == len(consumed["req_ids"]),
+            "real sampled token/request rows differ",
+        )
+        sampled = dict(zip(consumed["req_ids"], consumed["sampled_token_ids"], strict=True))
+        require(
+            all(
+                type(tokens) is list and all(type(token) is int and token >= 0 for token in tokens)
+                for tokens in sampled.values()
+            ),
+            "real sampled output IDs invalid",
+        )
+        engine_outputs = chain["update_from_output_success"].get("engine_outputs")
+        require(
+            type(engine_outputs) is list
+            and len({output.get("request_id") for output in engine_outputs}) == len(engine_outputs),
+            "native output processor request rows missing/duplicated",
+        )
+        for output in engine_outputs:
+            rid, tokens = output.get("request_id"), output.get("new_token_ids")
+            require(
+                rid in sampled and type(tokens) is list and tokens == sampled[rid][: len(tokens)],
+                "native engine output tokens do not derive from real sampled return",
+            )
         if counts:
             require(
                 returned.get("result_kind") == "none" and returned.get("forward_observed") is True,
@@ -671,6 +714,7 @@ def audit_batches(events):
         "runner_forward_tokens": gpu_tokens,
         "runner_forward_tokens_padded": padded_tokens,
         "physical_gpu_work": "runner input token counts observed; FLOPs and speedup unmeasured",
+        "dispatch_by_request": dispatch_by_request,
     }
 
 
@@ -820,6 +864,16 @@ def audit_native_requests(events, case, metadata, client):
         == Counter({rid: 1 for rid in expected_ids}),
         "actual native terminal catalog incomplete",
     )
+    bindings = {e["request_id"]: e for e in admitted}
+    for event in rows(events, "schedule_success"):
+        for interval in event.get("intervals", []):
+            rid = interval.get("request_id")
+            if rid in expected_ids:
+                require(
+                    interval.get("object_id") == bindings[rid].get("object_id")
+                    and interval.get("prompt_length") == len(bindings[rid]["prompt_token_ids"]),
+                    "dispatch range does not bind actual request object/prompt geometry",
+                )
     generated = defaultdict(list)
     for event in sorted(rows(events, "update_from_output_success"), key=lambda e: e["seq"]):
         for output in event.get("engine_outputs", []):
@@ -1528,11 +1582,44 @@ def audit_resources(resources):
     return {"allocations": len(allocations), "released_job_ids": sorted(ids)}
 
 
-def audit_trace(events, config, *, resources=None, engine_id=None, config_sha256=None):
+def audit_trace(
+    events,
+    config,
+    *,
+    resources=None,
+    engine_id=None,
+    config_sha256=None,
+    frozen_inputs=None,
+    inputs_sha256=None,
+):
     require_assertions()
     validate_envelopes(events)
     require(is_hash(config_sha256), "actual frozen config file hash required")
     expected = expected_cases(config)
+    require(
+        is_hash(inputs_sha256) and type(frozen_inputs) is dict,
+        "frozen real tokenizer input artifact/hash missing",
+    )
+    require(
+        frozen_inputs.get("model_revision")
+        == frozen_inputs.get("tokenizer_revision")
+        == MODEL_REVISION,
+        "frozen tokenizer input source differs",
+    )
+    texts = {r["text"] for r in config["requests"].values()} | {
+        f"Give one short fact about {subject}." for subject in ("GPUs", "oceans", "planets")
+    }
+    require(
+        type(frozen_inputs.get("by_text")) is dict and set(frozen_inputs["by_text"]) == texts,
+        "frozen tokenizer input catalog differs",
+    )
+    require(
+        all(
+            type(ids) is list and ids and all(type(token) is int and token >= 0 for token in ids)
+            for ids in frozen_inputs["by_text"].values()
+        ),
+        "frozen actual integer tokenizer IDs missing",
+    )
     partial = engine_id is not None
     if partial:
         events = [e for e in events if e["engine_id"] == engine_id]
@@ -1571,6 +1658,10 @@ def audit_trace(events, config, *, resources=None, engine_id=None, config_sha256
         start, ready = one(local, "engine_start"), one(local, "engine_ready")
         phase, mode = name.split("-", 1)
         require(start["phase"] == phase and start["mode"] == mode, "engine identity mislabeled")
+        require(
+            start.get("inputs_sha256") == inputs_sha256,
+            "engine input artifact hash differs from frozen input file",
+        )
         sources = audit_sources(start, ready, config)
         sources_all.append(sources)
         worker = ready.get("worker")
@@ -1631,7 +1722,11 @@ def audit_trace(events, config, *, resources=None, engine_id=None, config_sha256
         )
         exited = one(local, "process_exit")
         require(
-            exited.get("exitcode") == 0 and exited.get("owned_pids_remaining") == [],
+            exited.get("exitcode") == 0
+            and type(exited.get("exitcode")) is int
+            and exited.get("owned_pids_remaining") == []
+            and exited.get("owned_pids_before_cleanup") == []
+            and exited.get("timed_out") is False,
             "engine/worker owned processes did not exit successfully",
         )
         engine_results[name] = {
@@ -1663,6 +1758,13 @@ def audit_trace(events, config, *, resources=None, engine_id=None, config_sha256
             "case executed in wrong engine/mode",
         )
         client = audit_client(events, case, meta, config)
+        require(
+            all(
+                value["token_ids"] == frozen_inputs["by_text"].get(value["text"])
+                for value in client["inputs"].values()
+            ),
+            "actual request token IDs differ from frozen tokenizer output",
+        )
         cases[case] = client
         audit_case_timeline(events, case, meta["scenario"])
         if meta["scenario"] != "smoke":

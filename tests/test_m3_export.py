@@ -80,7 +80,15 @@ def projection_fixture():
             "batches": 100,
             "positive_batches": 90,
             "scheduled_tokens": 1000,
-            "physical_gpu_work": "unmeasured",
+            "physical_gpu_work": "runner input token counts observed; FLOPs and speedup unmeasured",
+            "runner_forward_tokens": 1000,
+            "runner_forward_tokens_padded": 1024,
+            "dispatch_by_request": {
+                f"{name}::{role}": {"prompt": 3, "decode": 1, "repeated": 0, "intervals": []}
+                for name, meta in m3_contract.case_catalog().items()
+                if meta["scenario"] != "smoke"
+                for role in cases[name]["inputs"]
+            },
         },
         "guard_lifecycle": {"diagnostic-guarded": {"registered": 20, "first_dispatch_cleared": 20}},
         "comparisons": [
@@ -103,6 +111,8 @@ def test_projection_rebuilds_only_finite_names_numbers_and_hashes():
     assert public["case_count"] == 20
     assert public["engines"]["diagnostic-prefix"]["kv_storage_bytes"] == 1024
     assert public["cases"]["mechanism:prefix:0"]["first_order"] == ["B", "C"]
+    assert public["runner_forward_input_tokens"] == 1000
+    assert public["runner_forward_input_tokens_padded"] == 1024
 
 
 @pytest.mark.parametrize(
@@ -175,6 +185,7 @@ def test_real_export_subprocess_fails_closed_for_partial_audit(tmp_path, optimiz
         ("trace-dir", tmp_path),
         ("resources", empty),
         ("sources", empty),
+        ("inputs", empty),
         ("audit", audit),
         ("output", output),
     ):
@@ -194,3 +205,59 @@ def test_location_normalization_preserves_line_and_process_links():
     assert export_m3.normalized_audit(original) != export_m3.normalized_audit(
         {**relocated, "line": 4}
     )
+
+
+def test_public_native_source_catalog_rejects_unlisted_path():
+    config = json.loads((ROOT / "configs/m3-real-model.json").read_text())
+    native = json.loads((ROOT / "configs/native-m2b.json").read_text())["source_sha256"]
+    sources = {
+        "upstream_sha256": {**native, **config["extra_upstream_sha256"]},
+        "model": {
+            "revision": m3_contract.MODEL_REVISION,
+            "tokenizer_revision": m3_contract.MODEL_REVISION,
+            "files": [
+                {
+                    "name": name,
+                    "size": metadata["size"],
+                    "verified_content_id": metadata["content_id"],
+                    "sha256": metadata["content_id"]
+                    if metadata["kind"] == "lfs_sha256"
+                    else "a" * 64,
+                }
+                for name, metadata in config["model_files"].items()
+            ],
+        },
+    }
+    result = export_m3.public_source_manifest(sources, config, native)
+    assert result["upstream_sha256"] == sources["upstream_sha256"]
+    sources["upstream_sha256"]["vllm/private_account/name.py"] = "b" * 64
+    with pytest.raises(ValueError, match="public allowlist"):
+        export_m3.public_source_manifest(sources, config, native)
+
+
+def test_complete_raw_contract_to_export_projection_integration(tmp_path):
+    """Full synthetic 20-case contract proves interfaces, never GPU execution."""
+    from m3_trace_fixture import build_fixture
+
+    fixture = build_fixture(tmp_path / "complete")
+    events = m3_contract.read_events(fixture["trace_path"])
+    audit = m3_contract.audit_trace(
+        events,
+        fixture["config"],
+        resources=fixture["resources"],
+        config_sha256=m3_contract.sha256(fixture["config_path"]),
+        frozen_inputs=fixture["inputs"],
+        inputs_sha256=m3_contract.sha256(fixture["inputs_path"]),
+    )
+    assert audit["scope"] == "complete" and audit["accepted"] is True
+    public = export_m3.public_summary(audit, fixture["sources"], fixture["config"])
+    assert public["case_count"] == 20
+    assert len(public["engines"]) == 8
+    assert public["runner_forward_input_tokens"] == audit["batch_audit"]["runner_forward_tokens"]
+    assert (
+        public["runner_forward_input_tokens_padded"]
+        == audit["batch_audit"]["runner_forward_tokens_padded"]
+    )
+    assert "synthetic-contract-fixture" not in json.dumps(public)
+    assert export_m3.raw_trace_files(fixture["trace_path"]) == [fixture["trace_path"]]
+    assert export_m3.raw_trace_files(fixture["trace_path"].parent) == [fixture["trace_path"]]
