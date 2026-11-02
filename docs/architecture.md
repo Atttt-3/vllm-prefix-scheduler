@@ -62,3 +62,7 @@ guarded 的时钟错误、缺记录及可能部分修改原生状态的生命周
 ## 验证层次
 
 本地记录检查只验证归档数据的内部一致性。真实 Scheduler replay 验证机制与排序语义；原生回归验证生命周期与副作用；GPU 集成验证异步实际运行与资源；配对实验才支持性能和公平性结论。每层的结果都需标明，不能互相替代。
+
+## M3 真实模型集成层
+
+M3新增独立AsyncLLM运行入口、固定输入准备、被动scheduler/worker/V2 runner观察及标准库trace审查器，生产策略不变。生产本名无observer smoke与诊断子类证据分开；原生pause/keep和实际add确认形成受控积队，旁路batch身份贯通execute/sample/materialize/FIFO消费。观察方法保留一次父调用与原返回/异常，不额外评分、分配或GPU同步；弱引用避免延长原生异步输出生命周期。来源与资源合同见[M3设计](research/m3-design.md)，实际运行与完整验收阻断见[M3交接](research/m3-handoff.md)。这不扩展已支持的模型、并行或自然流量公平性范围。
