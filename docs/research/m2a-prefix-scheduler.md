@@ -1,7 +1,12 @@
 # M2A: bounded prefix scheduling on native AsyncScheduler
 
-Status: implementation in progress; no M2A native acceptance yet. Design recorded
-before implementation on 2026-11-02 (Asia/Hong_Kong). Baseline is accepted M1
+Status: M2A implemented and native-verified; awaiting total-project acceptance,
+with both PRs unmerged. Final native-tested code is
+`1091037dcc2a3a9c31d9692841faebff1f063808`: 72 cases, three independent repeats,
+plus seven real fail-closed subprocesses. Full results, retained failures,
+review and reproduction commands are in the [handoff](m2a-handoff.md).
+Design recorded before implementation on 2026-11-02 (Asia/Hong_Kong).
+Baseline is accepted M1
 `fc23bc380dc82f5b57922b26d072470397184267`; M1 mechanism evidence remains attached
 to `0288eb4`, not its later validation-entry fixes. PR #4 is open.
 
