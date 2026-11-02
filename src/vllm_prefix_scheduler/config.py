@@ -1,4 +1,4 @@
-"""Standard-library-only parsing of the M2A scheduler configuration."""
+"""Standard-library-only parsing of the prefix scheduler configuration."""
 
 import math
 from dataclasses import dataclass
@@ -12,10 +12,7 @@ class PrefixSchedulerConfig:
 
 
 def parse_prefix_config(additional_config: dict | None = None) -> PrefixSchedulerConfig:
-    """Read without modifying vLLM's additional_config or importing vLLM.
-
-    max_wait_ms is a reserved contract only. M2A does not measure waiting time.
-    """
+    """Read without modifying vLLM's additional_config or importing vLLM."""
     if additional_config is None:
         additional_config = {}
     if not isinstance(additional_config, dict):
@@ -39,6 +36,4 @@ def parse_prefix_config(additional_config: dict | None = None) -> PrefixSchedule
         or (type(max_wait_ms) is float and not math.isfinite(max_wait_ms))
     ):
         raise ValueError("prefix_scheduler.max_wait_ms must be finite and nonnegative (not bool)")
-    if mode == "guarded":
-        raise NotImplementedError("prefix_scheduler guarded mode is not implemented in M2A")
     return PrefixSchedulerConfig(mode=mode, window=window, max_wait_ms=max_wait_ms)

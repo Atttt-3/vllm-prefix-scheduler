@@ -62,9 +62,11 @@ def test_accept_nonnegative_finite_wait_contract(value):
     assert parse_prefix_config({"prefix_scheduler": {"max_wait_ms": value}}).max_wait_ms == value
 
 
-def test_guarded_does_not_execute_prefix():
-    with pytest.raises(NotImplementedError, match="guarded.*not implemented"):
-        parse_prefix_config({"prefix_scheduler": {"mode": "guarded"}})
+@pytest.mark.parametrize("value", [0, 0.0, 2.5, 0.1, 10**400])
+def test_guarded_accepts_wait_contract(value):
+    assert parse_prefix_config(
+        {"prefix_scheduler": {"mode": "guarded", "max_wait_ms": value}}
+    ) == PrefixSchedulerConfig(mode="guarded", max_wait_ms=value)
 
 
 def test_unknown_key_fails():
