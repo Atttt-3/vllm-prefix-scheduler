@@ -1,0 +1,139 @@
+{
+  "schema_version": 1,
+  "task_id": "M3-real-model-integration",
+  "repeats": 3,
+  "seed": 42,
+  "window": 16,
+  "max_wait_ms": 500,
+  "upstream_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "baseline": {
+    "dtype": "bfloat16",
+    "tensor_parallel_size": 1,
+    "max_model_len": 16384,
+    "max_num_seqs": 4,
+    "max_num_batched_tokens": 2048,
+    "gpu_memory_utilization": 0.85,
+    "enable_prefix_caching": true,
+    "async_scheduling": true,
+    "enable_chunked_prefill": true,
+    "enforce_eager": true,
+    "seed": 42,
+    "trust_remote_code": false,
+    "disable_log_stats": false
+  },
+  "functional": {
+    "dtype": "bfloat16",
+    "tensor_parallel_size": 1,
+    "max_model_len": 16384,
+    "max_num_seqs": 1,
+    "max_num_batched_tokens": 2048,
+    "gpu_memory_utilization": 0.85,
+    "enable_prefix_caching": true,
+    "async_scheduling": true,
+    "enable_chunked_prefill": true,
+    "enforce_eager": true,
+    "seed": 42,
+    "trust_remote_code": false,
+    "disable_log_stats": false
+  },
+  "sampling": {
+    "temperature": 0,
+    "max_tokens": 8,
+    "ignore_eos": true,
+    "seed": 42
+  },
+  "timing": {
+    "enqueue_timeout_s": 10,
+    "case_timeout_s": 60,
+    "drain_timeout_s": 10,
+    "old_wait_s": 0.75
+  },
+  "requests": {
+    "A": {
+      "text": "Public synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nSummarize the reference in one short sentence."
+    },
+    "B": {
+      "text": "A cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nA cold ocean story describes whales, tides, sailing boats and distant islands.\nWrite one short ocean fact."
+    },
+    "C": {
+      "text": "Public synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nPublic synthetic reference: GPU inference reuses identical prompt prefixes. This paragraph tests automatic prefix caching.\nGive one short GPU fact."
+    }
+  },
+  "environment": {
+    "PYTHONHASHSEED": "42",
+    "VLLM_USE_V2_MODEL_RUNNER": "1",
+    "VLLM_DISABLE_REQUEST_ID_RANDOMIZATION": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1"
+  },
+  "extra_upstream_sha256": {
+    "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/engine/core_client.py": "386b528a69029507f80a2df4d6df2a4fa6ba2ba811501dc3449ceea58b5cd90a",
+    "vllm/v1/engine/input_processor.py": "97f66659814177d3f7b72b959f09201cbdd1794de21ec1542fe8970f18a1a2b6",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/worker/gpu_worker.py": "e970aa29a738aa15cd963d9f9202ca6d3d504e98fd344959fd998e940472a5a0"
+  },
+  "gpu_budget": {
+    "max_allocations": 4,
+    "max_minutes_per_allocation": 20,
+    "gpus": 1,
+    "serial": true
+  },
+  "model_files": {
+    "config.json": {
+      "size": 726,
+      "content_id": "e49eccdc32f36da9c09cfa0e737084f9e0105e5e",
+      "kind": "git_blob_sha1"
+    },
+    "generation_config.json": {
+      "size": 239,
+      "content_id": "20a8a9156fc8c3f25295ca067f61fdf120d517c5",
+      "kind": "git_blob_sha1"
+    },
+    "merges.txt": {
+      "size": 1671853,
+      "content_id": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+      "kind": "git_blob_sha1"
+    },
+    "model-00001-of-00003.safetensors": {
+      "size": 3957900840,
+      "content_id": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
+      "kind": "lfs_sha256"
+    },
+    "model-00002-of-00003.safetensors": {
+      "size": 3987450520,
+      "content_id": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
+      "kind": "lfs_sha256"
+    },
+    "model-00003-of-00003.safetensors": {
+      "size": 99630640,
+      "content_id": "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1",
+      "kind": "lfs_sha256"
+    },
+    "model.safetensors.index.json": {
+      "size": 32819,
+      "content_id": "95c0a0059df040d75dc6c396b174382cf61d2f91",
+      "kind": "git_blob_sha1"
+    },
+    "tokenizer.json": {
+      "size": 11422654,
+      "content_id": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+      "kind": "lfs_sha256"
+    },
+    "tokenizer_config.json": {
+      "size": 9732,
+      "content_id": "417d038a63fa3de29cfde265caedae14d1a58d92",
+      "kind": "git_blob_sha1"
+    },
+    "vocab.json": {
+      "size": 2776833,
+      "content_id": "4783fe10ac3adce15ac8f358ef5462739852c569",
+      "kind": "git_blob_sha1"
+    }
+  }
+}
