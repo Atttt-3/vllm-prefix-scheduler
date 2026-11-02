@@ -18,4 +18,4 @@ M2B 需另行设计 monotonic 等待保护及保护元数据生命周期；当�
 
 ## 结果解释
 
-现有证据证明 BF16 推理、APC 复用、异步配置和工作区重放可用，不支持调度优化收益结论。16K 是上下文上限，当前输入约 2.2K tokens；CUDA Graph 与 torch.compile 在这次功能验证中关闭。性能结论须按[实验规范](experiments.md)另行验证。
+早期 readiness 证据证明 BF16 推理、APC 复用、异步配置和工作区重放可用；其中16K是上下文上限，实际输入约2.2K tokens，CUDA Graph与torch.compile关闭。M2A另行证明了固定合成场景下scheduled/dispatched tokens的机制差异；两类证据均不支持调度优化的真实模型端到端性能收益结论。性能结论须按[实验规范](experiments.md)另行验证。

@@ -6,7 +6,7 @@
 
 `scripts/validate_model.py` 使用原生 LLM，`scripts/diagnostic_worker.py` 通过具名 worker RPC 读取模型精度、调度配置和 KV 分配。诊断扩展不修改调度顺序或模型执行，也不需要开启不安全的函数序列化。
 
-实测运行使用 V2 GPU Model Runner、FlashAttention 2 和单 full-attention group。eager 模式关闭 torch.compile、CUDA Graph 和 JIT warmup；APC 与异步调度在 worker 中保持开启。
+早期真实模型 readiness 验证使用 V2 GPU Model Runner、FlashAttention 2 和单 full-attention group。该验证的 eager 模式关闭 torch.compile、CUDA Graph 和 JIT warmup；APC 与异步调度在 worker 中保持开启。M2A 只校验生效异步/V2 配置并运行原生 host-side 调度对象，没有启动 GPU model runner 或模型 worker。
 
 ## 原生调用链
 
