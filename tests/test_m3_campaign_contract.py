@@ -210,3 +210,54 @@ def test_submission_catalog_symlink_is_rejected(campaign, monkeypatch):
     linked.symlink_to(catalog / "attempt-01", target_is_directory=True)
     with pytest.raises(ValueError, match="submission receipt catalog contains symlink"):
         contract.audit_campaign(**campaign["paths"])
+
+
+def test_m1_declared_boundary_matches_fixed_native_entry_and_fixture(campaign):
+    import ast
+
+    source = ast.parse((ROOT / "src/vllm_prefix_scheduler/native_replay.py").read_text())
+    function = next(
+        node
+        for node in source.body
+        if isinstance(node, ast.FunctionDef) and node.name == "runtime_record"
+    )
+    returned = next(
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Return) and isinstance(node.value, ast.Dict)
+    )
+    substitutions = next(
+        value
+        for key, value in zip(returned.keys, returned.values, strict=True)
+        if isinstance(key, ast.Constant) and key.value == "substitutions"
+    )
+    declared = ast.literal_eval(substitutions)
+    assert declared == list(contract.M1_NATIVE_SUBSTITUTIONS_V1)
+    runtime = json.loads(Path(campaign["native"]["m1"]["runtime"]["path"]).read_text())
+    assert runtime["substitutions"] == declared
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    (None, [], ["Undeclared replacement"], list(reversed(contract.M1_NATIVE_SUBSTITUTIONS_V1))),
+)
+def test_m1_declaration_is_exact_after_valid_collector_binding(campaign, monkeypatch, invalid):
+    seams(monkeypatch)
+    entry = campaign["native"]["m1"]
+    path = Path(entry["runtime"]["path"])
+    runtime = json.loads(path.read_text())
+    runtime["substitutions"] = invalid
+    entry["runtime"] = write(path, runtime)
+    collector = Path(entry["collector_dir"])
+    manifest = json.loads((collector / "manifest.json").read_text())
+    record = next(r for r in manifest["files"] if r["path"] == "artifacts/runtime.json")
+    record.update(sha256=entry["runtime"]["sha256"], bytes=path.stat().st_size)
+    manifest_reference = write(collector / "manifest.json", manifest)
+    acceptance = json.loads((collector / "acceptance.json").read_text())
+    acceptance["manifest_sha256"] = manifest_reference["sha256"]
+    write(collector / "acceptance.json", acceptance)
+    write(campaign["paths"]["native_index"], campaign["native"])
+    with pytest.raises(
+        ValueError, match="m1 native substitutions differ from fixed replay v1 declaration"
+    ):
+        contract.audit_campaign(**campaign["paths"])

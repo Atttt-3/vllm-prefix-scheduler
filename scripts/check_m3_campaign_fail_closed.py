@@ -41,6 +41,8 @@ CONTROLS = {
     "stale_native_commit": "native selected job/commit differs",
     "corrupt_native_runtime": "compat runtime artifact hash differs",
     "wrong_native_inputs": "compat native frozen input differs",
+    "undeclared_m1_substitutions": "m1 native substitutions differ from fixed replay v1 declaration",
+    "changed_m1_substitutions": "m1 native substitutions differ from fixed replay v1 declaration",
     "monitor_missing_terminal": "terminal absent from actual monitor trace",
     "monitor_not_exited": "monitor did not exit cleanly after terminal",
     "stale_active_query": "final active query is not a later full-queue observation",
@@ -195,6 +197,37 @@ def mutate(label, original, directory):
         manifest_path.unlink()  # break the hardlink before writing; originals stay immutable
         write(manifest_path, manifest)
         native["gpu"]["collector_dir"] = str(cloned.resolve())
+    elif label in {"undeclared_m1_substitutions", "changed_m1_substitutions"}:
+        entry = native["m1"]
+        original_runtime_hash = entry["runtime"]["sha256"]
+        runtime = load(entry["runtime"]["path"])
+        if label == "undeclared_m1_substitutions":
+            runtime.pop("substitutions")
+        else:
+            runtime["substitutions"] = ["Different and unapproved test substitution"]
+        cloned = directory / "m1-collector"
+        shutil.copytree(entry["collector_dir"], cloned, copy_function=os.link)
+        manifest_path = cloned / "manifest.json"
+        manifest = load(manifest_path)
+        matching = [
+            record
+            for record in manifest["files"]
+            if record["path"].startswith("artifacts/") and record["sha256"] == original_runtime_hash
+        ]
+        require(len(matching) == 1, "m1 runtime mutation needs one bound collector artifact")
+        record = matching[0]
+        runtime_path = cloned / record["path"]
+        runtime_path.unlink()  # break every mutated hardlink; originals remain read-only
+        entry["runtime"] = write(runtime_path, runtime)
+        record.update(sha256=entry["runtime"]["sha256"], bytes=runtime_path.stat().st_size)
+        manifest_path.unlink()
+        manifest_reference = write(manifest_path, manifest)
+        acceptance_path = cloned / "acceptance.json"
+        acceptance = load(acceptance_path)
+        acceptance["manifest_sha256"] = manifest_reference["sha256"]
+        acceptance_path.unlink()
+        write(acceptance_path, acceptance)
+        entry["collector_dir"] = str(cloned.resolve())
     elif label == "stale_native_commit":
         native["project_commit"] = "403b7838e46ecf17a97cc14de0a1f048938dfbd8"
     elif label == "corrupt_native_runtime":
@@ -208,6 +241,8 @@ def mutate(label, original, directory):
         "corrupt_native_runtime",
         "wrong_native_inputs",
         "gpu_collector_unstable",
+        "undeclared_m1_substitutions",
+        "changed_m1_substitutions",
     }:
         args["native_index"] = directory / "native-index.json"
         write(args["native_index"], native)

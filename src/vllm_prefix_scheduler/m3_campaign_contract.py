@@ -20,6 +20,13 @@ from .run_evidence import check_run
 SCOPE = "replacement_campaign_with_retained_history_exception"
 OLD_COMMIT = "403b7838e46ecf17a97cc14de0a1f048938dfbd8"
 SOURCE_ROOTS = ("src", "scripts", "configs", "tests", "Makefile")
+# M1 replay v1 boundary, recorded by native_replay.runtime_record (frozen source).
+# These declared native-test substitutions never apply to the real-model GPU run.
+M1_NATIVE_SUBSTITUTIONS_V1 = (
+    "Synthetic ModelRunnerOutput only; no model runner, model weights, tokenizer, or KV tensors",
+    "One-layer FullAttentionSpec metadata fixture (not model-derived KV geometry)",
+    "One recorded waiting-queue permutation only in C,B test fixture",
+)
 HISTORY_ROWS = (
     ("calibration-01", "FAILED", "1:0"),
     ("formal-01", "COMPLETED", "0:0"),
@@ -722,9 +729,12 @@ def native_gate(root, index, plan, campaign_hash, commit, selected_job, sources)
         else:
             require(
                 runtime.get("python_assertions_enabled") is True
-                and runtime.get("mocks_or_stubs") == []
-                and runtime.get("substitutions") == [],
+                and runtime.get("mocks_or_stubs") == [],
                 "m1 native assertion/mock contract differs",
+            )
+            require(
+                runtime.get("substitutions") == list(M1_NATIVE_SUBSTITUTIONS_V1),
+                "m1 native substitutions differ from fixed replay v1 declaration",
             )
         result[kind] = {
             **native_raw_audit(root, kind, paths["trace"]),

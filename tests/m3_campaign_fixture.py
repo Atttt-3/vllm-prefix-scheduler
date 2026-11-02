@@ -290,7 +290,11 @@ def build_campaign_fixture(directory):
             runtime.update(
                 python_assertions_enabled=True,
                 mocks_or_stubs=[],
-                substitutions=[],
+                substitutions=[
+                    "Synthetic ModelRunnerOutput only; no model runner, model weights, tokenizer, or KV tensors",
+                    "One-layer FullAttentionSpec metadata fixture (not model-derived KV geometry)",
+                    "One recorded waiting-queue permutation only in C,B test fixture",
+                ],
                 model_config={"sha256": model_hash},
             )
         collector = directory / f"native/{kind}"
