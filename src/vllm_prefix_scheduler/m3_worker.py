@@ -10,6 +10,7 @@ import os
 import sys
 import weakref
 from collections import Counter
+from pathlib import Path
 
 from vllm_prefix_scheduler import m3_events as events
 
@@ -208,6 +209,8 @@ class M3WorkerExtension:
             "model_parameter_devices": dict(parameter_devices),
             "model_type": events.qualified_type(runner.model),
             "model_config_dtype": str(cfg.model_config.dtype),
+            "resolved_model_path": str(Path(cfg.model_config.model).resolve()),
+            "resolved_tokenizer_path": str(Path(cfg.model_config.tokenizer).resolve()),
             "gpu_name": torch.cuda.get_device_name(),
             "compute_capability": list(torch.cuda.get_device_capability()),
             "gpu_total_memory_bytes": torch.cuda.get_device_properties(self.device).total_memory,

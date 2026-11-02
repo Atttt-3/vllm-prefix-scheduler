@@ -20,7 +20,10 @@ def gpu_snapshot():
         "--query-gpu=name,memory.total,memory.used,memory.free,utilization.gpu",
         "--format=csv,noheader,nounits",
     ]
-    p = subprocess.run(command, text=True, capture_output=True, timeout=10)
+    try:
+        p = subprocess.run(command, text=True, capture_output=True, timeout=10)
+    except Exception as error:
+        return {"monotonic_ns": time.monotonic_ns(), "returncode": None, "error": str(error)}
     return {
         "monotonic_ns": time.monotonic_ns(),
         "returncode": p.returncode,
@@ -47,6 +50,7 @@ def owned_processes(pgid):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/m3-real-model.json"))
+    parser.add_argument("--inputs", type=Path, required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -116,6 +120,8 @@ def main():
                 str(args.config),
                 "--model",
                 str(args.model),
+                "--inputs",
+                str(args.inputs),
                 "--sources",
                 str(args.output / "sources.json"),
                 "--output",
@@ -176,17 +182,29 @@ def main():
                 raise RuntimeError(f"M3 engine failed: {engine_id}")
         status = 0
     finally:
+        # Repeated signals must not interrupt failure evidence sealing.
+        signal.signal(signal.SIGTERM, lambda *_: None)
+        signal.signal(signal.SIGINT, lambda *_: None)
         # Child engines own separate groups; clean only our recorded group on any exit.
-        if active_process is not None:
-            try:
-                os.killpg(active_process.pid, signal.SIGTERM)
-                active_process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                os.killpg(active_process.pid, signal.SIGKILL)
+        try:
+            if active_process is not None:
+                try:
+                    os.killpg(active_process.pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                cleanup_deadline = time.monotonic() + 15
+                while owned_processes(active_process.pid) and time.monotonic() < cleanup_deadline:
+                    active_process.poll()
+                    time.sleep(0.1)
+                if owned_processes(active_process.pid):
+                    try:
+                        os.killpg(active_process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
                 active_process.wait(timeout=5)
-            except ProcessLookupError:
-                pass
-            remaining = owned_processes(active_process.pid)
+                remaining = owned_processes(active_process.pid)
+        except Exception as error:
+            remaining = [f"owned process cleanup could not be verified: {error}"]
         stop.set()
         sampler.join(timeout=12)
         after = gpu_snapshot()

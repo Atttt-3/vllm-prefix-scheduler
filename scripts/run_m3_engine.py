@@ -11,6 +11,7 @@ def parse_args():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=Path("configs/m3-real-model.json"))
     p.add_argument("--model", type=Path, required=True)
+    p.add_argument("--inputs", type=Path, required=True)
     p.add_argument("--sources", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--mode", choices=["native", "off", "prefix", "guarded"], required=True)
@@ -29,6 +30,7 @@ async def run(args):
 
     config = json.loads(args.config.read_text())
     sources = json.loads(args.sources.read_text())
+    frozen_inputs = json.loads(args.inputs.read_text())
     mode, phase = args.mode, args.phase
     cls = (
         "vllm.v1.core.sched.async_scheduler.AsyncScheduler"
@@ -61,6 +63,7 @@ async def run(args):
         production_class=cls,
         scheduler_class=actual_cls,
         config_sha256=sha256(args.config),
+        inputs_sha256=sha256(args.inputs),
         project_commit=sources["project_commit"],
         source_sha256=sources["source_sha256"],
         upstream_sha256=sources["upstream_sha256"],
@@ -86,6 +89,8 @@ async def run(args):
             ]
         }
         resolved.update(
+            model=cfg.model_config.model,
+            tokenizer=cfg.model_config.tokenizer,
             dtype=str(cfg.model_config.dtype),
             max_model_len=cfg.model_config.max_model_len,
             enable_prefix_caching=cfg.cache_config.enable_prefix_caching,
@@ -110,12 +115,18 @@ async def run(args):
             raise RuntimeError("Required APC/async disabled")
 
         def tokenize(text):
-            ids = tokenizer.apply_chat_template(
+            rendered = tokenizer.apply_chat_template(
                 [{"role": "user", "content": text}],
-                tokenize=True,
+                tokenize=False,
                 add_generation_prompt=True,
                 enable_thinking=False,
             )
+            ids = tokenizer.encode(rendered, add_special_tokens=False)
+            if not ids or any(type(token) is not int or token < 0 for token in ids):
+                raise RuntimeError("Tokenizer did not return nonempty integer token IDs")
+            expected = frozen_inputs["by_text"].get(text)
+            if ids != expected:
+                raise RuntimeError("Tokenizer IDs differ from pre-run frozen inputs")
             return {"text": text, "token_ids": list(ids)}
 
         common = {k: tokenize(v["text"]) for k, v in config["requests"].items()}
