@@ -32,7 +32,7 @@
 
 ## 三种模式
 
-默认 `mode=off`、`window=16`、`max_wait_ms=500`；配置契约记录在 `configs/scheduler-plan.json`，M3已实际接入真实异步引擎；完整验收仍受历史资源证据缺口阻断，见[M3交接](research/m3-handoff.md)。
+默认 `mode=off`、`window=16`、`max_wait_ms=500`；配置契约记录在 `configs/scheduler-plan.json`，M3新批次已完成真实异步引擎闭环与独立A–F审查，待总站验收；原历史资源缺口及其blocked门槛单独保留，见[M3新批次交接](research/m3-campaign-handoff.md)。
 
 - `off`：保留原生调度顺序，用于和原生类做扩展成本与等价性对照。
 - `prefix`：窗口候选按当前可复用前缀 token 数降序排列，同分保持原始顺序。
