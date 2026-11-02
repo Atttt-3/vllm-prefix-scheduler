@@ -35,6 +35,41 @@ def require_assertions():
         )
 
 
+def expected_matrix_cases(config):
+    """Validate only the fixed M1 four-condition, at-least-three-repeat contract."""
+    if not isinstance(config, dict):
+        raise ValueError("M1 matrix config must be an object")
+    repeats = config.get("repeats")
+    if type(repeats) is not int or repeats < 3:
+        raise ValueError("M1 matrix config repeats must be an integer (not bool) >= 3")
+    capacities = config.get("capacities")
+    if (
+        not isinstance(capacities, dict)
+        or capacities != {"pressure": 5, "ample": 10}
+        or any(type(value) is not int for value in capacities.values())
+    ):
+        raise ValueError("M1 matrix config capacities must be pressure=5 and ample=10 integers")
+    orders = config.get("orders")
+    if (
+        not isinstance(orders, list)
+        or len(orders) != 2
+        or any(
+            not isinstance(order, list) or order not in [["B", "C"], ["C", "B"]] for order in orders
+        )
+        or orders[0] == orders[1]
+    ):
+        raise ValueError("M1 matrix config orders must contain BC and CB exactly once")
+    expected = {
+        f"{repeat}-{capacity}-{''.join(order)}"
+        for repeat in range(repeats)
+        for capacity in capacities
+        for order in orders
+    }
+    if not expected:
+        raise ValueError("M1 expected matrix must not be empty")
+    return expected
+
+
 class DispatchLedger:
     """Count dispatched positions, including overlaps after native preemption."""
 
@@ -568,9 +603,32 @@ def replay_case(config, capacity_name, order, model_path, emit):
         scheduler.shutdown()
 
 
-def verify_matrix(results):
+def verify_matrix(results, config):
     """Check repeated dispatch counts; causal trace acceptance is a separate gate."""
     require_assertions()
+    expected_cases = expected_matrix_cases(config)
+    if not results:
+        raise ValueError("M1 matrix results must not be empty")
+    actual_cases = []
+    for result in results:
+        repeat = result["repeat"]
+        capacity = result["capacity"]
+        order = result["order"]
+        if (
+            type(repeat) is not int
+            or not 0 <= repeat < config["repeats"]
+            or capacity not in config["capacities"]
+            or order not in config["orders"]
+            or type(result["num_blocks"]) is not int
+            or result["num_blocks"] != config["capacities"][capacity]
+            or result["case"] != f"{repeat}-{capacity}-{''.join(order)}"
+        ):
+            raise ValueError("M1 matrix case metadata does not match the frozen configuration")
+        actual_cases.append(result["case"])
+    if len(actual_cases) != len(set(actual_cases)):
+        raise ValueError("M1 matrix results contain duplicate case IDs")
+    if set(actual_cases) != expected_cases:
+        raise ValueError("M1 result case set does not match expected matrix")
     expected = {
         ("pressure", "BC"): 33,
         ("pressure", "CB"): 1,
@@ -616,6 +674,7 @@ def main():
     write_json(args.output / "inputs.json", config)
     results = []
     try:
+        expected_matrix_cases(config)
         if platform.system() != "Linux":
             raise RuntimeError("Native replay requires the pinned Linux runtime; no skip-success")
         for key, expected in {
@@ -649,7 +708,7 @@ def main():
                             args.output / "summary.json",
                             {"metric": config["metric"], "cases": results, "verified": False},
                         )
-        verify_matrix(results)
+        verify_matrix(results, config)
         write_json(
             args.output / "summary.json",
             {"metric": config["metric"], "cases": results, "verified": True},

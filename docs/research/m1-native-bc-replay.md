@@ -152,3 +152,13 @@ A 预热另计 33 prefill + 2 decode，不包含在 B+C 合计中。每个请求
 独立 AST 对照确认 `create_scheduler`、`create_requests`、`drive`、`Observation`、`DispatchLedger` 等机制函数与原生被测 `0288eb4` 完全相同；main/replay_case/verify_matrix 仅增加上述前置检查，runtime_record 仅增加两项元数据。正常模式的核心行为不变。本轮没有再次运行 Linux 原生矩阵或申请 GPU；机制验收继续引用 `0288eb4` 的原始记录，入口修复以新的子进程回归、原始 trace 再审和完整本地检查为证据，不能把新提交声称为已重新完成 Linux 原生重放。
 
 本轮私有材料位于 `runs/m1-native-bc-rereview/`，保留优化模式反证、修复后检查及独立 AST/证据复核记录。判断功能完成需同时满足：固定原生因果矩阵成立、完整生命周期与区间计数可核查、四组重复可复现、证据门槛分开，以及无效审查输入不能错误返回通过。当前补丁针对最后一项修复，不扩展到 M2 或性能工作。
+
+## F 项补充修复：固定矩阵必须非空且完整
+
+汇总对话在 `a983336` 发现普通 Python 模式下的另一项验收入口缺陷：空 trace 配 `repeats=0/-1`、空 orders 或空 capacities 会报告零 case 通过；一次重复的四个 case 也被接受。补充反证还确认缺顺序、重复顺序和缺容量的六 case 子集会误通过。这些输入及修复前输出保存在新的私有 `runs/m1-native-bc-f-gate/`，历史原生与公开材料保持只读。
+
+修复限定为固定 M1 配置和结果门槛：`expected_matrix_cases` 要求 repeats 为严格整数（排除 bool）且至少3；capacities 恰好为整数 pressure=5、ample=10；orders 恰好包含 BC、CB 各一次。审查器与原生 `verify_matrix(results, config)` 共用这项结构契约。审查器显式拒绝空 trace、空预期矩阵、实际 case 集不匹配和空审查结果；原生结果还检查 case ID 唯一，并绑定 repeat/capacity/order/num_blocks 元数据。原生入口在平台初始化或 vLLM 导入前检查配置，全部满足后才允许输出 verified。
+
+新增回归使用真实子进程，覆盖四种空维度输入、一次/两次重复、bool/浮点/字符串重复次数、缺组、重复顺序、错误容量、缺/多 case 和重复结果。原有 `-O`、`-OO`、`PYTHONOPTIMIZE` 拒绝行为保留。固定配置的原始12个 case 在新审查器下继续通过；公开原生 summary 用于结果身份回归，未模拟原生命中或缓存结果。
+
+本次没有修改调度、缓存、输出消费或派发计数核心，没有申请 GPU，也没有执行新的 Linux native replay。机制证据仍是 `0288eb4` 的真实 Linux 记录。本轮门槛修复以新子进程反证/回归、完整本地检查及对 `a983336` 的核心 AST 等价检查作为证据，交回总项目对话重新验收 F 项，不推进 M2。

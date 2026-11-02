@@ -16,10 +16,14 @@ from pathlib import Path
 if __name__ != "__main__":
     import pytest
 
-    from vllm_prefix_scheduler.native_replay import DispatchLedger
-
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "configs/native-bc-replay.json"
+sys.path.insert(0, str(ROOT / "src"))
+
+from vllm_prefix_scheduler.native_replay import (  # noqa: E402
+    DispatchLedger,
+    expected_matrix_cases,
+)
 
 
 def assert_trace(trace_path, config=None):
@@ -34,17 +38,17 @@ def assert_trace(trace_path, config=None):
         )
     if config is None:
         config = json.loads(CONFIG.read_text())
+    expected_cases = expected_matrix_cases(config)
+    if not expected_cases:
+        raise ValueError("M1 expected matrix is empty")
     cases = defaultdict(list)
     for line in Path(trace_path).read_text().splitlines():
         event = json.loads(line)
         cases[event["case"]].append(event)
-    expected_cases = {
-        f"{repeat}-{capacity}-{''.join(order)}"
-        for repeat in range(config["repeats"])
-        for capacity in config["capacities"]
-        for order in config["orders"]
-    }
-    assert set(cases) == expected_cases
+    if not cases:
+        raise ValueError("M1 trace is empty")
+    if set(cases) != expected_cases:
+        raise ValueError("M1 trace case set does not match expected matrix")
     results = {}
     warm_states = {}
     shared_hashes = None
@@ -209,6 +213,8 @@ def assert_trace(trace_path, config=None):
             assert request["in_flight"] == request["output_placeholders"] == 0
             assert request["stale_output_tokens"] == request["preemptions"] == 0
         results[case] = dict(counts)
+    if not results:
+        raise ValueError("M1 trace audit produced no cases")
     return results
 
 
@@ -300,7 +306,7 @@ def test_empty_trace_never_reports_verified(tmp_path, flag, optimization):
     if flag is not None or optimization is not None:
         assert "M1 validation requires assertions enabled" in completed.stderr
     else:
-        assert "AssertionError" in completed.stderr
+        assert "ValueError: M1 trace is empty" in completed.stderr
 
 
 @pytest.mark.parametrize(
@@ -317,6 +323,138 @@ def test_native_entry_rejects_optimized_interpreter_before_imports(flag, optimiz
     else:
         assert completed.returncode == 0
         assert "usage:" in completed.stdout
+
+
+INVALID_MATRIX_CONFIGS = [
+    pytest.param("repeats", 0, id="zero-repeats"),
+    pytest.param("repeats", -1, id="negative-repeats"),
+    pytest.param("repeats", 1, id="one-repeat"),
+    pytest.param("repeats", 2, id="two-repeats"),
+    pytest.param("repeats", True, id="bool-true-repeats"),
+    pytest.param("repeats", False, id="bool-false-repeats"),
+    pytest.param("repeats", 3.0, id="float-repeats"),
+    pytest.param("repeats", "3", id="string-repeats"),
+    pytest.param("orders", [], id="empty-orders"),
+    pytest.param("orders", [["B", "C"]], id="missing-order"),
+    pytest.param("orders", [["B", "C"], ["B", "C"]], id="duplicate-order"),
+    pytest.param("orders", ["BC", "CB"], id="string-orders"),
+    pytest.param("capacities", {}, id="empty-capacities"),
+    pytest.param("capacities", {"pressure": 5}, id="missing-capacity"),
+    pytest.param("capacities", {"pressure": 5, "ample": 9}, id="wrong-capacity"),
+    pytest.param("capacities", {"pressure": 5.0, "ample": 10}, id="float-capacity"),
+    pytest.param("capacities", {"pressure": True, "ample": 10}, id="bool-capacity"),
+    pytest.param("capacities", {"pressure": 5, "ample": 10, "extra": 20}, id="extra-capacity"),
+]
+
+
+@pytest.mark.parametrize("field,value", INVALID_MATRIX_CONFIGS)
+@pytest.mark.parametrize("entry", ["trace", "native"])
+def test_cli_rejects_invalid_matrix_before_trace_or_native_imports(tmp_path, field, value, entry):
+    config = json.loads(CONFIG.read_text())
+    config[field] = value
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config))
+    output = tmp_path / "native-output"
+    if entry == "trace":
+        trace = tmp_path / "empty.jsonl"
+        trace.write_text("")
+        script = Path(__file__)
+        arguments = ["--config", str(config_path), "--trace", str(trace)]
+    else:
+        script = ROOT / "scripts/replay_bc.py"
+        arguments = [
+            "--config",
+            str(config_path),
+            "--model-config",
+            str(tmp_path / "no-model"),
+            "--output",
+            str(output),
+        ]
+    completed = run_cli_with_optimization(script, arguments, None, None)
+    assert completed.returncode != 0
+    assert "M1 matrix config" in completed.stderr
+    assert field in completed.stderr
+    assert "verified" not in completed.stdout
+    assert not (output / "summary.json").exists()
+
+
+@pytest.mark.parametrize("variation", ["one-missing-case", "missing-condition", "extra-case"])
+def test_trace_cli_rejects_nonempty_incomplete_case_set_before_event_audit(tmp_path, variation):
+    cases = sorted(expected_matrix_cases(json.loads(CONFIG.read_text())))
+    if variation == "one-missing-case":
+        cases.pop()
+    elif variation == "missing-condition":
+        cases = [case for case in cases if not case.endswith("-pressure-CB")]
+    else:
+        cases.append("3-pressure-BC")
+    # Deliberately incomplete records test only the case-set gate. The exact
+    # error ensures later missing event fields are not what rejects them.
+    trace = tmp_path / "incomplete.jsonl"
+    trace.write_text("".join(json.dumps({"case": case}) + "\n" for case in cases))
+    completed = run_cli_with_optimization(Path(__file__), ["--trace", str(trace)], None, None)
+    assert completed.returncode != 0
+    assert "M1 trace case set does not match expected matrix" in completed.stderr
+    assert "causal_trace_verified" not in completed.stdout
+
+
+@pytest.mark.parametrize(
+    "variation",
+    [
+        "unchanged",
+        "empty",
+        "one-repeat",
+        "missing-case",
+        "duplicate-case",
+        "wrong-repeat",
+        "wrong-capacity",
+    ],
+)
+def test_native_matrix_verifier_checks_actual_recorded_case_identity(tmp_path, variation):
+    # These are real published native summaries, not simulated scheduler work.
+    recorded = ROOT / "evidence/2026-11-02-m1-native-bc-replay/results.json"
+    results = json.loads(recorded.read_text())["cases"]
+    config = json.loads(CONFIG.read_text())
+    if variation == "empty":
+        results = []
+    elif variation == "one-repeat":
+        config["repeats"] = 1
+        results = [result for result in results if result["repeat"] == 0]
+    elif variation == "missing-case":
+        results.pop()
+    elif variation == "duplicate-case":
+        results[-1] = results[0]
+    elif variation == "wrong-repeat":
+        results[0]["repeat"] = True
+    elif variation == "wrong-capacity":
+        results[0]["num_blocks"] = 6
+    payload = tmp_path / "recorded-summary.json"
+    payload.write_text(json.dumps({"results": results, "config": config}))
+    program = (
+        "import json, sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "from vllm_prefix_scheduler.native_replay import verify_matrix; "
+        "data = json.load(open(sys.argv[2])); "
+        "verify_matrix(data['results'], data['config']); "
+        "print('matrix_verified=true')"
+    )
+    environment = dict(os.environ)
+    environment.pop("PYTHONOPTIMIZE", None)
+    completed = subprocess.run(
+        [sys.executable, "-S", "-c", program, str(ROOT / "src"), str(payload)],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if variation == "unchanged":
+        assert completed.returncode == 0, completed.stderr
+        assert completed.stdout.strip() == "matrix_verified=true"
+    else:
+        assert completed.returncode != 0
+        assert "ValueError" in completed.stderr
+        assert "matrix_verified" not in completed.stdout
 
 
 @pytest.mark.native
