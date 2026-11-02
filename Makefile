@@ -4,7 +4,7 @@ export UV_CACHE_DIR := $(CURDIR)/.cache/uv
 export UV_PYTHON_INSTALL_DIR := $(CURDIR)/.tools/python
 export UV_PROJECT_ENVIRONMENT := $(CURDIR)/.venv
 
-.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence native-replay native-trace-check native-m2a native-m2a-trace-check
+.PHONY: dev check lint format test evidence build script-syntax run-evidence check-run-evidence native-replay native-trace-check native-m2a native-m2a-trace-check native-m2b native-m2b-compat native-m2b-trace-check
 
 dev:
 	"$(UV)" sync --locked --dev
@@ -44,6 +44,17 @@ native-m2a:
 
 native-m2a-trace-check:
 	"$(NATIVE_PYTHON)" tests/native/m2a_trace_check.py $(value ARGS)
+
+# M2A's historical guarded rejection stays versioned at its accepted commit.
+# M2B has its own complete leaf matrix and current off/prefix compatibility suite.
+native-m2b:
+	"$(NATIVE_PYTHON)" scripts/replay_m2b.py $(value ARGS) --suite full
+
+native-m2b-compat:
+	"$(NATIVE_PYTHON)" scripts/replay_m2b.py $(value ARGS) --suite compat
+
+native-m2b-trace-check:
+	"$(NATIVE_PYTHON)" tests/native/m2b_trace_check.py $(value ARGS)
 
 build:
 	"$(UV)" build --no-sources

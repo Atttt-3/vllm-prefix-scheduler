@@ -5,6 +5,7 @@ The supported native interface and lookup semantics were inspected at upstream
 See docs/research/m2a-prefix-scheduler.md. Native scheduling is never substituted.
 """
 
+import time
 from collections import deque
 
 import vllm
@@ -18,6 +19,7 @@ from vllm.v1.request import Request, RequestStatus
 
 from vllm_prefix_scheduler.config import parse_prefix_config
 from vllm_prefix_scheduler.probe import reusable_prefix_tokens
+from vllm_prefix_scheduler.wait_guard import WaitGuard, WaitGuardError
 
 
 def _require(condition: bool, reason: str) -> None:
@@ -82,7 +84,7 @@ def _validate_prefix_config(vconfig, kv_config, block_size, hash_block_size) -> 
 
 
 class PrefixAsyncScheduler(AsyncScheduler):
-    """A fixed-runtime extension; native allocation and lifecycle stay inherited."""
+    """A fixed-runtime extension with native allocation and async output handling."""
 
     def __init__(
         self,
@@ -101,7 +103,7 @@ class PrefixAsyncScheduler(AsyncScheduler):
             vllm_config.scheduler_config.async_scheduling is True,
             "extension requires effective async_scheduling=True",
         )
-        if self.prefix_config.mode == "prefix":
+        if self.prefix_config.mode in {"prefix", "guarded"}:
             _validate_prefix_config(vllm_config, kv_cache_config, block_size, hash_block_size)
         super().__init__(
             vllm_config=vllm_config,
@@ -113,7 +115,7 @@ class PrefixAsyncScheduler(AsyncScheduler):
             include_finished_set=include_finished_set,
             log_stats=log_stats,
         )
-        if self.prefix_config.mode == "prefix":
+        if self.prefix_config.mode in {"prefix", "guarded"}:
             try:
                 self._validate_native_objects()
             except BaseException as error:
@@ -122,6 +124,8 @@ class PrefixAsyncScheduler(AsyncScheduler):
                 except BaseException as cleanup_error:
                     error.add_note(f"Native shutdown after postcheck failure: {cleanup_error}")
                 raise
+        if self.prefix_config.mode == "guarded":
+            self._wait_guard = WaitGuard(self.prefix_config.max_wait_ms, self._wait_clock_ns)
 
     def _validate_native_objects(self):
         manager = self.kv_cache_manager
@@ -148,10 +152,95 @@ class PrefixAsyncScheduler(AsyncScheduler):
         _require(self.use_v2_model_runner, "native Model Runner V2 is not active")
 
     def schedule(self, throttle_prefills: bool = False):
+        if self.prefix_config.mode == "guarded":
+            guard = self._wait_guard
+            guard.ensure_active()
+            # Keep M2A's recoverable queue transaction outside native failure handling.
+            # Even a one-item window must validate its original enqueue record.
+            self._reorder_waiting()
+            try:
+                output = super().schedule(throttle_prefills=throttle_prefills)
+                # The full AsyncScheduler parent must return successfully. Its final
+                # update hook alone is too early (a profiling context can still fail).
+                for request_id, tokens in output.num_scheduled_tokens.items():
+                    if tokens > 0:
+                        request = self.requests.get(request_id)
+                        if request is not None:
+                            guard.discard(request, "first_dispatch")
+                return output
+            except BaseException:
+                guard.fail("native_schedule")
+                raise
         if self.prefix_config.mode == "prefix" and self.prefix_config.window > 1:
             self._reorder_waiting()
         # Deliberately outside the queue transaction: native effects are not rolled back.
         return super().schedule(throttle_prefills=throttle_prefills)
+
+    def _wait_clock_ns(self) -> int:
+        """Private injection point; never replaces any native clock."""
+        return time.monotonic_ns()
+
+    def add_request(self, request: Request) -> None:
+        if self.prefix_config.mode != "guarded":
+            return super().add_request(request)
+        guard = self._wait_guard
+        guard.ensure_active()
+        existing = self.requests.get(request.request_id)
+        try:
+            result = super().add_request(request)
+        except BaseException:
+            # Native add is not transactional: enqueue may precede the ID binding.
+            # Existing-ID duplicate/session failures never refresh an old record.
+            if existing is None:
+                guard.fail("native_add")
+            raise
+        if existing is None:
+            if self.requests.get(request.request_id) is not request:
+                guard.fail("admission_identity")
+                raise WaitGuardError("wait_guard: admission_identity")
+            if self._fresh_request(request):
+                guard.register(request)
+        return result
+
+    def _preempt_request(self, request, timestamp, drop_stale_output=False):
+        if self.prefix_config.mode != "guarded":
+            return super()._preempt_request(request, timestamp, drop_stale_output)
+        guard = self._wait_guard
+        status_before = request.status
+        preemptions_before = request.num_preemptions
+        try:
+            return super()._preempt_request(request, timestamp, drop_stale_output)
+        except BaseException:
+            # This hook is also called outside schedule (e.g. reset_prefix_cache).
+            guard.fail("native_preempt")
+            raise
+        finally:
+            if (
+                status_before is not RequestStatus.PREEMPTED
+                and request.status is RequestStatus.PREEMPTED
+            ) or request.num_preemptions > preemptions_before:
+                guard.discard(request, "preempted")
+
+    def _free_request(self, request, delay_free_blocks=False):
+        if self.prefix_config.mode != "guarded":
+            return super()._free_request(request, delay_free_blocks)
+        guard = self._wait_guard
+        try:
+            return super()._free_request(request, delay_free_blocks)
+        except BaseException:
+            guard.fail("native_free")
+            raise
+        finally:
+            if request.is_finished():
+                guard.discard(request, "terminal")
+
+    def shutdown(self):
+        if self.prefix_config.mode != "guarded":
+            return super().shutdown()
+        try:
+            return super().shutdown()
+        finally:
+            self._wait_guard.close()
 
     def _fresh_request(self, request) -> bool:
         """Conservative read-only predicate; do not advance native blocked handlers."""
@@ -215,11 +304,24 @@ class PrefixAsyncScheduler(AsyncScheduler):
         return reusable_prefix_tokens(self.kv_cache_manager, request)
 
     def _sort_window(self, candidates):
+        if self.prefix_config.mode == "guarded":
+            guard = self._wait_guard
+            now = guard.read_clock("decision")
+
+            def key(request):
+                if guard.is_protected(request, now):
+                    return (0, guard.require_record(request).sequence)
+                return (1, -self._score_request(request))
+
+            return sorted(candidates, key=key)
         # sorted evaluates each key once and preserves current window order for ties.
         return sorted(candidates, key=self._score_request, reverse=True)
 
     def _reorder_waiting(self) -> None:
         original = self._candidate_window()
+        if self.prefix_config.mode == "guarded":
+            for request in original:
+                self._wait_guard.require_record(request)
         if len(original) < 2:
             return
         ordered = self._sort_window(original)

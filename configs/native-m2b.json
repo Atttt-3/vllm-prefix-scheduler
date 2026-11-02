@@ -1,0 +1,1480 @@
+{
+  "task_id": "M2B-wait-guard",
+  "schema_version": 2,
+  "seed": 42,
+  "vllm_version": "0.32.0",
+  "vllm_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "block_size": 16,
+  "capacities": {
+    "pressure": 5,
+    "ample": 10
+  },
+  "max_num_batched_tokens": 64,
+  "max_num_seqs": 2,
+  "max_num_active_seqs": 2,
+  "max_model_len": 128,
+  "enable_chunked_prefill": true,
+  "watermark": 0.0,
+  "max_tokens": 3,
+  "ignore_eos": true,
+  "synthetic_output_token_id": 9001,
+  "pending_output_depth": 2,
+  "max_steps_per_phase": 64,
+  "repeats": 3,
+  "requests": [
+    {
+      "id": "A",
+      "arrival_time": 0.0,
+      "enqueue_phase": "warmup",
+      "tokens": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        200
+      ]
+    },
+    {
+      "id": "B",
+      "arrival_time": 1.0,
+      "enqueue_phase": "after_A_drained",
+      "tokens": [
+        300,
+        301,
+        302,
+        303,
+        304,
+        305,
+        306,
+        307,
+        308,
+        309,
+        310,
+        311,
+        312,
+        313,
+        314,
+        315,
+        316,
+        317,
+        318,
+        319,
+        320,
+        321,
+        322,
+        323,
+        324,
+        325,
+        326,
+        327,
+        328,
+        329,
+        330,
+        331,
+        332,
+        333,
+        334,
+        335,
+        336,
+        337,
+        338,
+        339,
+        340,
+        341,
+        342,
+        343,
+        344,
+        345,
+        346,
+        347,
+        348
+      ]
+    },
+    {
+      "id": "C",
+      "arrival_time": 2.0,
+      "enqueue_phase": "after_A_drained",
+      "tokens": [
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        201
+      ]
+    }
+  ],
+  "metric": "host-side scheduled/dispatched tokens and monotonic waiting metadata; no model or KV tensors",
+  "source_sha256": {
+    "vllm/config/scheduler.py": "2fb86b1572a4925be59f304d13b4f6ec03d496b67a7c4abbb976ecda2232839a",
+    "vllm/config/vllm.py": "573692a80364d5c373321754c6213b4792ae292ba6aea7d6573ae013c2c71ae9",
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/core/sched/async_scheduler.py": "38d296e77e4d612e696241c67298eb1ca9b6a48b483cd33d35495bf31691032e",
+    "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae",
+    "vllm/v1/core/sched/request_queue.py": "db8d25daf9580d581f18c6b631a6576dfaa7d1474398cd8dc4db1d29745c214d",
+    "vllm/v1/core/kv_cache_manager.py": "d08315437c6b07040d1b7e12d7bd7d6e966c976a286f05a9788098cfdd9754c7",
+    "vllm/v1/core/kv_cache_coordinator.py": "efd7193391197c555ebc0c8f2b593a6c4cb5b7da2978cd57414c0b71170f5971",
+    "vllm/v1/core/single_type_kv_cache_manager.py": "fe38816a388bb5b615231f621adc208e3893d20349865d041cc4f646d4d89b0a",
+    "vllm/v1/core/block_pool.py": "6d1e0d89b43e3b2ae396906b9c2f0551dbe192b60d05f8c1ca2d93a91bbbeea3",
+    "vllm/v1/core/kv_cache_utils.py": "af4164bca819f1cdc416077522a7019936fd38a523a482283eb91b08dae0e57a",
+    "vllm/v1/kv_cache_interface.py": "39ea5be3054f97238f81ba070ea661f1b5975a6268ced5f413d4a057ea449d4a",
+    "vllm/v1/request.py": "dd7c30bf8b0894dc123a739c299c0133566f8cc075b081e45905f1c29506e69d",
+    "vllm/v1/outputs.py": "40b3aec867bca3a419f7b5ed8a33bfebe431f1085a09ff9d45ca4c4640377b19",
+    "vllm/utils/hashing.py": "2e8fcc81dd675ed0fba49de8fd8658b4dab9ae26a917edaf5164bf266c56b4df",
+    "vllm/config/kv_events.py": "b1dbaee3e6830e381e9157fe3bab0d65c357da88ff7cdf8b1e4b3a4e75c82a87",
+    "vllm/distributed/kv_events.py": "fc73fe6a4b52b05183a9b7bb7696e3c468f7ec9d7c37ec08f1cbee989298e949",
+    "vllm/v1/core/kv_cache_metrics.py": "efedec04feff5f04a6d51c6c464290b52ab8c249d65121a9ab9f1370d6b67f47",
+    "vllm/config/offload.py": "1dbcc23fedee34e09fe275b5889c43d77bbbafed7b36d097a620fb3e905c7aab",
+    "vllm/config/parallel.py": "e8dcfb67c1ace957dcc7e12569ee62eb0f983aec3901fdef27c13014cea4b760",
+    "vllm/config/observability.py": "6ebc5cad34ab04e8a060c482e2f1267d996d909fa045b8cb055c3a7b96cd7657",
+    "vllm/config/device.py": "ac7d153000e76d6d6b554fa26eb947c51c62c4295f40fabe13294bc35ba3c066",
+    "vllm/config/model.py": "04ca37ea1d50128a7ddede30e7baa4e0a56bccec85091577a2c81c5de1a8fab8",
+    "vllm/config/aux_output.py": "fb23313546ab0f6302888fc5b7e95ae2eb6f8d222f98b00bcb9aea53238b4a32",
+    "vllm/config/lora.py": "74281df97da18a86591997b26ba962ef31acf4ec2a13b9f8e7d8a14037b2ce66",
+    "vllm/config/multimodal.py": "c30971531e7d10c276ac9d01b0080833f1aa5218880a43e43243414a139e96a8",
+    "vllm/config/speculative.py": "ce135651a7a0343ff526f72e9545932617378161abd03135d67eda6de89c617c",
+    "vllm/config/kv_transfer.py": "6c1aee67cd39507cd52df37725e88ced5baa63037c6912be011c8aa36ca55bfa",
+    "vllm/config/ec_transfer.py": "1e30f1e86d082ab72fb075362abf16598c0d6d6025701a7e39fd7df0fcbbc27f"
+  },
+  "scheduler_reserve_full_isl": true,
+  "long_prefill_token_threshold": 0,
+  "long_prefill_token_threshold_adaptive": false,
+  "model_config_sha256": "8ba006f74fecfaaeb392872a60f4a480e7ec9860153d2e1b769ec81f9a147f8a",
+  "modes": [
+    "native",
+    "off",
+    "prefix",
+    "guarded"
+  ],
+  "window": 16,
+  "max_wait_ms": 500,
+  "scenarios": {
+    "bc_pressure": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "bc_ample": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "apc_off": [
+      "native",
+      "off"
+    ],
+    "probe": [
+      "prefix",
+      "guarded"
+    ],
+    "window": [
+      "prefix",
+      "guarded"
+    ],
+    "score_eviction": [
+      "prefix",
+      "guarded"
+    ],
+    "chunk": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "preemption": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "cancellation": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "id_reuse": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "global_rejection": [
+      "prefix",
+      "guarded"
+    ],
+    "clock_thresholds": [
+      "guarded"
+    ],
+    "clock_absence": [
+      "off",
+      "prefix"
+    ],
+    "enqueue_identity": [
+      "guarded"
+    ],
+    "protected_order": [
+      "guarded"
+    ],
+    "window_age": [
+      "guarded"
+    ],
+    "allocation_retry": [
+      "guarded"
+    ],
+    "hot_flow": [
+      "native",
+      "off",
+      "prefix",
+      "guarded"
+    ],
+    "metadata_terminal": [
+      "guarded"
+    ],
+    "shutdown": [
+      "guarded"
+    ],
+    "repeat_cycles": [
+      "guarded"
+    ],
+    "postcheck_failure": [
+      "prefix",
+      "guarded"
+    ]
+  },
+  "lifecycle": {
+    "chunk": {
+      "num_blocks": 10,
+      "max_num_batched_tokens": 16,
+      "max_num_active_seqs": 1,
+      "prompt_length": 65
+    },
+    "preempt": {
+      "num_blocks": 5,
+      "max_num_batched_tokens": 64,
+      "max_num_active_seqs": 2,
+      "prompt_length": 32,
+      "max_tokens": 3,
+      "watermark": 0.0,
+      "pending_output_depth": 2
+    }
+  },
+  "baseline_commit": "a776cd3467ce1697f9dfd6bf8b858f1952a34de2",
+  "leaves": [
+    {
+      "scenario": "bc_pressure",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_pressure",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_pressure",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_pressure",
+      "mode": "guarded",
+      "variant": "unprotected"
+    },
+    {
+      "scenario": "bc_pressure",
+      "mode": "guarded",
+      "variant": "protected"
+    },
+    {
+      "scenario": "bc_ample",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_ample",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_ample",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "bc_ample",
+      "mode": "guarded",
+      "variant": "unprotected"
+    },
+    {
+      "scenario": "bc_ample",
+      "mode": "guarded",
+      "variant": "protected"
+    },
+    {
+      "scenario": "apc_off",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "apc_off",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "cold"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "partial"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "full"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "exact16"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "exact32"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "one"
+    },
+    {
+      "scenario": "probe",
+      "mode": "prefix",
+      "variant": "skip_read"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "cold"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "partial"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "full"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "exact16"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "exact32"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "one"
+    },
+    {
+      "scenario": "probe",
+      "mode": "guarded",
+      "variant": "skip_read"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "stable_ties"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "all_cold"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "window_one"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "window_limit"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "head_barrier"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "middle_barrier"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "preempt_history"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "partial_progress"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "placeholder"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "in_flight"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "stale"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "resumable"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "unsupported"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "prepend_order"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "score_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "pop_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "prepend_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "repeated_step"
+    },
+    {
+      "scenario": "window",
+      "mode": "prefix",
+      "variant": "other_queues"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "stable_ties"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "all_cold"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "window_one"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "window_limit"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "head_barrier"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "middle_barrier"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "preempt_history"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "partial_progress"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "placeholder"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "in_flight"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "stale"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "resumable"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "unsupported"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "prepend_order"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "score_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "pop_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "prepend_exception"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "repeated_step"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "other_queues"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "missing_singleton"
+    },
+    {
+      "scenario": "window",
+      "mode": "guarded",
+      "variant": "missing_window_one"
+    },
+    {
+      "scenario": "score_eviction",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "score_eviction",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "chunk",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "chunk",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "chunk",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "chunk",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "guarded",
+      "variant": "preempt_free_error"
+    },
+    {
+      "scenario": "preemption",
+      "mode": "guarded",
+      "variant": "preempt_after_transition_error"
+    },
+    {
+      "scenario": "cancellation",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "cancellation",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "cancellation",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "cancellation",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "id_reuse",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "id_reuse",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "id_reuse",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "id_reuse",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "id_reuse",
+      "mode": "guarded",
+      "variant": "stale_object_cleanup"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "apc_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "async_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "priority"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "tensor_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "pipeline_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "data_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "decode_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "prefill_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "aux_output"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "hash_block"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "multiple_groups"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "noncausal"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "window1_apc_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "cuda_only"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "lora"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "kv_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "cpu_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "prefetch_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "pooling"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "expert_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "dbo"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "sliding_window"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "attention_chunk"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "speculative"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "multimodal"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "kv_connector"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "ec_connector"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "encoder_decoder"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "diffusion"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "nonfull_spec"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "external_lb"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "prefix",
+      "variant": "hybrid_lb"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "apc_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "async_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "priority"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "tensor_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "pipeline_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "data_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "decode_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "prefill_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "aux_output"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "hash_block"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "multiple_groups"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "noncausal"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "window1_apc_off"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "cuda_only"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "lora"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "kv_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "cpu_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "prefetch_offload"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "pooling"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "expert_parallel"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "dbo"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "sliding_window"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "attention_chunk"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "speculative"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "multimodal"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "kv_connector"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "ec_connector"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "encoder_decoder"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "diffusion"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "nonfull_spec"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "external_lb"
+    },
+    {
+      "scenario": "global_rejection",
+      "mode": "guarded",
+      "variant": "hybrid_lb"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "before"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "exact"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "after"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "zero"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "negative_zero"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "min_positive_float"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "float_exact"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "float_fraction_before"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "float_fraction_at"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "float_max"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "huge_integer"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "signed_epoch"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_bool"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_float"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_string"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_backward"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_provider_add"
+    },
+    {
+      "scenario": "clock_thresholds",
+      "mode": "guarded",
+      "variant": "fault_provider_decision"
+    },
+    {
+      "scenario": "clock_absence",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "clock_absence",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "same_object_duplicate"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "different_object_duplicate"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "add_failure_prebind"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "add_failure_postbind"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "session_update"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "initial_session_id"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "initial_resumable"
+    },
+    {
+      "scenario": "enqueue_identity",
+      "mode": "guarded",
+      "variant": "initial_abort_immediately"
+    },
+    {
+      "scenario": "protected_order",
+      "mode": "guarded",
+      "variant": "prior_reorder"
+    },
+    {
+      "scenario": "protected_order",
+      "mode": "guarded",
+      "variant": "same_tick"
+    },
+    {
+      "scenario": "window_age",
+      "mode": "guarded",
+      "variant": "outside_then_enter"
+    },
+    {
+      "scenario": "allocation_retry",
+      "mode": "guarded",
+      "variant": "natural_twice"
+    },
+    {
+      "scenario": "hot_flow",
+      "mode": "native",
+      "variant": "default"
+    },
+    {
+      "scenario": "hot_flow",
+      "mode": "off",
+      "variant": "default"
+    },
+    {
+      "scenario": "hot_flow",
+      "mode": "prefix",
+      "variant": "default"
+    },
+    {
+      "scenario": "hot_flow",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "str"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "list"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "generator"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "none"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "unknown_duplicate"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "free_error"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "generator_raise"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "batch_free_error"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "schedule_before_update_error"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "schedule_after_update_error"
+    },
+    {
+      "scenario": "metadata_terminal",
+      "mode": "guarded",
+      "variant": "fault_weakref_release"
+    },
+    {
+      "scenario": "shutdown",
+      "mode": "guarded",
+      "variant": "waiting"
+    },
+    {
+      "scenario": "shutdown",
+      "mode": "guarded",
+      "variant": "running"
+    },
+    {
+      "scenario": "shutdown",
+      "mode": "guarded",
+      "variant": "raises"
+    },
+    {
+      "scenario": "repeat_cycles",
+      "mode": "guarded",
+      "variant": "default"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "prefix",
+      "variant": "queue"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "prefix",
+      "variant": "coordinator"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "prefix",
+      "variant": "full_attention"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "prefix",
+      "variant": "block_size"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "prefix",
+      "variant": "v2"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "guarded",
+      "variant": "queue"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "guarded",
+      "variant": "coordinator"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "guarded",
+      "variant": "full_attention"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "guarded",
+      "variant": "block_size"
+    },
+    {
+      "scenario": "postcheck_failure",
+      "mode": "guarded",
+      "variant": "v2"
+    }
+  ],
+  "clock_plans": {
+    "before": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "decision_ns": 499999999
+    },
+    "exact": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "decision_ns": 500000000
+    },
+    "after": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "decision_ns": 500000001
+    },
+    "zero": {
+      "max_wait_ms": 0,
+      "enqueue_ns": 0,
+      "decision_ns": 0
+    },
+    "negative_zero": {
+      "max_wait_ms": -0.0,
+      "enqueue_ns": 0,
+      "decision_ns": 0
+    },
+    "min_positive_float": {
+      "max_wait_ms": 5e-324,
+      "enqueue_ns": 0,
+      "decision_ns": 1
+    },
+    "float_exact": {
+      "max_wait_ms": 0.5,
+      "enqueue_ns": 0,
+      "decision_ns": 500000
+    },
+    "float_fraction_before": {
+      "max_wait_ms": 0.1,
+      "enqueue_ns": 0,
+      "decision_ns": 100000
+    },
+    "float_fraction_at": {
+      "max_wait_ms": 0.1,
+      "enqueue_ns": 0,
+      "decision_ns": 100001
+    },
+    "float_max": {
+      "max_wait_ms": 1.7976931348623157e+308,
+      "enqueue_ns": 0,
+      "decision_ns": 179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368000000
+    },
+    "huge_integer": {
+      "max_wait_ms": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+      "enqueue_ns": 0,
+      "decision_ns": 10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+    },
+    "signed_epoch": {
+      "max_wait_ms": 0.5,
+      "enqueue_ns": -1000000,
+      "decision_ns": -500000
+    },
+    "fault_bool": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "invalid_kind": "bool",
+      "invalid_value": true
+    },
+    "fault_float": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "invalid_kind": "float",
+      "invalid_value": 1.5
+    },
+    "fault_string": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "invalid_kind": "str",
+      "invalid_value": "0"
+    },
+    "fault_backward": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 10,
+      "invalid_kind": "backward",
+      "invalid_value": 9
+    },
+    "fault_provider_add": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "invalid_kind": "provider_error",
+      "failure_phase": "add"
+    },
+    "fault_provider_decision": {
+      "max_wait_ms": 500,
+      "enqueue_ns": 0,
+      "invalid_kind": "provider_error",
+      "failure_phase": "decision"
+    }
+  }
+}

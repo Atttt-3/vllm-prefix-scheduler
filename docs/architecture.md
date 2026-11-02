@@ -39,11 +39,11 @@ flowchart TD
   F --> H[原生重新查找 分配 抢占及异步占位]
 ```
 
-`guarded` 在配置解析时明确报未实现。扩展不参与原生输出更新、释放或模型执行；原生 running 阶段可能改变评分时的缓存，后续原生重新查找和分配仍具有最终决定权。合成 runner 回归未运行模型或 KV tensor 计算。
+M2B 在本分支启用 `guarded`，新增 `wait_guard.py`；完整状态机见 [M2B 设计](research/m2b-wait-guard.md)，固定Linux验收与限制见 [M2B交接](research/m2b-handoff.md)。只有 guarded 创建实际 Request 对象绑定的保护记录；首次成功入队后登记，父类 schedule 成功返回正 token 输出后定向清理，抢占和终止使用窄包装清理，shutdown 在 finally 清表并关闭保护状态。原生输出更新和模型执行不变；running 阶段可能改变评分时的缓存，后续原生重新查找和分配仍具有最终决定权。合成 runner 回归不运行模型或 KV tensor 计算。
 
 ## 配置与回退
 
-通过完整类名 `vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler` 和 `additional_config["prefix_scheduler"]` 接入，默认 `mode=off`、`window=16`、`max_wait_ms=500`。严格拒绝未知键、非法类型和范围，数值不接受 bool。prefix 启动时验证单 CUDA GPU 语义、所有并行维度为1、原生异步/V2、单因果 full-attention group、FCFS、APC、普通文本生成及块大小一致；分布式、offload、连接器、投机、LoRA、多模态等不兼容配置明确拒绝。
+通过完整类名 `vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler` 和 `additional_config["prefix_scheduler"]` 接入，默认 `mode=off`、`window=16`、`max_wait_ms=500`。严格拒绝未知键、非法类型和范围，数值不接受 bool。prefix/guarded 启动时均验证单 CUDA GPU 语义、所有并行维度为1、原生异步/V2、单因果 full-attention group、FCFS、APC、普通文本生成及块大小一致，构造后再检查实际原生对象；分布式、offload、连接器、投机、LoRA、多模态等不兼容配置明确拒绝。
 
 off 直接调用原生 schedule，不访问窗口、评分或等待时钟，支持 APC 关闭。prefix/window=1 先完成兼容性校验，再直接走原生路径。全冷及同分保持窗口当前 FIFO。不静默更换调度模式。运行中的非候选请求和边界请求继续由原生路径处理。
 
@@ -53,9 +53,11 @@ off 直接调用原生 schedule，不访问窗口、评分或等待时钟，支�
 
 `prefix` 每步重新读取缓存，不保存跨步分数或请求级元数据。只读路径为 `prefix_cache_lookup_enabled(request)` 后调用 coordinator 的 `find_longest_cache_hit(request.block_hashes, request.num_tokens - 1)`，只返回命中长度。不能使用会在 full 报告模式发事件的 `get_computed_blocks` 评分，也不临时关闭事件。
 
-先完成评分和排序，再只替换顺序改变的队头窗口；`prepend_requests` 的 extendleft 语义要求传入反序。super 前提交异常通过真实 deque 原语恢复；已进入原生 schedule 后不回滚。M2B 才考虑 monotonic 等待保护及其元数据生命周期，当前 `max_wait_ms` 不产生保护功能。
+先完成评分和排序，再只替换顺序改变的队头窗口；`prepend_requests` 的 extendleft 语义要求传入反序。super 前提交异常通过真实 deque 原语恢复；已进入原生 schedule 后不回滚。M2B guarded 每次实际排序读一次私有 monotonic 纳秒时钟，达到精确整数纳秒阈值的候选按首次入队序号置前，其余维持稳定 prefix；window=1/单候选仍核对记录但不读排序时钟。配置的浮点等待值使用其精确二进制值，整数安全向上取整，例如0.1ms对应100001ns，不溢出或限幅。
 
-真实 chunk 保持 running 优先级；抢占即使进度归零也由抢占历史、in-flight/stale 等字段排除。窗口不修改 `running`、`kv_holding_waiting` 或 `deferred_waiting`。原生自身跳过 blocked 请求与插件跨屏障重排分别判定。取消时保留的历史对象字段不等同于活跃引用泄漏；ID 复用仅在旧代 pending 排空后验证。测试 generation ledger 不进入生产类。
+guarded 的时钟错误、缺记录及可能部分修改原生状态的生命周期异常锁定实例；正常取消与清理仍可执行。故障只保存简单代码，不持有异常/traceback。shutdown 后不可重新 add/schedule；保护清零不等于原生请求、pending 或 KV 排空。详细状态机与失败合同见 M2B 设计。off/prefix 不创建保护表、不调用保护时钟。
+
+真实 chunk 保持 running 优先级；抢占即使进度归零也由抢占历史、in-flight/stale 等字段排除。窗口不修改 `running`、`kv_holding_waiting` 或 `deferred_waiting`。原生自身跳过 blocked 请求与插件跨屏障重排分别判定。取消时保留的历史对象字段不等同于活跃引用泄漏；ID 复用仅在旧代 pending、终止通知和资源排空后验证。固定原生has_requests包含finished通知，真实空输出沿原生FIFO消费；新增边界后置条件同时检查这些状态。测试 generation ledger 不进入生产类。
 
 ## 验证层次
 
