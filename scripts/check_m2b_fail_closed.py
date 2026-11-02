@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,8 +62,112 @@ def child_check(kind, payload, config):
             )
             require(type(event.get("repeat")) is int, "repeat must be strict integer")
         audit_leaf(payload, meta, config)
+    elif kind == "trace":
+        audit_mutated_trace(payload, config, expected)
     else:
         raise ValueError("unknown negative child operation")
+
+
+RAW_TRACE_ERRORS = {
+    "missing_final_case": "trace must contain entire unique frozen leaf matrix",
+    "missing_final_repeat": "trace must contain entire unique frozen leaf matrix",
+    "duplicate_reopened_case": "trace case duplicated or interleaved",
+    "extra_case": "unexpected trace case",
+    "mislabeled_case": "trace case metadata mismatch",
+    "skipped_event": "failed/skipped/manual reorder trace cannot pass",
+}
+
+
+def write_mutated_trace(source, destination, operation, expected):
+    """Stream one temporary real trace; never retain several full-size copies."""
+    require(operation in RAW_TRACE_ERRORS, "unknown raw trace mutation")
+    cases = list(expected)
+    drop = (
+        {cases[-1]}
+        if operation == "missing_final_case"
+        else {
+            case
+            for case, meta in expected.items()
+            if meta["repeat"] == max(m["repeat"] for m in expected.values())
+        }
+        if operation == "missing_final_repeat"
+        else set()
+    )
+    digest, first_event = hashlib.sha256(), None
+    removed, changed, copied = 0, 0, 0
+    with Path(source).open("rb") as incoming, Path(destination).open("wb") as outgoing:
+        for line in incoming:
+            digest.update(line)
+            event = json.loads(line)
+            if first_event is None:
+                first_event = event
+                if operation in {"extra_case", "mislabeled_case", "skipped_event"}:
+                    altered = dict(event)
+                    if operation == "extra_case":
+                        altered["case"] = "unexpected:raw-trace-case"
+                    elif operation == "mislabeled_case":
+                        altered["variant"] = "raw-trace-mislabel"
+                    else:
+                        altered["event"] = "skipped"
+                    outgoing.write((json.dumps(altered, allow_nan=False) + "\n").encode())
+                    changed += 1
+                    if operation == "mislabeled_case":
+                        continue
+            if event["case"] in drop:
+                removed += 1
+                continue
+            outgoing.write(line)
+            copied += 1
+            if (
+                operation == "duplicate_reopened_case"
+                and not changed
+                and event["case"] != first_event["case"]
+            ):
+                outgoing.write((json.dumps(first_event, allow_nan=False) + "\n").encode())
+                changed += 1
+    require((removed > 0) if drop else (changed == 1), "raw trace mutation had no unique effect")
+    return {
+        "base_sha256": digest.hexdigest(),
+        "removed_records": removed,
+        "changed_records": changed,
+        "copied_records": copied,
+        "affected_cases": sorted(drop),
+    }
+
+
+def audit_mutated_trace(plan, config, expected):
+    from m2b_trace_check import assert_trace
+
+    operation, source = plan["operation"], Path(plan["base_trace"])
+    if operation == "identity":
+        require(
+            fingerprint(source) == plan["base_sha256"], "raw trace positive source hash changed"
+        )
+        assert_trace(source, config)
+        return
+    temporary_trace, observed = None, {}
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="raw-trace-mutation-", dir=plan["temporary_parent"]
+        ) as directory:
+            temporary_trace = Path(directory) / "trace.jsonl"
+            observed = write_mutated_trace(source, temporary_trace, operation, expected)
+            require(
+                observed["base_sha256"] == plan["base_sha256"],
+                "raw trace mutation source hash changed",
+            )
+            assert_trace(temporary_trace, config)
+    finally:
+        print(
+            json.dumps(
+                {
+                    "operation": operation,
+                    **observed,
+                    "temporary_trace_removed": temporary_trace is not None
+                    and not temporary_trace.exists(),
+                }
+            )
+        )
 
 
 # These exercise distinct fault/close entry paths using their original native
@@ -147,6 +252,23 @@ def retry_definitions():
     return definitions
 
 
+def corrupt_fifo_output(events, *, duplicate):
+    outputs = [event for event in events if event["event"] == "output_after"]
+    require(len(outputs) >= 2, "FIFO negative requires two actual output consumptions")
+    require(outputs[0]["output_step"] != outputs[1]["output_step"], "FIFO source already repeats")
+    if duplicate:
+        outputs[1]["output_step"] = outputs[0]["output_step"]
+    else:
+        outputs[0]["output_step"] = outputs[1]["output_step"]
+
+
+def retain_native_kv_reference(events, index):
+    blocks = events[index]["state"]["blocks"]
+    block = next(block for block in blocks if block["null"] is False)
+    require(block["ref_cnt"] == 0, "resource negative source already retains a KV reference")
+    block["ref_cnt"] = 1
+
+
 def primitive_definitions():
     """Each corruption changes a raw fact or required identity, never a summary label."""
     return [
@@ -199,6 +321,32 @@ def primitive_definitions():
             "dispatch_interval",
             lambda e: e["event"] == "dispatch" and bool(e.get("intervals")),
             lambda es, i: es[i]["intervals"][0].update(end=es[i]["intervals"][0]["end"] + 1),
+        ),
+        (
+            "fifo_output_out_of_order",
+            lambda e: (
+                e["event"] == "output_after"
+                and e.get("scenario") == "bc_pressure"
+                and e.get("mode") == "native"
+            ),
+            lambda es, i: corrupt_fifo_output(es, duplicate=False),
+        ),
+        (
+            "fifo_output_duplicate",
+            lambda e: (
+                e["event"] == "output_after"
+                and e.get("scenario") == "bc_pressure"
+                and e.get("mode") == "native"
+            ),
+            lambda es, i: corrupt_fifo_output(es, duplicate=True),
+        ),
+        (
+            "native_kv_reference_retained",
+            lambda e: (
+                e["event"] == "fixture_drained"
+                and any(block["null"] is False for block in e["state"]["blocks"])
+            ),
+            retain_native_kv_reference,
         ),
         (
             "cleanup_reason",
@@ -297,6 +445,9 @@ PRIMITIVE_ERRORS = {
     "window_suffix": "window suffix/order changed outside policy",
     "native_dispatch_tokens": "native dispatch token map changed after return",
     "dispatch_interval": "scheduled interval size mismatch",
+    "fifo_output_out_of_order": "outputs not consumed FIFO",
+    "fifo_output_duplicate": "outputs not consumed FIFO",
+    "native_kv_reference_retained": "KV references remain",
     "cleanup_reason": "guard call/completion mismatch",
     "cleanup_record_retained": "cleanup return disagrees with actual live state",
     "cleanup_completion_missing": "positive dispatch retained protection",
@@ -362,7 +513,7 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--trace", type=Path)
     parser.add_argument("--config", type=Path, default=ROOT / "configs/native-m2b.json")
-    parser.add_argument("--child-check", choices=("results", "config", "leaf"))
+    parser.add_argument("--child-check", choices=("results", "config", "leaf", "trace"))
     parser.add_argument("--payload", type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -380,10 +531,11 @@ def main():
     accepted = assert_trace(args.trace, config)
     require(accepted["matrix_verified"] is True, "negative baseline not fully accepted")
     args.output.mkdir(parents=True, exist_ok=False)
+    base_sha256 = fingerprint(args.trace)
     write(
         args.output / "baseline.json",
         {
-            "trace_sha256": fingerprint(args.trace),
+            "trace_sha256": base_sha256,
             "case_count": accepted["case_count"],
             "matrix_verified": True,
             "note": "Primitive excerpts below are only negative tests, never full-matrix evidence.",
@@ -477,6 +629,16 @@ def main():
         altered = copy.deepcopy(config)
         mutate(altered)
         child(label, "config", altered, fragment)
+    raw_trace_plan = {
+        "base_trace": str(args.trace.resolve()),
+        "base_sha256": base_sha256,
+        "temporary_parent": str(args.output.resolve()),
+    }
+    child("positive_raw_trace", "trace", {**raw_trace_plan, "operation": "identity"})
+    for operation, fragment in RAW_TRACE_ERRORS.items():
+        child(
+            "raw_trace_" + operation, "trace", {**raw_trace_plan, "operation": operation}, fragment
+        )
     mutation_index = []
     selected = select_primitive_sources(args.trace, expected)
     positive_sources = {}
@@ -547,7 +709,11 @@ def main():
     results = []
     for label, command, fragment, changes in commands:
         result = subprocess.run(
-            command, capture_output=True, text=True, env={**environment, **changes}, timeout=60
+            command,
+            capture_output=True,
+            text=True,
+            env={**environment, **changes},
+            timeout=180 if label == "positive_raw_trace" or label.startswith("raw_trace_") else 60,
         )
         (args.output / f"{label}.stdout").write_text(result.stdout)
         (args.output / f"{label}.stderr").write_text(result.stderr)

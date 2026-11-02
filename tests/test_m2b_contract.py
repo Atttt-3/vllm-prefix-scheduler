@@ -1,6 +1,7 @@
 """Local contract and independent oracle negatives, never native acceptance."""
 
 import copy
+import hashlib
 import importlib.util
 import json
 import os
@@ -29,6 +30,16 @@ def config():
 def auditor():
     spec = importlib.util.spec_from_file_location(
         "m2b_oracle_tests", ROOT / "tests/native/m2b_trace_check.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def negative_runner():
+    spec = importlib.util.spec_from_file_location(
+        "m2b_negative_tests", ROOT / "scripts/check_m2b_fail_closed.py"
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -426,3 +437,93 @@ def test_reuse_also_requires_native_ownership_to_be_drained(auditor, mutate, fra
     mutate(event)
     with pytest.raises(ValueError, match=fragment):
         auditor.audit_reuse_boundary(event)
+
+
+@pytest.mark.parametrize("label", ["fifo_output_out_of_order", "fifo_output_duplicate"])
+def test_fifo_negative_mutations_target_raw_consumption_order(auditor, negative_runner, label):
+    events = [
+        {"event": "schedule_after", "step": 0, "pending_outputs": 1},
+        {"event": "schedule_after", "step": 1, "pending_outputs": 2},
+        {"event": "output_after", "output_step": 0, "pending_outputs": 1},
+        {"event": "output_after", "output_step": 1, "pending_outputs": 0},
+        {"event": "drained", "pending_outputs": 0},
+    ]
+    for event in events:
+        event.update(scenario="bc_pressure", mode="native")
+    assert auditor.legacy.audit_fifo(events) == 2
+    _, predicate, mutate = next(
+        definition
+        for definition in negative_runner.primitive_definitions()
+        if definition[0] == label
+    )
+    index = next(i for i, event in enumerate(events) if predicate(event))
+    mutate(events, index)
+    with pytest.raises(ValueError, match=negative_runner.PRIMITIVE_ERRORS[label]):
+        auditor.legacy.audit_fifo(events)
+
+
+def test_resource_negative_mutation_targets_final_nonnull_block(auditor, negative_runner):
+    event = empty_reuse_boundary()
+    event["event"] = "fixture_drained"
+    event["state"]["blocks"].insert(0, {"id": 0, "null": True, "ref_cnt": 1})
+    auditor.audit_resources(event["state"])
+    label = "native_kv_reference_retained"
+    _, predicate, mutate = next(
+        definition
+        for definition in negative_runner.primitive_definitions()
+        if definition[0] == label
+    )
+    assert predicate(event)
+    mutate([event], 0)
+    assert event["state"]["blocks"][0]["ref_cnt"] == 1
+    assert event["state"]["blocks"][1]["ref_cnt"] == 1
+    with pytest.raises(ValueError, match=negative_runner.PRIMITIVE_ERRORS[label]):
+        auditor.audit_resources(event["state"])
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        "missing_final_case",
+        "missing_final_repeat",
+        "duplicate_reopened_case",
+        "extra_case",
+        "mislabeled_case",
+        "skipped_event",
+    ],
+)
+def test_full_trace_mutators_reach_case_stream_gate(auditor, negative_runner, tmp_path, operation):
+    """Local stream-format controls; complete native leaf semantics run on Linux."""
+    expected = {
+        f"{repeat}:local:guarded:{variant}": {
+            "repeat": repeat,
+            "scenario": "local",
+            "mode": "guarded",
+            "variant": variant,
+        }
+        for repeat in range(3)
+        for variant in ("first", "last")
+    }
+    events = [
+        {"case": case, **metadata, "event": event}
+        for case, metadata in expected.items()
+        for event in ("case_begin", "case_end")
+    ]
+    source = tmp_path / "original.jsonl"
+    source.write_text("".join(json.dumps(event) + "\n" for event in events))
+    original = source.read_bytes()
+    assert len(list(auditor.iter_case_groups(source, expected))) == 6
+    output = tmp_path / "mutated.jsonl"
+    observed = negative_runner.write_mutated_trace(source, output, operation, expected)
+    assert source.read_bytes() == original
+    assert observed["base_sha256"] == hashlib.sha256(original).hexdigest()
+    if operation == "missing_final_case":
+        assert observed["removed_records"] == 2
+        assert observed["affected_cases"] == [list(expected)[-1]]
+    elif operation == "missing_final_repeat":
+        assert observed["removed_records"] == 4
+        assert len(observed["affected_cases"]) == 2
+    else:
+        assert observed["changed_records"] == 1
+    with pytest.raises(ValueError, match=negative_runner.RAW_TRACE_ERRORS[operation]):
+        list(auditor.iter_case_groups(output, expected))
