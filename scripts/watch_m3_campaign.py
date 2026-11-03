@@ -27,7 +27,13 @@ def main():
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--submission", type=Path, required=True)
     p.add_argument("--timeout", type=int, default=1800)
+    p.add_argument("--m5-release", action="store_true")
     args = p.parse_args()
+    if args.m5_release:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+        from m4_processes import atomic_write
+
+        from vllm_prefix_scheduler.m5_resources import observe_clear_queue, receipt_job
     args.output.mkdir(parents=True, exist_ok=True)
     ready = {
         "ready": True,
@@ -40,9 +46,15 @@ def main():
         "observed_unix_ns": time.time_ns(),
         "pid": __import__("os").getpid(),
     }
-    with (args.output / "monitor-ready.json").open("x") as stream:
-        json.dump(ready, stream, indent=2)
-        stream.write("\n")
+    ready_path = args.output / "monitor-ready.json"
+    if args.m5_release:
+        if ready_path.exists():
+            raise FileExistsError(ready_path)
+        atomic_write(ready_path, ready)
+    else:
+        with ready_path.open("x") as stream:
+            json.dump(ready, stream, indent=2)
+            stream.write("\n")
     print("WATCH_READY", flush=True)
     deadline = time.monotonic() + args.timeout
     job = None
@@ -76,7 +88,11 @@ def main():
                 submission = json.loads(args.submission.read_text())
                 if submission.get("returncode") != 0:
                     return 3
-                job = submission["stdout"].strip().split(";")[0]
+                job = (
+                    receipt_job(submission)
+                    if args.m5_release
+                    else submission["stdout"].strip().split(";")[0]
+                )
                 if not job.isdigit():
                     raise RuntimeError("Invalid submitted job identity")
             data = query(f"scontrol show job {job}")
@@ -99,7 +115,20 @@ def main():
                 "DEADLINE",
                 "REVOKED",
             }:
-                active = query('squeue -h -o "%i|%T|%j"')
+                if args.m5_release:
+                    with (args.output / "queue-watch.jsonl").open("x") as queue_log:
+
+                        def journal_query(command):
+                            row = query(command)
+                            queue_log.write(json.dumps(row) + "\n")
+                            queue_log.flush()
+                            return row
+
+                        records, clear = observe_clear_queue(journal_query, job, time.sleep)
+                    active = records[-1]
+                else:
+                    active = query('squeue -h -o "%i|%T|%j"')
+                    clear = active["returncode"] == 0
                 for name, value in [
                     ("slurm-final.json", data),
                     ("active-final.json", active),
@@ -108,7 +137,7 @@ def main():
                         json.dump(value, target, indent=2)
                         target.write("\n")
                 print(f"TERMINAL_CAPTURED {state}", flush=True)
-                return 0 if active["returncode"] == 0 else 4
+                return 0 if clear else 4
             time.sleep(1)
     return 2
 

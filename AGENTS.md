@@ -6,6 +6,8 @@ Read `docs/state.md`, `docs/project-plan.md`, `docs/architecture.md`, and releva
 
 ## Current scope
 
+This isolated worktree is authorized for the M5-paired-performance design, implementation and local preflight from accepted M4 delivery `f4d94d3d22a967efeeb3a00bc13f6a6b8591835b`. The M4 paragraphs below are historical. Follow `docs/research/m5-design.md` and `configs/m5-performance.json`. Obtain explicit M5 calibration and formal allocation approval separately before any submission. Preserve historical worktrees and evidence. M5 uses a dedicated draft stacked on `feat/m4-scheduler-stability`. Keep PRs unmerged and leave M6 to project coordination.
+
 M4 execution and the explicitly authorized audit-only revision are complete and await project acceptance; see docs/research/m4-handoff.md. Actual execution remains 5525bda3eff2dad20f614eaca7718383c31448e4 and independent analysis is 34fa4eabb846b8095fe7aa9ecdcc05d2a6bf27a7. The original frozen F failure is retained. All three M4 allocations are consumed; the user explicitly authorized no additional GPU for the audit revision. No further allocation, automatic merge, or M5 is authorized.
 
 This isolated worktree is now explicitly authorized for M4-scheduler-stability from M3 delivery 12705a8e392eaa90c019de8e347ee31134ab3ca4. Follow docs/research/m4-design.md and configs/m4-stability.json. Earlier M3 stop-at-M3 language below records historical scope and is superseded only for this isolated M4 task. M4 has its own maximum three serialized single-3090 allocations, twenty minutes each, sixty requested minutes total; no M3 budget transfer or unknown-terminal exception. Preserve all historical records and worktrees. No automatic PR merges or M5.

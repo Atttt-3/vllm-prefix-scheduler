@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "role": "D7",
+  "scope": "late-native-admission-and-output-diagnostic",
+  "runs": [
+    "thermal-pilot",
+    "E1",
+    "E2",
+    "E3",
+    "E4"
+  ],
+  "capture": [
+    "pilot",
+    "endpoint",
+    "step",
+    "step",
+    "endpoint"
+  ],
+  "trace": {
+    "start_offset_ns": 3500000000,
+    "window_ns": 4000000000,
+    "arm_lead_ns": 250000000,
+    "event_limit": 32768,
+    "batch_limit": 1024
+  },
+  "signature": {
+    "bin_ns": 500000000,
+    "minimum_gaps": 10,
+    "minimum_requests": 2,
+    "median_gap_ns": 30000000,
+    "consecutive_bins": 2
+  },
+  "runtime_sources": {
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4"
+  },
+  "budget": {
+    "additional_allocations": 1,
+    "devices_per_allocation": 1,
+    "gpu": "RTX 3090",
+    "serial": true,
+    "request_minutes": 20,
+    "pilot_seconds": 150,
+    "measured_conditioning_seconds": 440,
+    "nonconditioning_envelope_seconds": 325,
+    "review_cleanup_seconds": 120,
+    "work_estimate_s": 1040,
+    "work_deadline_s": 1050,
+    "retries": 0,
+    "trace_export_margin_seconds": 5
+  },
+  "can_qualify_C3": false,
+  "D6_plan_sha256": "0cce4570b6354e90d9d73a6cdc1771e98c51ea89f4ba16cf52bf71dd920b3275",
+  "D6_analysis_sha256": "334a2266605317de3cdb42f986d295ff67e1e0f5d251348f6e6513e552ff6d99",
+  "late_timeline_sha256": "7ac4310bdacea89f31af914f74072ce7d152bb3cbdfac7d1ebe8bb9c7ada3a6b",
+  "waiting": {
+    "noticeable_ns": 50000000,
+    "sustained_ns": 500000000
+  }
+}

@@ -1,0 +1,393 @@
+{
+  "schema_version": 1,
+  "measurement_schema_version": 2,
+  "resource_schema_version": 2,
+  "task_id": "M5-paired-performance",
+  "baseline_commit": "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b",
+  "baseline_config": "configs/baseline-3090.json",
+  "attention_backend": "FLASH_ATTN",
+  "upstream_commit": "5df63a7203cdb9328d824a27b682e77c7b9928be",
+  "model_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "tokenizer_revision": "1cfa9a7208912126459214e8b04321603b3df60c",
+  "environment": {
+    "PYTHONHASHSEED": "42",
+    "VLLM_USE_V2_MODEL_RUNNER": "1",
+    "VLLM_DISABLE_REQUEST_ID_RANDOMIZATION": "1",
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1"
+  },
+  "model_files": {
+    "config.json": {
+      "size": 726,
+      "content_id": "e49eccdc32f36da9c09cfa0e737084f9e0105e5e",
+      "kind": "git_blob_sha1"
+    },
+    "generation_config.json": {
+      "size": 239,
+      "content_id": "20a8a9156fc8c3f25295ca067f61fdf120d517c5",
+      "kind": "git_blob_sha1"
+    },
+    "merges.txt": {
+      "size": 1671853,
+      "content_id": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+      "kind": "git_blob_sha1"
+    },
+    "model-00001-of-00003.safetensors": {
+      "size": 3957900840,
+      "content_id": "328a91d3122359d5547f9d79521205bc0a46e1f79a792dfe650e99fc2d651223",
+      "kind": "lfs_sha256"
+    },
+    "model-00002-of-00003.safetensors": {
+      "size": 3987450520,
+      "content_id": "6cd087b316306a68c562436b5492edbcf6e16c6dba3a1308279caa5a58e21ca5",
+      "kind": "lfs_sha256"
+    },
+    "model-00003-of-00003.safetensors": {
+      "size": 99630640,
+      "content_id": "e4bf436957184f4eeb86a80e9db394503f1f56446b2e6b7edeac5b81470f4ca1",
+      "kind": "lfs_sha256"
+    },
+    "model.safetensors.index.json": {
+      "size": 32819,
+      "content_id": "95c0a0059df040d75dc6c396b174382cf61d2f91",
+      "kind": "git_blob_sha1"
+    },
+    "tokenizer.json": {
+      "size": 11422654,
+      "content_id": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4",
+      "kind": "lfs_sha256"
+    },
+    "tokenizer_config.json": {
+      "size": 9732,
+      "content_id": "417d038a63fa3de29cfde265caedae14d1a58d92",
+      "kind": "git_blob_sha1"
+    },
+    "vocab.json": {
+      "size": 2776833,
+      "content_id": "4783fe10ac3adce15ac8f358ef5462739852c569",
+      "kind": "git_blob_sha1"
+    }
+  },
+  "extra_upstream_sha256": {
+    "vllm/outputs.py": "370d233794f0b571174e63cf318ed282ec19b053dd2991a1c28d7340d4423a4e",
+    "vllm/v1/engine/__init__.py": "5a525d4fc6e9a802be0d211d98b42cd196ac3bfd91906eb98a9dd47a15ecac22",
+    "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/engine/core_client.py": "386b528a69029507f80a2df4d6df2a4fa6ba2ba811501dc3449ceea58b5cd90a",
+    "vllm/v1/engine/input_processor.py": "97f66659814177d3f7b72b959f09201cbdd1794de21ec1542fe8970f18a1a2b6",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4",
+    "vllm/v1/metrics/stats.py": "f594c5ea0f9caebe54737528e0da0ffbbdc909d74cfd625e0e384afb324d9663",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/worker/gpu_worker.py": "e970aa29a738aa15cd963d9f9202ca6d3d504e98fd344959fd998e940472a5a0",
+    "vllm/engine/arg_utils.py": "c10281277fd9a90dc8b22670db4f1af53708c5caa2aefee7aa861fa579329219",
+    "vllm/config/utils.py": "eb3f40bb32522dfdd802f9c456184c501d30dc0fcd36d0edebcb04b510e3ec8b",
+    "vllm/v1/worker/gpu/input_batch.py": "2e4c2ebdb2c1ce04026d15288f5408624d880f335735636985efa3a3209a56f2",
+    "vllm/v1/worker/gpu/states.py": "5ca84b57d4f4233ba4013ed42f44b7917cdd7a14b6ea4dabf4ba8de5c9d5f4d6",
+    "vllm/v1/attention/backends/flash_attn.py": "e6637cb5a66c4284a32a634532a9c71c236249aa7f3dfefb34544984fc75663a",
+    "vllm/v1/worker/gpu/model_states/default.py": "f1d34d5c8c03be6e5afec8c2a24480ec259ca7c87392462f4e52d6c4eb775733",
+    "vllm/model_executor/models/qwen3.py": "06bee457e1278cecc3d0745f45c44b4711243330e8c2c19d5c732625b67f1374"
+  },
+  "production_policy_change": false,
+  "request_count": 500,
+  "block_size": 16,
+  "modes": [
+    "native",
+    "off",
+    "prefix",
+    "guarded"
+  ],
+  "window": 16,
+  "max_wait_ms": 500,
+  "sampling": {
+    "temperature": 0.0,
+    "ignore_eos": true,
+    "seed": 42,
+    "detokenize": false
+  },
+  "gates": {
+    "deadline_ns": 30000000000,
+    "submit_p99_ns": 5000000,
+    "submit_max_ns": 25000000,
+    "max_clock_rtt_ns": 5000000,
+    "min_competing_windows": 20,
+    "min_reusable_evictions": 5,
+    "min_calibration_completion": 0.99,
+    "overhead_ttft_rel": 0.05,
+    "overhead_ttft_ns": 2000000,
+    "overhead_throughput_rel": 0.05,
+    "max_allocation_work_s": 1050
+  },
+  "scenarios": {
+    "burst": {
+      "prefix_tokens": 512,
+      "suffix_tokens": 129,
+      "families": 64,
+      "prime_families": 8,
+      "hot_percent": 50,
+      "output_tokens": 16,
+      "burst_size": 20,
+      "burst_gap_ns": 2000000
+    },
+    "mixed": {
+      "prefix_tokens": 512,
+      "suffix_tokens": 129,
+      "families": 64,
+      "prime_families": 8,
+      "hot_percent": 50,
+      "output_tokens": 16,
+      "burst_size": 20,
+      "burst_gap_ns": 2000000
+    },
+    "ample": {
+      "prefix_tokens": 96,
+      "suffix_tokens": 33,
+      "families": 4,
+      "prime_families": 4,
+      "hot_percent": 50,
+      "output_tokens": 16,
+      "burst_size": 20,
+      "burst_gap_ns": 2000000
+    },
+    "all-cold": {
+      "prefix_tokens": 512,
+      "suffix_tokens": 129,
+      "families": 0,
+      "prime_families": 0,
+      "hot_percent": 0,
+      "output_tokens": 16,
+      "burst_size": 20,
+      "burst_gap_ns": 2000000
+    },
+    "serial": {
+      "prefix_tokens": 96,
+      "suffix_tokens": 33,
+      "families": 4,
+      "prime_families": 4,
+      "hot_percent": 50,
+      "output_tokens": 8,
+      "burst_size": 20,
+      "burst_gap_ns": 2000000
+    },
+    "mechanism": {
+      "pressure_blocks": 129,
+      "ample_blocks": 257,
+      "max_model_len": 2048,
+      "prefix_tokens": 1024,
+      "cold_prompt_tokens": 1537,
+      "output_tokens": 8
+    }
+  },
+  "matrix": [
+    {
+      "id": "burst-01",
+      "scenario": "burst",
+      "seed": 52001,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "burst-02",
+      "scenario": "burst",
+      "seed": 52002,
+      "order": [
+        "off",
+        "prefix",
+        "native",
+        "guarded"
+      ]
+    },
+    {
+      "id": "burst-03",
+      "scenario": "burst",
+      "seed": 52003,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    },
+    {
+      "id": "burst-04",
+      "scenario": "burst",
+      "seed": 52004,
+      "order": [
+        "guarded",
+        "native",
+        "prefix",
+        "off"
+      ]
+    },
+    {
+      "id": "burst-05",
+      "scenario": "burst",
+      "seed": 52005,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "mixed-01",
+      "scenario": "mixed",
+      "seed": 52101,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "mixed-02",
+      "scenario": "mixed",
+      "seed": 52102,
+      "order": [
+        "off",
+        "prefix",
+        "native",
+        "guarded"
+      ]
+    },
+    {
+      "id": "mixed-03",
+      "scenario": "mixed",
+      "seed": 52103,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    },
+    {
+      "id": "mixed-04",
+      "scenario": "mixed",
+      "seed": 52104,
+      "order": [
+        "guarded",
+        "native",
+        "prefix",
+        "off"
+      ]
+    },
+    {
+      "id": "mixed-05",
+      "scenario": "mixed",
+      "seed": 52105,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    },
+    {
+      "id": "ample-01",
+      "scenario": "ample",
+      "seed": 52201,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "ample-02",
+      "scenario": "ample",
+      "seed": 52202,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    },
+    {
+      "id": "all-cold-01",
+      "scenario": "all-cold",
+      "seed": 52301,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "all-cold-02",
+      "scenario": "all-cold",
+      "seed": 52302,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    },
+    {
+      "id": "serial-01",
+      "scenario": "serial",
+      "seed": 52401,
+      "order": [
+        "native",
+        "off",
+        "guarded",
+        "prefix"
+      ]
+    },
+    {
+      "id": "serial-02",
+      "scenario": "serial",
+      "seed": 52402,
+      "order": [
+        "prefix",
+        "guarded",
+        "off",
+        "native"
+      ]
+    }
+  ],
+  "calibration": {
+    "split_c3": true,
+    "qualification_authorization_schema_version": 2,
+    "qualification_predecessor_roles": ["D8"],
+    "stages": [
+      "C1",
+      "C2",
+      "C3",
+      "C4",
+      "C5",
+      "C6"
+    ],
+    "seed_base": 51000,
+    "candidate_rates": [
+      3,
+      4,
+      5,
+      6,
+      8
+    ],
+    "pilot_count": 60,
+    "serial_pilot_count": 20,
+    "serial_pilot_interval_ms": 1000
+  },
+  "budget": {
+    "gpus_per_allocation": 1,
+    "minutes_per_allocation": 20,
+    "calibration_allocations": 6,
+    "split_calibration_allocations": 7,
+    "formal_allocations": 16,
+    "serial": true,
+    "unknown_terminal_blocks": true
+  }
+}

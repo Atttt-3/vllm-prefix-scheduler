@@ -1,0 +1,196 @@
+{
+  "schema_version": 1,
+  "role": "D9",
+  "scope": "original-four-slot-dual-window-admission-and-output-diagnostic",
+  "can_qualify_C3": false,
+  "retained_C3": {
+    "status": "blocked",
+    "sha256": "e8618fde6793d2c2d749e32b7f8052a495f695ab1ddc68dc015ac58012495866"
+  },
+  "retained_D8": {
+    "status": "diagnostic-complete",
+    "analysis_sha256": "568ca1a806419f55e08937526ea3fe2d246d747bdc8a0efc23d3a4dc1931bb79",
+    "proposal_sha256": "18907f0bdd93c6ab1f51f26446b4a689c411fa880578a8b7540bbe8498ec8772",
+    "execution_commit": "dab68d40a4b786d467e49b8180134175cdd690f6",
+    "observed_endpoint_stability": "unstable"
+  },
+  "history_sha256": {
+    "D3_analysis": "d7f18b84ac663ce7d6463cdf1ee8547bac0381b414216ba87faaa0db19b401a5",
+    "D6_analysis": "334a2266605317de3cdb42f986d295ff67e1e0f5d251348f6e6513e552ff6d99",
+    "D7_analysis": "9c0d4f4c4548522c88546751dc4cb29c6c8535fc565609342265230c20801a83",
+    "D8_analysis": "568ca1a806419f55e08937526ea3fe2d246d747bdc8a0efc23d3a4dc1931bb79",
+    "cross_raw_audit": "3e9738543540509a47316beee3d9893ac6f825fbf2cf7cc50e79a39660c84872",
+    "cross_fixed_windows": "28a31bfd595ac9bf62621b7d9d434ceab9b8e4234c7ef0f05eb31316c4461e57"
+  },
+  "D2R110_plan_sha256": "891231f0444a0347be7104bb53ac4c4586d91c7d68e5500a5d971e29046b55c3",
+  "runtime_config_sha256": "bb8b413a998da434675065da3df1605630295d04e23c51802d82ba679d5ddaac",
+  "baseline_config_sha256": "3b61fad68ca765f1f78299414af59fcc45c79aab2683840d46e6bc3adc32b362",
+  "target": {
+    "input_sha256": "e52cd3e00563b3e7827b089faa3e4a8aaffafa8a873867b2dfde8c6b5ea713ab",
+    "scenario": "mixed",
+    "seed": 51213,
+    "mode": "guarded",
+    "tier": "endpoint",
+    "count_per_engine": 60,
+    "arrival_rate_rps": 8,
+    "fresh_engines": [
+      "thermal-pilot",
+      "E1",
+      "E2",
+      "E3",
+      "E4"
+    ]
+  },
+  "runs": [
+    "thermal-pilot",
+    "E1",
+    "E2",
+    "E3",
+    "E4"
+  ],
+  "capture": [
+    "pilot",
+    "endpoint",
+    "step",
+    "step",
+    "endpoint"
+  ],
+  "profile": {
+    "max_num_seqs": 4,
+    "max_num_active_seqs": null,
+    "num_gpu_blocks_override": null,
+    "num_gpu_blocks": 5553,
+    "max_num_batched_tokens": 2048
+  },
+  "trace": {
+    "windows_ns": [
+      [
+        0,
+        3000000000
+      ],
+      [
+        6000000000,
+        8500000000
+      ]
+    ],
+    "arm_lead_ns": 250000000,
+    "event_limit": 32768,
+    "batch_limit": 1024
+  },
+  "signature": {
+    "bin_ns": 500000000,
+    "minimum_gaps": 10,
+    "minimum_requests": 2,
+    "median_gap_ns": 30000000,
+    "consecutive_bins": 2
+  },
+  "waiting": {
+    "noticeable_ns": 50000000,
+    "sustained_ns": 500000000
+  },
+  "runtime_sources": {
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4"
+  },
+  "native_timing": {
+    "schema_version": 1,
+    "source_sha256": {
+      "vllm/v1/metrics/stats.py": "f594c5ea0f9caebe54737528e0da0ffbbdc909d74cfd625e0e384afb324d9663",
+      "vllm/outputs.py": "370d233794f0b571174e63cf318ed282ec19b053dd2991a1c28d7340d4423a4e",
+      "vllm/v1/engine/__init__.py": "5a525d4fc6e9a802be0d211d98b42cd196ac3bfd91906eb98a9dd47a15ecac22",
+      "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
+      "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4",
+      "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+      "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae"
+    }
+  },
+  "stability_gate": {
+    "ttft": "nearest-rank p95 of planned arrival to first real client token",
+    "ttft_p95_absolute_floor_ns": 2000000,
+    "ttft_p95_relative_margin": 0.05,
+    "throughput_both_last_terminal_relative_margin": 0.05
+  },
+  "pairs": {
+    "primary": [
+      [
+        "E1",
+        "E4"
+      ],
+      [
+        "E2",
+        "E3"
+      ],
+      [
+        "E1",
+        "E2"
+      ],
+      [
+        "E4",
+        "E3"
+      ]
+    ],
+    "thermal": [
+      [
+        "E1",
+        "E2"
+      ],
+      [
+        "E1",
+        "E3"
+      ],
+      [
+        "E1",
+        "E4"
+      ],
+      [
+        "E2",
+        "E3"
+      ],
+      [
+        "E2",
+        "E4"
+      ],
+      [
+        "E3",
+        "E4"
+      ]
+    ],
+    "historical_d8": [
+      [
+        "E1",
+        "E2"
+      ],
+      [
+        "E3",
+        "E4"
+      ],
+      [
+        "E1",
+        "E4"
+      ]
+    ]
+  },
+  "budget": {
+    "additional_allocations": 1,
+    "devices_per_allocation": 1,
+    "gpu": "RTX 3090",
+    "serial": true,
+    "request_minutes": 20,
+    "pilot_seconds": 150,
+    "measured_conditioning_seconds": 440,
+    "nonconditioning_envelope_seconds": 325,
+    "review_cleanup_seconds": 120,
+    "work_estimate_s": 1040,
+    "work_deadline_s": 1050,
+    "retries": 0,
+    "trace_export_margin_seconds": 5,
+    "prior_allocations": 16,
+    "cumulative_allocations": 17,
+    "cumulative_requested_minutes": 340,
+    "qualification_allocations": 0
+  }
+}
