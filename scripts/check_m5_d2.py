@@ -1015,8 +1015,11 @@ def review(attempt, proposal_path):
             "D2 device journal differs from allocation",
         )
         if samples_path.stat().st_size:
-            samples = device_samples(
-                samples_path, device(allocation["gpu_before"])[0], fixed_affinity=not d10
+            sample_gpu = device(allocation["gpu_before"])[0]
+            samples = (
+                device_samples(samples_path, sample_gpu, fixed_affinity=False)
+                if d10
+                else device_samples(samples_path, sample_gpu)
             )
         else:
             require(not resource["complete"], "Completed D2 has an empty device journal")
