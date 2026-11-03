@@ -487,3 +487,29 @@ D9 从 D8 交付 `63c84db905797974c830213316c28290839f25f5` 起步。执行与�
 python scripts/check_m5_d9.py --attempt runs/M5-paired-performance/attempts/d9-01 --proposal configs/m5-d9.json --output NEW_PRIVATE_AUDIT
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D10 原四槽主机隔离预检
+
+D8 与 D9 在各自冻结执行提交复算均与原报告逐字节一致，前 17 次资源账本保持一致。两批端点 E1/E4 的 TTFT p95 差分别为 446.483/138.218 ms。两批首个同 ID 请求 `000000` 的提交至首 token 差分别仅 2.273/2.790 ms，首至末 token 却在 D8 为 546.000/394.496 ms，在 D9 为 514.091/386.856 ms。快轮在第二个请求提交前已收到第 2 个 token，慢轮在该时点仍未收到。计划到达 T0 后 3–6 秒的 24 个同 ID 请求，提交至首 token 中位数在 D8 为 850.507/222.230 ms，在 D9 为 547.685/210.374 ms。D9 两个双窗快轮也在 4.825/4.773 秒形成持续待接纳。早段服务差异早于积压，E1 的原生入队和执行边界仍缺证。1 Hz 设备样本中，慢轮早段功率偏低，SM 频率相近，测量期均为 P2。上述关联不足以区分主机供给和设备行为。
+
+冻结方案只改变作业内 CPU 放置。A 继承同一组 8 个 CPU，B 把客户端及采样器分配到两个物理核心，将余下核心留给 EngineCore。选择 B→A→A→B，先把隔离应用到两个历史慢段均出现过的第一轮位置。四轮保持 D8 四槽、8 请求/秒、原热准入、相同原生标量端点和冻结输入。独立审查用 A/A 原门槛越界及原早段慢窗作为干预可判读条件，用 B/B 原门槛、对应慢窗消失、对慢 A 的 TTFT 改善和对任一 A 的性能非劣作判定。A 无法复现时记证据不足。通过后还需另做同布局四个端点轮，复算原三对资格前置，D10 不替代该入口。 [D10 冻结设计](m5-design.md#d10-原四槽主机-cpu-隔离)
+
+冻结执行及审查为 `503630989fe2b7175ebacde027e282710139a7c8`，方案 SHA-256 为 `e80ddbce81ddaa3fda085f05d4b062eb0323fff180cf29f71c25fe87c8c53b27`。完整本地检查为 **1,069 项通过、3 项固定 Linux opt-in 跳过**。早期集成检查发现 D8 测试夹具收到新增参数，最终版本把可变采样器掩码参数限定到 D10。真实叶子进程接受两种放置正控，拒绝七类语义篡改，真实暂存子进程接受五个原始规格，拒绝九项输入篡改。集群 Linux CPU 核对实际活线程掩码、2/6 物理核心分配、采样器掩码和客户端恢复，同时核对九项暂存文件、五个规格及 47 个固定 vLLM 源码文件。GPU 性能结果待实测。
+
+| 私有证据 | SHA-256 |
+| --- | --- |
+| D8/D9 端点原件交叉复算 | `1316c25dca4ca7ccce2753873a7083383dce1940a08681df7f5bc8bf68585c33` |
+| 前 17 次资源账本 | `2fdc5990d82e10523a434520847c7f7d3a5853b69b764d2b3f134f7f6238724c` |
+| 本地完整检查 manifest | `b5e732cccc920de0308c35517e8a9578a05be521c624e2d87a1f65de9b1c4eb6` |
+| 真实叶审查子进程 | `5d1346998032c441f127fbe3a8a409035dfa33867a3fa6bad482e732ace93927` |
+| 真实暂存正负控 | `ed9909094093aa9947633362e3891b433e608576de08c3885c6302f48df81aa2` |
+| 集群 CPU 预检 | `8e1136cd480c4c36c2d77b727bc4ed9fa3f98f9caf10ac6290c64f20da5ed80a` |
+
+最小新增预算为 **一次串行单 RTX 3090、最多 20 分钟、无重试**，作业内估算 1,035 秒，硬上限 1,050 秒。材料保存在 `runs/M5-paired-performance/d10-review/`。本轮预检阶段新增 GPU 分配 0，原 C3 继续 `blocked`，原热状态、TTFT 和两项吞吐门槛保留，资格复验未启动。
+
+预算获批后从干净的冻结执行提交运行 D10 控制器。控制器核对 CPU 预检、前 17 次释放和本批授权，独立 watcher 就绪后才提交。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D10_AUTH --phase calibration --role D10 --attempt d10-01
+python scripts/check_m5_d10.py --attempt runs/M5-paired-performance/attempts/d10-01 --proposal configs/m5-d10.json --output NEW_PRIVATE_D10_AUDIT
+```
