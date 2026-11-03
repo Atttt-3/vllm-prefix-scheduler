@@ -35,7 +35,9 @@ def verify_analysis(execution, analysis):
     require(execution == analysis, "M5 analysis requires the frozen execution auditor")
 
 
-def validate_profile(profile, run, config, source, git_files):
+def validate_profile(profile, run, config, source, git_files, *, d5_expected_profile=None):
+    if run.get("pair_id") == "D5":
+        require(d5_expected_profile is not None, "D5 capacity profile expectations are required")
     baseline = read_json(ROOT / config["baseline_config"])
     expected = {
         key: baseline[key]
@@ -70,6 +72,26 @@ def validate_profile(profile, run, config, source, git_files):
             max_model_len=diagnostic["max_model_len"],
             num_gpu_blocks=diagnostic[f"{run['mechanism']}_blocks"],
         )
+    if d5_expected_profile is not None:
+        active_cap = d5_expected_profile.get("max_num_active_seqs")
+        require(
+            run["pair_id"] == "D5"
+            and run["mode"] == "guarded"
+            and run["tier"] == "endpoint"
+            and run["mechanism"] is None
+            and type(active_cap) is int
+            and active_cap in (4, 5)
+            and all(type(value) is int for value in d5_expected_profile.values())
+            and d5_expected_profile
+            == {
+                "max_num_seqs": 5,
+                "max_num_active_seqs": active_cap,
+                "max_num_batched_tokens": 2048,
+                "num_gpu_blocks": 5553,
+            },
+            "D5 runtime expectations differ from its frozen capacity contrast",
+        )
+        expected.update(d5_expected_profile)
     native = run["mode"] == "native"
     if run["tier"] == "endpoint":
         expected["scheduler_type"] = (
@@ -125,15 +147,31 @@ def validate_profile(profile, run, config, source, git_files):
     )
 
 
-def sealed_leaf(directory, remote_root, run, table, config_path, config, job, git_files, commit):
+def sealed_leaf(
+    directory,
+    remote_root,
+    run,
+    table,
+    config_path,
+    config,
+    job,
+    git_files,
+    commit,
+    *,
+    d5_expected_profile=None,
+):
     leaf = directory / "node" / run["id"]
     raw = leaf / "raw"
     collector = leaf / "collector"
     status = check_run(collector, require_success=True)
     manifest = read_json(collector / "manifest.json")
-    expected_layer = (
-        "performance" if read_json(directory / "planned.json")["phase"] == "formal" else "gpu"
-    )
+    planned = read_json(directory / "planned.json")
+    expected_layer = "performance" if planned["phase"] == "formal" else "gpu"
+    if d5_expected_profile is not None:
+        require(
+            planned["role"] == "D5" and planned["phase"] == "calibration",
+            "D5 capacity profile cannot be used outside its diagnostic allocation",
+        )
     require(
         manifest["schema_version"] == 2
         and manifest["task_id"] == TASK
@@ -236,7 +274,14 @@ def sealed_leaf(directory, remote_root, run, table, config_path, config, job, gi
         if name == "Makefile" or name.split("/")[0] in ("src", "scripts", "tests", "configs")
     }
     require(source["source_sha256"] == source_files, "bound runtime project sources differ")
-    validate_profile(engine["profile"], run, config, source, git_files)
+    validate_profile(
+        engine["profile"],
+        run,
+        config,
+        source,
+        git_files,
+        d5_expected_profile=d5_expected_profile,
+    )
     audit = leaf / "audit.json"
     require(digest(audit) == run["audit_sha256"], "on-node audit record changed")
     return {

@@ -122,3 +122,22 @@ python scripts/prepare_m5_d4.py --plan configs/m5-d4.json --config configs/m5-pe
   --d3-analysis runs/M5-paired-performance/d3-review/analysis.json \
   --output runs/M5-paired-performance/d4-prepared
 ```
+
+## D5 隔离活跃准入上限
+
+[D5 冻结方案](../../configs/m5-d5.json) 从 D4 的到达压力证据出发，在同一张原始 mixed 8 请求/秒表上比较活跃准入上限。五个新引擎均固定 5 个 runner 槽位、2,048 token 批预算、5,553 个实际物理 KV 块、原生产 guarded 策略及原生端点采集。热试跑使用 4 个活跃槽，随后四轮依次使用 4、5、5、4 个活跃槽，各 60 条。全部复用原 8 请求/秒预热输入、APC 重置与预置，以及 D3 热准入、时钟和源码核验。
+
+固定版本的 vLLM 从不同字段读取 runner 槽位与活跃准入上限。D5 仅在诊断回放中传入显式 KV 块覆盖。覆盖会替代容量自动估计，五槽位能否用此容量启动由热试跑实测核验。每个引擎在首个预热波次前核验实际槽位、活跃上限、token 批预算和 KV 块数。若启动、配置、热准入或资源边界失败，保存已取得的原件并按冻结流程停止。生产与正式配置仍使用原 M5 基线。
+
+E1/E4 与 E2/E3 分别按原热状态、TTFT p95 与末终态请求及 token 吞吐门槛检查同档重复。四轮证据完整、全部六对热状态可比、两组同档均通过，且两个 4 槽轮次的末 15 条接纳前等待中位数均至少 300 ms、待接纳峰值均至少 4，才能判读优化。该复现门槛来自 D4 两轮 8 请求/秒的 345.136 和 444.593 ms、峰值均 4。D5 的 4 槽组共用 5 槽 runner，复现条件将这项布局差异纳入解释。
+
+两个 5 槽轮次的末 15 条接纳前等待中位数与 TTFT p95 都须低于两个 4 槽轮次，且任一跨档对照的请求与 token 吞吐降幅各不超过 5%，才记为支持增加一个准入槽。另报告全部四个跨档差值和各档波动。原生接纳至末输出区间用于估计占用。复现、重复或证据前提不足记为不可判定，证据和前提完整但收益规则失败记为不支持。D5 只诊断准入，C3 后继资格仍按原流程判断。
+
+预算为一次串行单 RTX 3090，最多 20 分钟。沿用 D3 的 1,035 秒预算包络，给五槽位启动增加 5 秒余量，估算 1,040 秒，硬上限 1,050 秒。D4 的最大单引擎非预热开销为 59.809 秒，低于该预算按每引擎 65 秒给出的包络。作业须沿用提交前节点端材料复核、独立 watcher、权威终态、全队列和资源清理。无失败重试额度。
+
+在对应执行 SHA 和新增单次授权文件就绪后，按以下入口运行和复算。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D5_AUTH --phase calibration --role D5 --attempt d5-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d5-01 --proposal configs/m5-d5.json --output runs/M5-paired-performance/d5-review/analysis.json
+```

@@ -20,6 +20,7 @@ from vllm_prefix_scheduler.m5_d3 import (
     verify_clock_brackets,
 )
 from vllm_prefix_scheduler.m5_d4 import d4_plan
+from vllm_prefix_scheduler.m5_d5 import d5_plan, d5_profile
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -288,7 +289,26 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
     thermal["reason"] = "conditioning deadline without an admissible plateau"
 
 
-async def _run(args, config, workload, client, *, native_stats_type=None, preheat_workload=None):
+def _check_d5_profile(profile, expected):
+    require(
+        all(
+            type(profile.get(key)) is int and profile[key] == value
+            for key, value in expected.items()
+        ),
+        "D5 active engine differs from frozen admission cap, runner slots, token budget or KV blocks",
+    )
+
+
+async def _run(
+    args,
+    config,
+    workload,
+    client,
+    *,
+    native_stats_type=None,
+    preheat_workload=None,
+    d5_expected_profile=None,
+):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
     from vllm.sampling_params import RequestOutputKind
@@ -328,6 +348,9 @@ async def _run(args, config, workload, client, *, native_stats_type=None, prehea
             num_gpu_blocks_override=diag[f"{args.mechanism}_blocks"],
             max_model_len=diag["max_model_len"],
         )
+    if d5_expected_profile is not None:
+        options.update(d5_expected_profile)
+        options["num_gpu_blocks_override"] = options.pop("num_gpu_blocks")
 
     llm = None
     tasks = []
@@ -342,7 +365,7 @@ async def _run(args, config, workload, client, *, native_stats_type=None, prehea
         plan = json.loads(args.d2_plan.read_text())
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
         conditioning = plan["conditioning"]
-        plan_sha = sha256(args.d4_plan or args.d2_plan)
+        plan_sha = sha256(args.d5_plan or args.d4_plan or args.d2_plan)
         target, pilot_gpu = None, None
         if args.d2_role == "measure":
             pilot = json.loads(args.d2_target.read_text())
@@ -420,6 +443,8 @@ async def _run(args, config, workload, client, *, native_stats_type=None, prehea
         armed = await rpc(
             "m5_arm", tier=args.tier, limit=limit, schema_version=client["schema_version"]
         )
+        if d5_expected_profile is not None:
+            _check_d5_profile(armed["profile"], d5_expected_profile)
         samples = await read_clock_samples()
         shortest = min(samples, key=lambda row: row["recv_ns"] - row["send_ns"])
         send_ns, engine_ns, recv_ns = (shortest[key] for key in ("send_ns", "engine_ns", "recv_ns"))
@@ -623,6 +648,25 @@ def _d4_replay_inputs(args, workload):
     return inherited["native_timing"], preheat
 
 
+def _d5_replay_inputs(args, workload):
+    plan, inherited = d5_plan(args.d5_plan, args.d2_plan)
+    target = inherited["target"]
+    require(
+        args.pair_id in target["fresh_engines"]
+        and (args.d2_role == "pilot") == (args.pair_id == "thermal-pilot"),
+        "D5 leaf identity differs from the frozen order",
+    )
+    require(
+        sha256(args.input) == target["input_sha256"]
+        and workload["scenario"] == target["scenario"]
+        and workload["seed"] == target["seed"]
+        and workload["rate_rps"] == target["arrival_rate_rps"]
+        and len(workload["requests"]) == target["count_per_engine"],
+        "D5 input differs from the frozen original 8 rps table",
+    )
+    return inherited["native_timing"], d5_profile(plan, args.pair_id)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for field in ("config", "input", "model", "output"):
@@ -634,7 +678,7 @@ def main():
     parser.add_argument("--pair-id", required=True)
     parser.add_argument("--mechanism", choices=("pressure", "ample"))
     parser.add_argument("--d2-role", choices=("pilot", "measure"))
-    for field in ("d2-plan", "d2-samples", "d2-target", "d4-plan", "d4-preheat-input"):
+    for field in ("d2-plan", "d2-samples", "d2-target", "d4-plan", "d4-preheat-input", "d5-plan"):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -653,8 +697,11 @@ def main():
         args.d4_plan is not None and args.d2_role is None
     ):
         parser.error("D4 requires its plan and 8 rps preheat input with a thermal replay role")
+    if args.d5_plan is not None and (args.d2_role is None or args.d4_plan is not None):
+        parser.error("D5 requires a thermal replay role and its own plan")
     native_timing = None
     preheat_workload = None
+    d5_expected_profile = None
     if args.d2_role is None:
         if any(path is not None for path in d2_files):
             parser.error("D2 evidence paths require --d2-role")
@@ -666,6 +713,11 @@ def main():
         != ("calibration", "guarded", "endpoint", None)
     ):
         parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
+    elif args.d5_plan is not None:
+        try:
+            native_timing, d5_expected_profile = _d5_replay_inputs(args, workload)
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
     elif args.d4_plan is not None:
         try:
             native_timing, preheat_workload = _d4_replay_inputs(args, workload)
@@ -732,6 +784,7 @@ def main():
                 client,
                 native_stats_type=native_stats_type,
                 preheat_workload=preheat_workload,
+                d5_expected_profile=d5_expected_profile,
             )
         )
     finally:

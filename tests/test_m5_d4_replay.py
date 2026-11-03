@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vllm_prefix_scheduler.m5_campaign import D4_ROLE, TASK, digest, read_json
+from vllm_prefix_scheduler.m5_campaign import D4_ROLE, D5_ROLE, TASK, digest, read_json
 from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
 from vllm_prefix_scheduler.m5_d4 import (
     D4_INPUT_6_NAME,
@@ -17,6 +17,7 @@ from vllm_prefix_scheduler.m5_d4 import (
     D4_PREVIOUS_ANALYSIS,
     D4_PROPOSAL_NAME,
 )
+from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 ORDER = {"thermal-pilot": 8, "E1": 8, "E2": 6, "E3": 6, "E4": 8}
@@ -81,7 +82,10 @@ def test_d4_cli_routes_measured_six_rps_and_frozen_eight_rps_preheat(staged, tmp
     monkeypatch.setattr(replay, "bind_loaded_sources", lambda *args: object)
     calls = []
 
-    async def fake_run(args, config, workload, client, *, native_stats_type, preheat_workload):
+    async def fake_run(
+        args, config, workload, client, *, native_stats_type, preheat_workload, d5_expected_profile
+    ):
+        assert d5_expected_profile is None
         calls.append((workload["rate_rps"], preheat_workload["rate_rps"], native_stats_type))
 
     monkeypatch.setattr(replay, "_run", fake_run)
@@ -136,20 +140,34 @@ def test_d4_cli_routes_measured_six_rps_and_frozen_eight_rps_preheat(staged, tmp
     assert calls == [(6, 8, object)]
 
 
-def test_d4_node_runs_abba_and_seals_preheat_and_measured_input(staged, tmp_path, monkeypatch):
+@pytest.mark.parametrize("role", (D4_ROLE, D5_ROLE))
+def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, monkeypatch, role):
     runner = importlib.import_module("run_m5_allocation")
-    output = tmp_path / "runs" / TASK / "d4-01"
+    role_name = role.lower()
+    attempt = f"{role_name}-01"
+    output = tmp_path / "runs" / TASK / attempt
+    d5 = role == D5_ROLE
+    proposal = staged.proposal
+    previous = staged.previous
+    if d5:
+        proposal = tmp_path / D5_PROPOSAL_NAME
+        proposal.write_bytes((ROOT / "configs/m5-d5.json").read_bytes())
+        previous = write(tmp_path / D5_PREVIOUS_ANALYSIS, {})
+        (tmp_path / "input.json").write_bytes(staged.tables[8].read_bytes())
+        monkeypatch.setattr(runner, "D1_INPUT_SHA", digest(staged.tables[8]))
     authorization = write(
-        tmp_path / "authorization.json", {"d4_plan_sha256": digest(staged.proposal)}
+        tmp_path / "authorization.json", {f"{role_name}_plan_sha256": digest(proposal)}
     )
+    plan = read_json(proposal)
     specs = [
         {
             "id": identity,
-            "rate_rps": rate,
+            "rate_rps": 8 if d5 else rate,
             "mode": "guarded",
             "tier": "endpoint",
             "seed": 51213,
             "mechanism": None,
+            **(d5_profile(plan, identity) if d5 else {}),
         }
         for identity, rate in ORDER.items()
     ]
@@ -167,8 +185,8 @@ def test_d4_node_runs_abba_and_seals_preheat_and_measured_input(staged, tmp_path
         return SimpleNamespace(pid=123, wait=lambda **_: 0)
 
     monkeypatch.setattr(runner, "ROOT", tmp_path)
-    monkeypatch.setattr(runner, "check_authorization", lambda *args, **kwargs: [D4_ROLE])
-    monkeypatch.setattr(runner, "d4_specs", lambda *args: specs)
+    monkeypatch.setattr(runner, "check_authorization", lambda *args, **kwargs: [role])
+    monkeypatch.setattr(runner, f"{role_name}_specs", lambda *args: specs)
     monkeypatch.setattr(runner, "collect_sources", lambda *args: {})
     monkeypatch.setattr(runner, "owner_group", lambda *args: 124)
     monkeypatch.setattr(runner, "owned_processes", lambda *args: [])
@@ -204,22 +222,23 @@ def test_d4_node_runs_abba_and_seals_preheat_and_measured_input(staged, tmp_path
             str(staged.config),
             str(authorization),
             "calibration",
-            D4_ROLE,
-            "d4-01",
+            role,
+            attempt,
             str(output),
             str(tmp_path),
             str(tmp_path),
-            str(staged.proposal),
+            str(proposal),
         ],
     )
     runner.main()
     assert len(calls) == len(ORDER)
     for (collect, child), (identity, rate) in zip(calls, ORDER.items(), strict=True):
         leaf = output / identity
-        assert digest(leaf / "input.json") == digest(staged.tables[rate])
+        assert digest(leaf / "input.json") == digest(staged.tables[8 if d5 else rate])
         assert child[child.index("--d2-plan") + 1] == str(staged.inherited)
-        assert child[child.index("--d4-plan") + 1] == str(staged.proposal)
-        assert child[child.index("--d4-preheat-input") + 1] == str(staged.tables[8])
+        assert child[child.index(f"--{role_name}-plan") + 1] == str(proposal)
+        if not d5:
+            assert child[child.index("--d4-preheat-input") + 1] == str(staged.tables[8])
         configs = [
             Path(value)
             for previous, value in zip(collect[:-1], collect[1:], strict=True)
@@ -228,10 +247,10 @@ def test_d4_node_runs_abba_and_seals_preheat_and_measured_input(staged, tmp_path
         assert configs == [
             staged.config,
             leaf / "input.json",
-            staged.proposal,
+            proposal,
             staged.inherited,
-            staged.tables[8],
-            staged.previous,
+            *([] if d5 else [staged.tables[8]]),
+            previous,
             staged.original,
             *(
                 []
@@ -239,8 +258,13 @@ def test_d4_node_runs_abba_and_seals_preheat_and_measured_input(staged, tmp_path
                 else [output / "thermal-pilot/raw/d2-thermal.json"]
             ),
         ]
-    result = read_json(output / "d4-result.json")
+    result = read_json(output / f"{role_name}-result.json")
     assert result["status"] == "diagnostic-complete"
-    assert result["measure_order_rps"] == [8, 6, 6, 8]
     assert result["audited_runs"] == 4
-    assert result["retained_d3_analysis_sha256"] == digest(staged.previous)
+    if d5:
+        assert result["retained_d4_analysis_sha256"] == digest(previous)
+        index = read_json(output / "index.json")
+        assert [row["max_num_active_seqs"] for row in index["runs"]] == [4, 4, 5, 5, 4]
+    else:
+        assert result["retained_d3_analysis_sha256"] == digest(previous)
+        assert result["measure_order_rps"] == [8, 6, 6, 8]

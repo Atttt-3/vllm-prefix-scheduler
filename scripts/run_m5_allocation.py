@@ -29,6 +29,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D3_PREVIOUS_ANALYSIS,
     D3_ROLE,
     D4_ROLE,
+    D5_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -57,6 +58,7 @@ from vllm_prefix_scheduler.m5_d4 import (  # noqa: E402
     D4_PREVIOUS_ANALYSIS,
     d4_specs,
 )
+from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, d5_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -293,7 +295,8 @@ def main():
         D3_ROLE: d3_specs,
     }
     d4 = args.role == D4_ROLE
-    d2 = d4 or args.role in d2_planners
+    d5 = args.role == D5_ROLE
+    d2 = d4 or d5 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
     retained_configs = []
     retained_result = {}
@@ -319,7 +322,19 @@ def main():
                 rates = report["selected_rates"]
             else:
                 dress_reports.append(report)
-    if d4:
+    if d5:
+        require(
+            auxiliary is not None and digest(auxiliary) == authorization["d5_plan_sha256"],
+            "D5 staged plan differs from authorization",
+        )
+        staged = auxiliary.parent
+        diagnostic_table = staged / "input.json"
+        inherited = staged / D3_PROPOSAL_NAME
+        original_c3 = staged / "original-c3-result.json"
+        previous_d4 = staged / D5_PREVIOUS_ANALYSIS
+        specs = d5_specs(config, auxiliary, diagnostic_table, original_c3, inherited, previous_d4)
+        retained_configs = [inherited, previous_d4, original_c3]
+    elif d4:
         require(
             auxiliary is not None and digest(auxiliary) == authorization["d4_plan_sha256"],
             "D4 staged plan differs from authorization",
@@ -525,7 +540,7 @@ def main():
                 "--d2-role",
                 "pilot" if pilot else "measure",
                 "--d2-plan",
-                str(inherited if d4 else auxiliary),
+                str(inherited if d4 or d5 else auxiliary),
                 "--d2-samples",
                 str(d2_samples),
             ]
@@ -534,6 +549,8 @@ def main():
                 command += ["--d2-target", str(target)]
             if d4:
                 command += ["--d4-plan", str(auxiliary), "--d4-preheat-input", str(d4_tables[8])]
+            if d5:
+                command += ["--d5-plan", str(auxiliary)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -687,7 +704,22 @@ def main():
         for spec in specs:
             if not run_spec(spec):
                 break
-        if d4:
+        if d5:
+            count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
+            atomic_write(
+                args.output / "d5-result.json",
+                {
+                    "status": "diagnostic-complete" if count == 4 else "diagnostic-incomplete",
+                    "role": D5_ROLE,
+                    "proposal_sha256": digest(auxiliary),
+                    "inherited_d3_proposal_sha256": digest(inherited),
+                    "retained_d4_analysis_sha256": digest(previous_d4),
+                    "input_sha256": D1_INPUT_SHA,
+                    "audited_runs": count,
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+            )
+        elif d4:
             count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
             atomic_write(
                 args.output / "d4-result.json",

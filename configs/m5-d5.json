@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "role": "D5",
+  "scope": "active-admission-cap-diagnostic",
+  "retained_C3_sha256": "e8618fde6793d2c2d749e32b7f8052a495f695ab1ddc68dc015ac58012495866",
+  "D3_plan_sha256": "4c6b4eb7092912de713b489cccdbf82923ab1abdfa4c7c1b1e66690014fc89bb",
+  "D4_plan_sha256": "d3b200bcda5a4017b40095c741d27b584eac9b1da6fc0a70b6a6806ecd5f075f",
+  "D4_analysis_sha256": "47b27cdb2ca50066ae0a18940fb07930417345611aae8dea9e3ca09add5c90fe",
+  "target": {
+    "scenario": "mixed",
+    "seed": 51213,
+    "mode": "guarded",
+    "tier": "endpoint",
+    "input_sha256": "e52cd3e00563b3e7827b089faa3e4a8aaffafa8a873867b2dfde8c6b5ea713ab",
+    "count_per_engine": 60,
+    "arrival_rate_rps": 8,
+    "max_num_seqs": 5,
+    "max_num_batched_tokens": 2048,
+    "num_gpu_blocks_override": 5553,
+    "pilot_max_num_active_seqs": 4,
+    "measure_order_max_num_active_seqs": [4, 5, 5, 4],
+    "same_cap_pairs": [["E1", "E4"], ["E2", "E3"]]
+  },
+  "assessment": {
+    "tail_request_count": 15,
+    "cap4_tail_wait_median_min_ns": 300000000,
+    "cap4_peak_waiting_min": 4,
+    "cross_cap_throughput_max_loss_rel": 0.05,
+    "same_cap_gates": "Original thermal, TTFT p95 and last-terminal request/token throughput gates, with the earlier same-cap leaf as reference.",
+    "optimization_signal": "Require complete evidence, all six thermal comparisons, both same-cap gates and cap4 backlog reproduction. Both cap5 leaves must have strictly lower tail waiting median and TTFT p95 than both cap4 leaves and neither request nor token throughput may lose more than 5% in any cross-cap comparison.",
+    "can_qualify_C3": false
+  },
+  "budget": {
+    "additional_allocations": 1,
+    "devices_per_allocation": 1,
+    "gpu": "RTX 3090",
+    "serial": true,
+    "request_minutes": 20,
+    "work_deadline_s": 1050,
+    "D3_estimate_s": 1035,
+    "startup_reserve_s": 5,
+    "work_estimate_s": 1040,
+    "retries": 0
+  }
+}

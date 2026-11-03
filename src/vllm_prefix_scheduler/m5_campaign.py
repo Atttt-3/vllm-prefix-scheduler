@@ -26,12 +26,15 @@ D3_PLAN_FILENAME = "m5-d3.json"
 D3_PREVIOUS_ANALYSIS = "previous-d2-r110-analysis.json"
 D4_ROLE = "D4"
 D4_PLAN_FILENAME = "m5-d4.json"
-DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE)
+D5_ROLE = "D5"
+D5_PLAN_FILENAME = "m5-d5.json"
+DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE, D5_ROLE)
 REVIEWED_DIAGNOSTIC_PLANS = {
     D2R_ROLE: (8, "d2r_plan_sha256", D2R_PLAN_FILENAME),
     D2R110_ROLE: (9, "d2r110_plan_sha256", D2R110_PLAN_FILENAME),
     D3_ROLE: (10, "d3_plan_sha256", D3_PLAN_FILENAME),
     D4_ROLE: (11, "d4_plan_sha256", D4_PLAN_FILENAME),
+    D5_ROLE: (12, "d5_plan_sha256", D5_PLAN_FILENAME),
 }
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
@@ -272,7 +275,7 @@ def qualification_batch(record, config):
     permitted = config["calibration"].get("qualification_predecessor_roles", [])
     require(
         type(permitted) is list
-        and all(id_ok(role) and role != D4_ROLE for role in permitted)
+        and all(id_ok(role) and role not in (D4_ROLE, D5_ROLE) for role in permitted)
         and type(predecessor) is dict
         and set(predecessor)
         == {
