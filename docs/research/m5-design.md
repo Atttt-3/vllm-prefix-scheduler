@@ -209,3 +209,23 @@ D8 通过后另行申请七次资格分配。提交侧按阶段顺序检查前�
 python scripts/submit_m5.py --authorization PRIVATE_D8_AUTH --phase calibration --role D8 --attempt d8-01
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d8-01 --proposal configs/m5-d8.json --output NEW_PRIVATE_D8_AUDIT
 ```
+
+## D9 原四槽双窗诊断
+
+[D9 冻结方案](../../configs/m5-d9.json) 从 D8 交付 `63c84db` 起步。D3、D6、D7、D8 共 15 轮、900 条请求使用同一张输入表。D8 E1 在 0–3 秒、E3 在 6.5 秒后触发慢窗。D3 的同 ID 证据定位其自身尾部接纳前差异，D7 直接核对四槽占满后的释放与接纳。D6/D7 的 runner 配置有五槽，D8 只有客户端端点。D9 在 D8 原生四槽上定位早段慢出包，并独立检查晚段慢出包能否进一步积累接纳等待。
+
+热试跑后依次运行 **端点 → 双窗 → 双窗 → 端点**，各轮新建引擎。固定同一张 8 请求/秒、60 条输入表、guarded、四个原生 runner 槽、2,048 token 批预算，核对 5,553 个实际 KV 块。无活跃槽或 KV 容量覆盖。热试跑按 D8 原规则选首个合格平台，测量轮保持原 110 秒热准入。四轮使用相同 T0 提前量并在实际 T0 检查设备样本。A 只收集客户端端点，B 补充原生请求端点及两段逐步事件。
+
+B 在 T0 前空闲时只 arm 一次。逐步采集为 **[0, 3) 和 [6, 8.5) 秒**。单一有界记录保留同一请求代际和真实 token 序号。两段之间保留原生请求端点和序号，窗内发出的批次沿原生路径跟到消费。晚窗入口核对原生 FIFO，跨入批次的派发、执行和 runner 输入均标为缺证，只记录实际可见的消费与出包。排空后导出，若排空早于 8.5 秒，等到观察边界再导出。该等待独立于末终态和吞吐窗口。完整性审查核对原生调用顺序、时钟域、跨窗批次、token 顺序和排空状态。
+
+六对热状态、两对同档和两对相邻 A/B 均独立复算。相邻性能对照以 A 为参考，另保留 D8 原配对方向。沿用 60/60 按时完成、原提交门槛、TTFT p95 的 2 ms 或参考轮 5% 中较大值、末终态请求和 token 吞吐各 ±5%。主配对越界时记采集等价性未建立。按后一个真实 token 到达时间分入 T0 对齐的 500 ms 窗，每窗至少 10 个间隔、两个请求，连续两窗中位数至少 30 ms。两窗分别核对 A 复现、B 快慢反差和同 ID 相邻 token 序号。至少两个不同批次具有可比的实际 runner 构成、缓存及队列状态，并由同一主机阶段解释相应的时间差，才支持阶段定位。积压起因要求该阶段早于持续待接纳。晚段放大还须有慢批延长槽位持有、实际释放、下一次接纳和等待增长的连续证据。关键逐步证据落在空档、采集等价性未建立或候选无法区分时，相关因果结论为 `unresolved`。设备归因需要独立关联的设备时间。
+
+预算为 **1 次串行单 RTX 3090 分配，最多 20 分钟，无重试**。作业内预计 1,040 秒，硬上限 1,050 秒。预计由热试跑 150 秒、四轮热准入 440 秒、五个引擎其余开销 325 秒、核验清理 120 秒和双窗额外开销 5 秒构成。集群 CPU 预检核对上传输入、固定源码、原生调用以及双窗额外开销。每次提交仍需要 D9 对应批次授权与独立 watcher 就绪。原 C3 仍为 `blocked`，D9 仅用于诊断。
+
+```bash
+UV_OFFLINE=1 make check
+python scripts/check_m5_d9.py --attempt PRIVATE_D9_ATTEMPT --proposal configs/m5-d9.json --output NEW_PRIVATE_AUDIT
+python scripts/preflight_m5_d9_cpu.py --proposal configs/m5-d9.json --input PRIVATE_FROZEN_TABLE --scratch PRIVATE_CPU_OUTPUT_DIR
+```
+
+集群 CPU 入口使用现有 Linux Python 3.12.16，核对 47 个已安装 vLLM 源码哈希。它以源代码固定的 EngineCore/UniProc 方法和合成请求执行 ABBA，比较原生调用顺序和 960 个输出 token，计量双窗导出、MsgPack 往返编解码、JSON 写入和客户端标量复制。以更慢的 B 与更快的 A 估算两轮增量，再加上四轮共用 T0 提前量和两轮最大静默等待。该预检检验 CPU 开销预算。真实推理下的扰动由正式诊断的 ABBA 判定。

@@ -409,14 +409,17 @@ def append_packet(
     )
 
 
-def audit_d7_trace(trace, client, limits, *, leaf_end_ns):
-    """Bind late host events, preserving the prefix/carry evidence boundary."""
+def audit_d7_trace(
+    trace, client, limits, *, leaf_end_ns, window=(TRACE_START_NS, TRACE_END_NS), role="d7"
+):
+    """Bind host events, preserving the prefix/carry evidence boundary."""
+    left_offset, right_offset = window
     status = trace["status"]
     require(
         type(trace["schema_version"]) is int
         and trace["schema_version"] == 1
         and status in {"complete", "incomplete", "not-started"}
-        and client.get("d7_capture") == "step",
+        and client.get(f"{role}_capture") == "step",
         "D7 trace schema, status or capture differs",
     )
     if status != "complete":
@@ -424,7 +427,7 @@ def audit_d7_trace(trace, client, limits, *, leaf_end_ns):
             (trace.get("overflow") is True or bool(trace.get("errors")))
             if status == "incomplete"
             else set(trace) == {"schema_version", "status"}
-            and "d7_arm_return_ns" not in client
+            and f"{role}_arm_return_ns" not in client
             and "measure_start_ns" not in client["phases"],
             "D7 partial trace lacks matching arm/failure evidence",
         )
@@ -435,7 +438,7 @@ def audit_d7_trace(trace, client, limits, *, leaf_end_ns):
     )
     phases = client["phases"]
     boundary = trace["boundary"]
-    arm_return = client["d7_arm_return_ns"]
+    arm_return = client[f"{role}_arm_return_ns"]
     require(
         ordered(
             phases["warmup_end_ns"],
@@ -450,8 +453,8 @@ def audit_d7_trace(trace, client, limits, *, leaf_end_ns):
         )
         and arm_return < t0
         and boundary["at_ns"] < end
-        and start - t0 == limits["start_offset_ns"] == TRACE_START_NS
-        and end - start == limits["window_ns"] == TRACE_END_NS - TRACE_START_NS
+        and start - t0 == limits["start_offset_ns"] == left_offset
+        and end - start == limits["window_ns"] == right_offset - left_offset
         and t0 == phases["measure_start_ns"]
         and t0 - armed <= limits["arm_lead_ns"]
         and phases["drain_end_ns"] <= exported

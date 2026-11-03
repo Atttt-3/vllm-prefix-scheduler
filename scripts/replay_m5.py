@@ -29,7 +29,7 @@ from vllm_prefix_scheduler.m5_d3 import (
 from vllm_prefix_scheduler.m5_d4 import d4_plan
 from vllm_prefix_scheduler.m5_d5 import d5_plan, d5_profile
 from vllm_prefix_scheduler.m5_d5r import d5r_plan
-from vllm_prefix_scheduler.m5_d6 import D6_RUNS, D6_STEPPED, d6_plan, d6_sources
+from vllm_prefix_scheduler.m5_d6 import D6_RUNS, d6_plan, d6_sources
 from vllm_prefix_scheduler.m5_d7 import D7_RUNS, d7_plan
 from vllm_prefix_scheduler.m5_d8 import d8_plan
 from vllm_prefix_scheduler.m5_workload import MODES
@@ -359,7 +359,7 @@ async def _run(
         attention_config={"backend": config["attention_backend"]},
         worker_extension_cls="vllm_prefix_scheduler.m5_observer.M5WorkerExtension",
     )
-    stepped = trace_plan is not None and args.pair_id in D6_STEPPED
+    stepped = trace_plan is not None and _trace_capture(trace_plan, args.pair_id) == "step"
     trace_armed = False
     if stepped:
         trace_role = trace_plan["role"]
@@ -405,7 +405,8 @@ async def _run(
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D8_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(
-            getattr(args, "d7_plan", None)
+            getattr(args, "d9_plan", None)
+            or getattr(args, "d7_plan", None)
             or getattr(args, "d6_plan", None)
             or getattr(args, "d5r_plan", None)
             or args.d5_plan
@@ -606,13 +607,7 @@ async def _run(
                 return
             if stepped:
                 trace_armed = True
-                trace_start = measure_start_ns + trace_plan["trace"].get("start_offset_ns", 0)
-                arm_arguments = {
-                    "start_ns": trace_start,
-                    "end_ns": trace_start + trace_plan["trace"]["window_ns"],
-                }
-                if trace_role == "D7":
-                    arm_arguments["t0_ns"] = measure_start_ns
+                arm_arguments = _trace_arm_arguments(trace_plan, measure_start_ns)
                 await rpc(f"m5_{trace_key}_arm", **arm_arguments)
                 client[f"{trace_key}_arm_return_ns"] = time.monotonic_ns()
                 if client[f"{trace_key}_arm_return_ns"] >= measure_start_ns:
@@ -644,6 +639,9 @@ async def _run(
         await asyncio.gather(*tasks)
         phases["drain_end_ns"] = time.monotonic_ns()
         await drain("measure-drained", stage="done")
+        if stepped and trace_role == "D9":
+            horizon_ns = phases["measure_start_ns"] + trace_plan["trace"]["windows_ns"][-1][1]
+            await _wait_until(horizon_ns)
         if native_stats_type is not None:
             native_clock = client["native_metrics_clock"]
             native_clock["post_clock_samples"] = await read_clock_samples()
@@ -773,6 +771,33 @@ def _d5_replay_inputs(args, workload):
     return inherited["native_timing"], profile, temperature_range, trace_plan
 
 
+def _trace_arm_arguments(plan, t0_ns):
+    limits = plan["trace"]
+    if plan["role"] == "D9":
+        return {
+            "t0_ns": t0_ns,
+            "windows_ns": [[t0_ns + start, t0_ns + end] for start, end in limits["windows_ns"]],
+        }
+    start_ns = t0_ns + limits.get("start_offset_ns", 0)
+    arguments = {"start_ns": start_ns, "end_ns": start_ns + limits["window_ns"]}
+    if plan["role"] == "D7":
+        arguments["t0_ns"] = t0_ns
+    return arguments
+
+
+def _trace_capture(plan, pair_id):
+    if plan["role"] == "D9":
+        runs = plan["runs"]
+    else:
+        runs = D7_RUNS if plan["role"] == "D7" else D6_RUNS
+    return plan["capture"][runs.index(pair_id)]
+
+
+async def _wait_until(horizon_ns):
+    while (remaining_ns := horizon_ns - time.monotonic_ns()) > 0:
+        await asyncio.sleep(remaining_ns / 1_000_000_000)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for field in ("config", "input", "model", "output"):
@@ -795,6 +820,7 @@ def main():
         "d6-plan",
         "d7-plan",
         "d8-inherited-plan",
+        "d9-plan",
     ):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
@@ -826,6 +852,8 @@ def main():
         args.d2_role is None or args.d4_plan is not None or args.d5_plan is not None
     ):
         parser.error("D8 inherited plan requires the original endpoint replay")
+    if args.d9_plan is not None and args.d8_inherited_plan is None:
+        parser.error("D9 requires the original D8 and inherited D2-R110 plans")
     native_timing = None
     preheat_workload = None
     d5_expected_profile = None
@@ -870,7 +898,13 @@ def main():
             native_timing = d3_plan(plan)["native_timing"]
         elif plan["role"] == D8_ROLE:
             try:
-                d8_plan(args.d2_plan, args.d8_inherited_plan)
+                if args.d9_plan is None:
+                    d8_plan(args.d2_plan, args.d8_inherited_plan)
+                else:
+                    from vllm_prefix_scheduler.m5_d9 import d9_plan
+
+                    trace_plan = d9_plan(args.d9_plan, args.d2_plan, args.d8_inherited_plan)
+                    thermal_options["trace_plan"] = trace_plan
             except (KeyError, OSError, TypeError, ValueError) as error:
                 parser.error(str(error))
         planned = plan["target"]
@@ -887,6 +921,8 @@ def main():
             or workload["rate_rps"] != planned["arrival_rate_rps"]
         ):
             parser.error("D2 input or run ID differs from the reviewed plan")
+        if trace_plan is not None and _trace_capture(trace_plan, args.pair_id) == "step":
+            native_timing = trace_plan["native_timing"]
     os.environ.update(config["environment"])
     os.environ["M5_WINDOW"] = str(config["window"])
     args.output.mkdir(parents=True, exist_ok=False)
@@ -915,8 +951,7 @@ def main():
         if trace_plan is not None:
             d6_sources(trace_plan, source)
             role = trace_plan["role"]
-            leaves = D7_RUNS if role == "D7" else D6_RUNS
-            client[f"{role.lower()}_capture"] = trace_plan["capture"][leaves.index(args.pair_id)]
+            client[f"{role.lower()}_capture"] = _trace_capture(trace_plan, args.pair_id)
         client["execution_commit"] = source["project_commit"]
         client["job_id"] = source["job_id"]
         _dump(args.output / "sources.json", source)

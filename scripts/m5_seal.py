@@ -234,7 +234,7 @@ def sealed_leaf(
     }
     role = planned["role"]
     trace_key = role.lower()
-    if role in ("D6", "D7") and run[f"{trace_key}_capture"] == "step":
+    if role in ("D6", "D7", "D9") and run[f"{trace_key}_capture"] == "step":
         name = f"{trace_key}-step.json"
         raw_hashes[name] = bind(raw / name, f"{run['run']}/{name}", "artifacts")
         require(

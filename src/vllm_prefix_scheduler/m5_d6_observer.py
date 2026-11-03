@@ -173,6 +173,9 @@ class _Trace:
             return self.step_original(*args, **kwargs)
         if not self.inside(start) and not self.pending:
             return self.step_original(*args, **kwargs)
+        return self.record_step(start, *args, **kwargs)
+
+    def record_step(self, start, *args, **kwargs):
         row = {
             "step_id": self.counts["steps"] + 1,
             "start_ns": start,

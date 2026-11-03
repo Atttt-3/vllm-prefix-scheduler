@@ -16,6 +16,7 @@ from .m5_campaign import (
     D6_ROLE,
     D7_ROLE,
     D8_ROLE,
+    D9_ROLE,
     JOB_PREFIX,
     REVIEWED_DIAGNOSTIC_PLANS,
     TASK,
@@ -713,5 +714,14 @@ def audit_history(root):
                 and audits[index - 1]["role"] == D7_ROLE
                 and audits[index - 1]["complete"],
                 "D8 resource history differs from the approved sixteenth allocation",
+            )
+        elif row["role"] == D9_ROLE:
+            require(
+                index == 16
+                and phase == "calibration"
+                and used[phase] == 17
+                and audits[index - 1]["role"] == D8_ROLE
+                and audits[index - 1]["complete"],
+                "D9 resource history differs from the approved seventeenth allocation",
             )
     return audits

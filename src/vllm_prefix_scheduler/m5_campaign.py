@@ -36,6 +36,9 @@ D7_ROLE = "D7"
 D7_PLAN_FILENAME = "m5-d7.json"
 D8_ROLE = "D8"
 D8_PLAN_FILENAME = "m5-d8.json"
+D9_ROLE = "D9"
+D9_PLAN_FILENAME = "m5-d9.json"
+D9_PLAN_SHA = "a818e854eda068247dd2f75f36831cee5f42b6a31af4f6d689c10c6db4f899a6"
 DIAGNOSTIC_ROLES = (
     D1_ROLE,
     D2_ROLE,
@@ -48,6 +51,7 @@ DIAGNOSTIC_ROLES = (
     D6_ROLE,
     D7_ROLE,
     D8_ROLE,
+    D9_ROLE,
 )
 REVIEWED_DIAGNOSTIC_PLANS = {
     D2R_ROLE: (8, "d2r_plan_sha256", D2R_PLAN_FILENAME),
@@ -59,6 +63,7 @@ REVIEWED_DIAGNOSTIC_PLANS = {
     D6_ROLE: (14, "d6_plan_sha256", D6_PLAN_FILENAME),
     D7_ROLE: (15, "d7_plan_sha256", D7_PLAN_FILENAME),
     D8_ROLE: (16, "d8_plan_sha256", D8_PLAN_FILENAME),
+    D9_ROLE: (17, "d9_plan_sha256", D9_PLAN_FILENAME),
 }
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
@@ -218,6 +223,8 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
             )
         else:
             require(key not in record, f"{role} plan hash outside its exclusive authorization")
+    if D9_ROLE in roles:
+        require(record["d9_plan_sha256"] == D9_PLAN_SHA, "D9 authorization differs from the freeze")
     if (
         phase == "calibration"
         and qualifying != CALIBRATION
@@ -300,7 +307,7 @@ def qualification_batch(record, config):
     require(
         type(permitted) is list
         and all(
-            id_ok(role) and role not in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE)
+            id_ok(role) and role not in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE, D9_ROLE)
             for role in permitted
         )
         and type(predecessor) is dict
