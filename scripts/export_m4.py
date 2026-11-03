@@ -12,78 +12,166 @@ sys.path.insert(0, str(ROOT / "src"))
 from vllm_prefix_scheduler.m4_contract import audit, read_events, require, sha256  # noqa: E402
 
 
-def controls(path, expected_scope, original_hash):
-    result = json.loads(path.read_text())
-    require(result.get("scope") == expected_scope, "control scope differs from actual raw layer")
-    records = result.get("controls")
-    require(type(records) is list and records, "empty controls")
-    operations = [row["operation"] for row in records]
-    from check_m4_fail_closed import COMMON
-
-    required = {"positive", "optimized"}
-    if expected_scope == "resource_contract_controls":
-        required |= {
-            "missing_terminal",
-            "omitted_job",
-            "wrong_exit",
-            "active_job",
-            "watcher_missing",
-            "watcher_started_late",
-            "omitted_attempt",
-        }
-    elif expected_scope == "cpu":
-        required |= {"cpu_scan", "cpu_io", "cpu_samples"}
-    else:
-        required |= set(COMMON)
-        required |= (
-            {"insufficient_rounds", "weakref_retained"}
-            if expected_scope == "native"
-            else {"probe_side_effect", "missing_terminal", "omitted_allocation"}
-        )
-    require(set(operations) == required, "required real subprocess negative controls missing")
-    require(
-        len(operations) == len(set(operations))
-        and "positive" in operations
-        and "optimized" in operations,
-        "control catalog incomplete/duplicate",
-    )
-    if expected_scope == "resource_contract_controls":
-        require(
-            result.get("original_sha256") == original_hash,
-            "resource controls use different raw index",
-        )
-    else:
-        require(
-            original_hash in result.get("originals", {}).values(),
-            "controls use different raw trace",
-        )
-    for row in records:
-        directory = path.parent / row["operation"]
-        stdout = (directory / "stdout.log").read_text()
-        stderr = (directory / "stderr.log").read_text()
-        code = row.get("returncode")
-        if row["operation"] == "positive":
-            require(code == 0, "positive actual subprocess failed")
-            if expected_scope != "resource_contract_controls":
-                require(
-                    json.loads(stdout)["accepted"] is True,
-                    "positive control was only a fixture/partial",
-                )
-        else:
-            require(
-                type(code) is int and code != 0 and row["expected_error"] in stderr,
-                "negative subprocess failed for an unintended reason",
+def bind_execution(commit, root=ROOT):
+    names = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(root),
+            "ls-tree",
+            "-r",
+            "--name-only",
+            commit,
+            "--",
+            "src",
+            "scripts",
+            "tests",
+            "configs",
+            "Makefile",
+        ],
+        text=True,
+    ).splitlines()
+    require(names, "empty tested source catalog")
+    current = subprocess.check_output(
+        ["git", "-C", str(root), "ls-files", "src", "scripts", "tests", "configs", "Makefile"],
+        text=True,
+    ).splitlines()
+    require(set(names) == set(current), "execution source catalog differs from tested freeze")
+    bound = {}
+    for name in names:
+        expected = hashlib.sha256(
+            subprocess.check_output(
+                ["git", "-C", str(root), "cat-file", "blob", f"{commit}:{name}"]
             )
-        for item in row.get("derived_inputs", []):
-            require(sha256(item["path"]) == item["sha256"], "derived subprocess input hash differs")
-        command = row["command"]
-        for flag in ("--trace", "--resources"):
-            if flag in command:
-                require(
-                    Path(command[command.index(flag) + 1]).is_file(),
-                    "subprocess input was not retained",
-                )
-    return len(records)
+        ).hexdigest()
+        path = root / name
+        require(
+            sha256(path) == expected,
+            "currently executing source differs from tested freeze: " + name,
+        )
+        bound[str(path)] = expected
+    return bound
+
+
+def bind_collector(directory, commit, job, actual_files):
+    manifest_path = directory / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    require(
+        manifest.get("project", {}).get("commit") == commit
+        and manifest["project"].get("dirty") is False
+        and manifest.get("source_changed_during_run") is False
+        and manifest.get("config_inputs_stable") is True
+        and str(manifest.get("allocation", {}).get("slurm_job_id")) == job,
+        "collector freeze/job/stability differs",
+    )
+    bound = {str(manifest_path): sha256(manifest_path)}
+    entries = manifest["files"]
+    for entry in entries:
+        path = directory / entry["path"]
+        require(sha256(path) == entry["sha256"], "collector sealed artifact changed")
+        bound[str(path)] = entry["sha256"]
+    before = json.loads((directory / "source-before.json").read_text())
+    after = json.loads((directory / "source-after.json").read_text())
+    require(
+        before == after and before.get("commit") == commit and before.get("dirty") is False,
+        "collector source boundaries differ",
+    )
+    require(
+        before.get("files_sha256") == manifest["project"].get("files_sha256"),
+        "collector source fingerprint detached",
+    )
+    for actual in actual_files:
+        digest = sha256(actual)
+        matches = [
+            entry
+            for entry in entries
+            if entry.get("sha256") == digest
+            and entry.get("source", "").endswith("/" + actual.name)
+            and entry["path"].startswith(("artifacts/", "configs/"))
+        ]
+        require(
+            len(matches) == 1,
+            "audited raw input is not the collector sealed artifact: " + actual.name,
+        )
+        bound[str(actual)] = digest
+    return bound
+
+
+def bind_resource_references(value, bound):
+    if isinstance(value, list):
+        for item in value:
+            bind_resource_references(item, bound)
+    elif isinstance(value, dict):
+        if set(value) >= {"path", "sha256"}:
+            path = Path(value["path"])
+            require(sha256(path) == value["sha256"], "resource indirect original hash differs")
+            if str(path) not in bound:
+                bound[str(path)] = value["sha256"]
+                if path.suffix == ".json":
+                    bind_resource_references(json.loads(path.read_text()), bound)
+        else:
+            for item in value.values():
+                bind_resource_references(item, bound)
+
+
+def rerun_controls(config_path, data, resources_path, destination):
+    """Execute fixed tested checkers; do not trust a supplied control summary."""
+    destination.mkdir(parents=True, exist_ok=False)
+    counts, bound = {}, {}
+    for layer in ("native", "cpu", "gpu", "resources"):
+        output = destination / layer
+        if layer == "resources":
+            command = [
+                sys.executable,
+                str(ROOT / "scripts/check_m4_resources_fail_closed.py"),
+                "--config",
+                str(config_path),
+                "--resources",
+                str(resources_path),
+                "--output",
+                str(output),
+            ]
+        else:
+            folder = data / f"{layer}-data"
+            command = [
+                sys.executable,
+                str(ROOT / "scripts/check_m4_fail_closed.py"),
+                "--config",
+                str(config_path),
+                "--trace",
+                str(folder / "trace.jsonl"),
+                "--layer",
+                layer,
+                "--sources",
+                str(folder / ("sources.json" if layer == "gpu" else "runtime.json")),
+                "--output",
+                str(output),
+            ]
+            if layer == "gpu":
+                command += [
+                    "--inputs",
+                    str(data / "gpu-inputs.json"),
+                    "--resources",
+                    str(resources_path),
+                ]
+        child = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        (destination / f"{layer}-stdout.log").write_text(child.stdout)
+        (destination / f"{layer}-stderr.log").write_text(child.stderr)
+        (destination / f"{layer}-command.json").write_text(
+            json.dumps({"command": command, "returncode": child.returncode}, indent=2) + "\n"
+        )
+        require(child.returncode == 0, "fresh fixed-source subprocess controls failed: " + layer)
+        report = json.loads((output / "results.json").read_text())
+        require(report.get("all_controls_passed") is True, "fresh controls incomplete")
+        require(
+            len(report["controls"]) == {"native": 17, "cpu": 5, "gpu": 18, "resources": 9}[layer],
+            "fresh control matrix differs",
+        )
+        counts[layer] = len(report["controls"])
+    for path in destination.rglob("*"):
+        if path.is_file():
+            bound[str(path)] = sha256(path)
+    return counts, bound
 
 
 def main():
@@ -96,10 +184,33 @@ def main():
     p.add_argument("--controls-root", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     args = p.parse_args()
+    args.config = args.config.resolve()
+    args.data = args.data.resolve()
+    args.resources = args.resources.resolve()
+    args.controls_root = args.controls_root.resolve()
+    args.output = args.output.resolve()
+    require(
+        any(args.controls_root.is_relative_to(ROOT / part) for part in ("runs", ".local")),
+        "control replay must use the private ignored runs/.local tree",
+    )
+    require(
+        not args.controls_root.is_relative_to(args.output)
+        and not args.output.is_relative_to(args.controls_root),
+        "private raw controls and public export destinations overlap",
+    )
+    require(not args.output.exists(), "public export output already exists")
     config = json.loads(args.config.read_text())
     resources = json.loads(args.resources.read_text())
     reports, originals = {}, {"config": sha256(args.config), "resources": sha256(args.resources)}
     inputs = args.data / "gpu-inputs.json"
+    initial_source = json.loads((args.data / "gpu-data/sources.json").read_text())
+    bound = bind_execution(initial_source["project_commit"])
+    bound[str(args.resources)] = sha256(args.resources)
+    bind_resource_references(resources, bound)
+    gpu_rows = read_events(args.data / "gpu-data/trace.jsonl")
+    jobs = {str(row.get("campaign_job_id")) for row in gpu_rows}
+    require(len(jobs) == 1 and next(iter(jobs)).isdigit(), "actual GPU job binding missing")
+    job = next(iter(jobs))
     for layer in ("native", "cpu", "gpu"):
         data = args.data / f"{layer}-data"
         source = data / ("sources.json" if layer == "gpu" else "runtime.json")
@@ -117,6 +228,14 @@ def main():
         require(reports[layer]["accepted"] is True, "M4 actual layer incomplete")
         originals[f"{layer}_trace"] = sha256(trace)
         originals[f"{layer}_sources"] = sha256(source)
+        bound.update(
+            bind_collector(
+                args.data / layer,
+                reports[layer]["project_commit"],
+                job,
+                [source, trace, args.config, *([inputs] if layer == "gpu" else [])],
+            )
+        )
         # Schema2 command success/integrity is distinct from the behavioral audit above.
         subprocess.run(
             [
@@ -148,6 +267,14 @@ def main():
         runtime = json.loads((regression / f"{name}-data/runtime.json").read_text())
         require(
             runtime.get("project_commit") == commit, "baseline regression tested another freeze"
+        )
+        bound.update(
+            bind_collector(
+                regression / name,
+                commit,
+                job,
+                [regression / f"{name}-data/runtime.json", regression / f"{name}-data/trace.jsonl"],
+            )
         )
         originals[f"regression_{name}_runtime"] = sha256(regression / f"{name}-data/runtime.json")
         originals[f"regression_{name}_trace"] = sha256(regression / f"{name}-data/trace.jsonl")
@@ -186,15 +313,12 @@ def main():
             outcome.get("audited_native_cases" if name == "m1" else "case_count") == wanted,
             "baseline regression raw case count differs",
         )
-    control_counts = {}
-    for layer in ("native", "cpu", "gpu", "resources"):
-        path = args.controls_root / layer / "results.json"
-        control_counts[layer] = controls(
-            path,
-            "resource_contract_controls" if layer == "resources" else layer,
-            originals["resources" if layer == "resources" else f"{layer}_trace"],
-        )
-        originals[f"{layer}_controls"] = sha256(path)
+    control_counts, control_bound = rerun_controls(
+        args.config, args.data, args.resources, args.controls_root
+    )
+    bound.update(control_bound)
+    for layer in control_counts:
+        originals[f"{layer}_controls"] = sha256(args.controls_root / layer / "results.json")
     summary = {
         "schema_version": 1,
         "task_id": config["task_id"],
@@ -228,7 +352,7 @@ def main():
         "budget": {
             "allocations_used": len(resources["allocations"]),
             "allocation_limit": 3,
-            "requested_minutes": len(resources["allocations"]) * 20,
+            "requested_minutes": reports["gpu"]["resources"]["requested_minutes"],
             "requested_minutes_limit": 60,
         },
         "limitations": [
@@ -250,6 +374,8 @@ def main():
         },
         "private_data_exported": False,
     }
+    for path, expected in bound.items():
+        require(sha256(path) == expected, "bound input changed during export")
     args.output.mkdir(parents=True, exist_ok=False)
     for name, value in (("summary", summary), ("provenance", provenance)):
         (args.output / f"{name}.json").write_text(
