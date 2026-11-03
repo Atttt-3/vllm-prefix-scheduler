@@ -158,3 +158,21 @@ D5-R 单独授权一次串行单 RTX 3090，最多 20 分钟，预计 1,040 秒�
 python scripts/submit_m5.py --authorization PRIVATE_D5R_AUTH --phase calibration --role D5-R --attempt d5-r-01
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d5-r-01 --proposal configs/m5-d5r.json --output runs/M5-paired-performance/d5-r-review/analysis.json
 ```
+
+## D6 最早出包慢段诊断
+
+[D6 冻结方案](../../configs/m5-d6.json) 绑定 D5-R 的实际执行与分析原件。热试跑继承 D5-R 的 64–66°C 首个合格目标选择。三轮按端点 E1、逐步 E2、逐步 E3 执行，各启用新引擎。三轮均用原 guarded 策略、同一张 8 请求/秒表、60 请求、4 活跃槽、5 runner 槽、5,553 个实际 KV 块、2,048 token 批预算和原 110 秒热准入。为给逐步采集 arm 留出明确边界，三轮共用 250 ms 的计划起点提前量，仍按原遥测新鲜度和温差核验。逐步 arm 未在计划时点前返回即停止。
+
+保存每轮全部请求的客户端和原生端点。候选筛查只使用 T0 后 0–3 秒，按后一个真实 token 到达时刻落入 500 ms 半开窗。同请求相邻 token 才构成间隔，同封包内多个 token 共用到达时间。每窗至少 10 个间隔、两个请求，连续两个合格窗中位数至少 30 ms。D5-R 封存 E1 的 1.5–2.0 和 2.0–2.5 秒窗分别为 35.042 和 35.075 ms，E4 均约 22 ms。候选判定最早在 2.5 秒成立，逐步追溯从约 1.3–1.7 秒的在途请求和实际首个异常事件开始。
+
+逐步观察绑定固定 UniProc、EngineCore、scheduler、V2 runner 与异步输出源码。记录入队处理、调度与活跃状态、实际 runner 批次有效和填充 token、原生执行调用、采样、future 消费、结果物化、scheduler 消费和原生输出。原生调度输出身份将提交的新批和消费的旧批分别绑定。0–3 秒中发出的批次保留至原生消费完成，终态或空批通知单列。诊断热路径沿用原调用顺序和消费点，使用有界记录，在排空后落盘。超时、溢出、断链、跨域或不完整捕获停止推进并保留已产生原件。真实调度原因无分支证据时记 `unknown`。执行、future 与物化间隔是主机可见计时。D6 暂无独立设备时钟采集。
+
+独立复算从封存请求、批次和时钟域追溯最早异常。只有端点参照复现、逐步轮有热可比的快慢对照、异常先于持续积压且位于同请求或同构批次出包的关键路径，并能解释观察到的间隔量级，才归入相应阶段。槽位放大以实际释放、下一次接纳和待接纳增长串联。缺少对照、区分不了候选机制或只在逐步轮出现时，结论为 `unresolved`，另记可核对的最窄阶段。端点参照只用于发现采集扰动迹象。
+
+预算为 **1 次串行单 RTX 3090 分配，最多 20 分钟**。预计作业内 860 秒，包含试跑 150 秒、三轮热准入 330 秒、四引擎其他工作 260 秒及核验清理 120 秒。封存 D5-R 单引擎实测非预热开销上限约 57.147 秒。D6 冻结作业内硬上限 **900 秒**，为采集导出和运行偏差留 40 秒。提交前核验已上传输入和源码，独立 watcher 就绪后才提交，无重试额度。慢段未复现时在当前作业内保留完整对照，结论记 `unresolved`。D6 独立于 C3 同条件前置与资格复验。
+
+```bash
+python scripts/m5_d6_signature.py --attempt runs/M5-paired-performance/attempts/d5-r-01 --output NEW_PRIVATE_REPORT
+python scripts/submit_m5.py --authorization PRIVATE_D6_AUTH --phase calibration --role D6 --attempt d6-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d6-01 --proposal configs/m5-d6.json --output NEW_PRIVATE_AUDIT
+```

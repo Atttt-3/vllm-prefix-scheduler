@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "role": "D6",
+  "scope": "earliest-native-output-slowdown-diagnostic",
+  "D5R_plan_sha256": "0bbda0693f6bffd9eff82c963ca9f06d41d17d83d3fd6f9009ada302852d4d9a",
+  "D5R_analysis_sha256": "bade7e99c3fb214f8545a1285df28a148f2062b1f6fa64d2d410aeeb55130882",
+  "runs": ["thermal-pilot", "E1", "E2", "E3"],
+  "capture": ["pilot", "endpoint", "step", "step"],
+  "trace": {
+    "window_ns": 3000000000,
+    "arm_lead_ns": 250000000,
+    "event_limit": 32768,
+    "batch_limit": 1024
+  },
+  "signature": {
+    "bin_ns": 500000000,
+    "minimum_gaps": 10,
+    "minimum_requests": 2,
+    "median_gap_ns": 30000000,
+    "consecutive_bins": 2
+  },
+  "runtime_sources": {
+    "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
+    "vllm/v1/core/sched/scheduler.py": "d9a39870286c424cef2fc0730e24092ee3df67e848608e2278944846bab804ae",
+    "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
+    "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
+    "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",
+    "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4"
+  },
+  "budget": {
+    "additional_allocations": 1,
+    "devices_per_allocation": 1,
+    "gpu": "RTX 3090",
+    "serial": true,
+    "request_minutes": 20,
+    "pilot_seconds": 150,
+    "measured_conditioning_seconds": 330,
+    "nonconditioning_envelope_seconds": 260,
+    "review_cleanup_seconds": 120,
+    "work_estimate_s": 860,
+    "work_deadline_s": 900,
+    "retries": 0
+  },
+  "can_qualify_C3": false
+}

@@ -31,6 +31,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D4_ROLE,
     D5_ROLE,
     D5R_ROLE,
+    D6_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -60,7 +61,12 @@ from vllm_prefix_scheduler.m5_d4 import (  # noqa: E402
     d4_specs,
 )
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, d5r_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d5r import (  # noqa: E402
+    D5R_PREVIOUS_ANALYSIS,
+    D5R_PROPOSAL_NAME,
+    d5r_specs,
+)
+from vllm_prefix_scheduler.m5_d6 import D6_PREVIOUS_ANALYSIS, d6_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -297,7 +303,8 @@ def main():
         D3_ROLE: d3_specs,
     }
     d4 = args.role == D4_ROLE
-    d5r = args.role == D5R_ROLE
+    d6 = args.role == D6_ROLE
+    d5r = d6 or args.role == D5R_ROLE
     d5 = d5r or args.role == D5_ROLE
     d2 = d4 or d5 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
@@ -326,7 +333,7 @@ def main():
             else:
                 dress_reports.append(report)
     if d5:
-        plan_key = "d5r_plan_sha256" if d5r else "d5_plan_sha256"
+        plan_key = "d6_plan_sha256" if d6 else "d5r_plan_sha256" if d5r else "d5_plan_sha256"
         require(
             auxiliary is not None and digest(auxiliary) == authorization[plan_key],
             f"{args.role} staged plan differs from authorization",
@@ -339,17 +346,34 @@ def main():
         if d5r:
             inherited_d5 = staged / D5_PROPOSAL_NAME
             previous_d5 = staged / D5R_PREVIOUS_ANALYSIS
-            specs = d5r_specs(
-                config,
-                auxiliary,
-                diagnostic_table,
-                original_c3,
-                inherited_d5,
-                inherited,
-                previous_d4,
-                previous_d5,
-            )
             retained_configs = [inherited_d5, inherited, previous_d4, previous_d5, original_c3]
+            if d6:
+                inherited_d5r = staged / D5R_PROPOSAL_NAME
+                previous_d5r = staged / D6_PREVIOUS_ANALYSIS
+                specs = d6_specs(
+                    config,
+                    auxiliary,
+                    diagnostic_table,
+                    original_c3,
+                    inherited_d5r,
+                    inherited_d5,
+                    inherited,
+                    previous_d4,
+                    previous_d5,
+                    previous_d5r,
+                )
+                retained_configs += [inherited_d5r, previous_d5r]
+            else:
+                specs = d5r_specs(
+                    config,
+                    auxiliary,
+                    diagnostic_table,
+                    original_c3,
+                    inherited_d5,
+                    inherited,
+                    previous_d4,
+                    previous_d5,
+                )
         else:
             specs = d5_specs(
                 config, auxiliary, diagnostic_table, original_c3, inherited, previous_d4
@@ -442,7 +466,10 @@ def main():
         TMPDIR=str(cache_tmp),
     )
     start = time.monotonic_ns()
-    deadline = start + config["gates"]["max_allocation_work_s"] * 10**9
+    work_limit = config["gates"]["max_allocation_work_s"]
+    if d6:
+        work_limit = read_json(auxiliary)["budget"]["work_deadline_s"]
+    deadline = start + work_limit * 10**9
 
     def remaining():
         return (deadline - time.monotonic_ns()) / 10**9
@@ -507,6 +534,7 @@ def main():
         nonlocal active, owner_path
         leaf = args.output / spec["id"]
         leaf.mkdir()
+        stepped = d6 and spec["d6_capture"] == "step"
         if d4:
             table = leaf / "input.json"
             rate = spec["rate_rps"]
@@ -573,7 +601,9 @@ def main():
             if d5:
                 command += ["--d5-plan", str(inherited_d5 if d5r else auxiliary)]
             if d5r:
-                command += ["--d5r-plan", str(auxiliary)]
+                command += ["--d5r-plan", str(inherited_d5r if d6 else auxiliary)]
+            if d6:
+                command += ["--d6-plan", str(auxiliary)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -601,6 +631,8 @@ def main():
             str(raw / "sources.json"),
         ]
         collect += ["--artifact", str(raw / "engine.json")]
+        if stepped:
+            collect += ["--artifact", str(raw / "d6-step.json")]
         if d2:
             collect += ["--config", str(auxiliary), "--artifact", str(raw / "d2-thermal.json")]
             for retained_config in retained_configs:
@@ -670,6 +702,15 @@ def main():
             expected = "target-frozen" if pilot else "admitted"
             require(thermal_status in {expected, "invalid"}, "D2 thermal replay status differs")
             result["d2_thermal_status"] = thermal_status
+            if stepped:
+                step_trace = raw / "d6-step.json"
+                step_status = read_json(step_trace)["status"]
+                require(
+                    step_status in {"complete", "incomplete", "not-started"},
+                    "D6 step status differs",
+                )
+                result["d6_step_sha256"] = digest(step_trace)
+                result["d6_step_status"] = step_status
             if pilot or thermal_status == "invalid":
                 shutil.copyfile(thermal, audit)
                 result["audit_sha256"] = digest(audit)
@@ -708,6 +749,39 @@ def main():
         atomic_write(
             args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
         )
+        if not d6:
+            return True
+        from m5_d3_audit import timing_leaf
+        from m5_d6_audit import audit_step_trace
+
+        client = read_json(raw / "client.json")
+        engine = read_json(raw / "engine.json")
+        leaf_end = result["ended_monotonic_ns"]
+        counts = read_json(audit)["metrics"]["strata"]["all"]["counts"]
+        require(
+            all(
+                counts[key] == spec["count"]
+                for key in ("planned", "submitted", "completed", "timely_first_token")
+            )
+            and timing_leaf(
+                client, engine, read_json(table), config["gates"], leaf_end_ns=leaf_end
+            )["status"]
+            == "complete",
+            "D6 native endpoint or cross-process clock evidence incomplete",
+        )
+        if not stepped:
+            return True
+        if result["d6_step_status"] != "complete":
+            return False
+        require(
+            audit_step_trace(
+                read_json(raw / "d6-step.json"),
+                client,
+                read_json(auxiliary)["trace"],
+                leaf_end_ns=leaf_end,
+            )["verified"],
+            "D6 complete trace failed its independent node check",
+        )
         return True
 
     try:
@@ -729,10 +803,17 @@ def main():
                 break
         if d5:
             count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
+            complete = count == 4
+            if d6:
+                complete = count == 3 and all(
+                    row.get("d6_step_status") == "complete"
+                    for row in results
+                    if row["d6_capture"] == "step"
+                )
             atomic_write(
                 args.output / f"{args.role.lower()}-result.json",
                 {
-                    "status": "diagnostic-complete" if count == 4 else "diagnostic-incomplete",
+                    "status": "diagnostic-complete" if complete else "diagnostic-incomplete",
                     "role": args.role,
                     "proposal_sha256": digest(auxiliary),
                     "inherited_d3_proposal_sha256": digest(inherited),
@@ -746,6 +827,14 @@ def main():
                             "retained_d5_analysis_sha256": digest(previous_d5),
                         }
                         if d5r
+                        else {}
+                    ),
+                    **(
+                        {
+                            "inherited_d5r_proposal_sha256": digest(inherited_d5r),
+                            "retained_d5r_analysis_sha256": digest(previous_d5r),
+                        }
+                        if d6
                         else {}
                     ),
                 },

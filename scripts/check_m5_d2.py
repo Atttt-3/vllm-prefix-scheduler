@@ -13,6 +13,7 @@ from check_m5_d1 import compare_pair, matched_requests
 from m5_d3_audit import assess_d3, timing_leaf, timing_pair, verify_native_sources
 from m5_d4_audit import SAME_RATE_PAIRS, assess_d4
 from m5_d5_audit import assess_d5
+from m5_d6_audit import assess_d6, audit_step_trace, verify_step_sources
 from m5_seal import ROOT, git_identity, sealed_leaf, verify_analysis
 
 from vllm_prefix_scheduler.m5_campaign import (
@@ -25,6 +26,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     D4_ROLE,
     D5_ROLE,
     D5R_ROLE,
+    D6_ROLE,
     digest,
     read_json,
     require,
@@ -49,6 +51,13 @@ from vllm_prefix_scheduler.m5_d4 import (
 )
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_plan, d5_profile
 from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, D5R_PROPOSAL_NAME, d5r_plan
+from vllm_prefix_scheduler.m5_d6 import (
+    D6_PREVIOUS_ANALYSIS,
+    D6_PROPOSAL_NAME,
+    D6_RUNS,
+    D6_STEPPED,
+    d6_plan,
+)
 from vllm_prefix_scheduler.m5_resources import audit_history, device
 
 ROLE = D2_ROLE
@@ -253,6 +262,7 @@ def bind_thermal_artifact(
         D4_ROLE: D4_PROPOSAL_NAME,
         D5_ROLE: D5_PROPOSAL_NAME,
         D5R_ROLE: D5R_PROPOSAL_NAME,
+        D6_ROLE: D6_PROPOSAL_NAME,
     }[role]
     require(
         sum(
@@ -265,7 +275,7 @@ def bind_thermal_artifact(
         "D2 reviewed proposal is not in the collector",
     )
     previous = []
-    if role in (D4_ROLE, D5_ROLE, D5R_ROLE):
+    if role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE):
         staged = d4_configs if role == D4_ROLE else d5_configs
         require(type(staged) is dict and staged, f"{role} collector inputs missing")
         previous.extend(staged.items())
@@ -545,9 +555,12 @@ def verified_pilot_target(thermal, prelude, *, strict=False):
     return candidate if verified else None
 
 
-def verify_thermal_run_order(rows, *, prospective, require_reviewable_pilot=False):
+def verify_thermal_run_order(
+    rows, *, prospective, require_reviewable_pilot=False, expected_runs=RUNS, stepped=()
+):
     require(
-        tuple(row["id"] for row in rows) == RUNS[: len(rows)], "D2 executed engine order differs"
+        tuple(row["id"] for row in rows) == expected_runs[: len(rows)],
+        "D2 executed engine order differs",
     )
     if require_reviewable_pilot:
         require(
@@ -560,6 +573,7 @@ def verify_thermal_run_order(rows, *, prospective, require_reviewable_pilot=Fals
                 row.get("returncode") == 0
                 and row.get("audit_sha256")
                 and row.get("d2_thermal_status") == ("target-frozen" if i == 0 else "admitted")
+                and (row["id"] not in stepped or row.get("d6_step_status") == "complete")
                 for i, row in enumerate(rows[:-1])
             ),
             "D2-R continued after an invalid or failed engine",
@@ -573,12 +587,21 @@ def review(attempt, proposal_path):
     d3 = role == D3_ROLE
     d4 = role == D4_ROLE
     d5r = role == D5R_ROLE
+    d6 = role == D6_ROLE
     d5 = role in (D5_ROLE, D5R_ROLE)
-    native_timing = d3 or d4 or d5
-    prospective = role in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE, D5_ROLE, D5R_ROLE)
+    capacity = d5 or d6
+    native_timing = d3 or d4 or capacity
+    prospective = role in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE)
     proposal_sha = digest(proposal_path)
     thermal_plan = capacity_plan = plan
-    if d5r:
+    if d6:
+        plan, pilot_plan, capacity_plan, thermal_plan = d6_plan(
+            proposal_path,
+            ROOT / "configs/m5-d5r.json",
+            ROOT / "configs/m5-d5.json",
+            ROOT / "configs/m5-d3.json",
+        )
+    elif d5r:
         plan, capacity_plan, thermal_plan = d5r_plan(
             proposal_path, ROOT / "configs/m5-d5.json", ROOT / "configs/m5-d3.json"
         )
@@ -598,7 +621,7 @@ def review(attempt, proposal_path):
             "D2 plan differs from the authorized proposal",
         )
     limits = thermal_plan["conditioning"]
-    expected = capacity_plan["target"] if d5 else plan["target"]
+    expected = capacity_plan["target"] if capacity else plan["target"]
     pairs_to_review = (
         tuple(tuple(pair) for pair in expected["same_cap_pairs"])
         if d5
@@ -630,6 +653,7 @@ def review(attempt, proposal_path):
         D4_ROLE: 11,
         D5_ROLE: 12,
         D5R_ROLE: 13,
+        D6_ROLE: 14,
     }[role]
     history = audit_history(attempt.parent)[:count]
     job = read_json(attempt / "submission.json")["stdout"].strip().split(";")[0]
@@ -646,7 +670,7 @@ def review(attempt, proposal_path):
         and auth["roles"] == [role],
         "D2 resource receipt or one-allocation authorization differs",
     )
-    if prospective and not (d4 or d5):
+    if prospective and not (d4 or capacity):
         prior = attempt.parent.parent / "d2-independent-review/analysis.json"
         auth_plan = {
             D2R_ROLE: "d2r_plan_sha256",
@@ -698,11 +722,12 @@ def review(attempt, proposal_path):
         rates = dict(
             zip(RUNS, (expected["preheat_rate_rps"], *expected["measure_order_rps"]), strict=True)
         )
-    if d5:
+    if capacity:
         prior_d4 = attempt.parent.parent / "d4-review/analysis.json"
         predecessor = read_json(prior_d4)
         require(
-            auth["d5r_plan_sha256" if d5r else "d5_plan_sha256"] == proposal_sha
+            auth["d6_plan_sha256" if d6 else "d5r_plan_sha256" if d5r else "d5_plan_sha256"]
+            == proposal_sha
             and history[10]["role"] == D4_ROLE
             and history[10]["complete"]
             and digest(prior_d4) == capacity_plan["D4_analysis_sha256"]
@@ -713,20 +738,35 @@ def review(attempt, proposal_path):
             and predecessor["resource_release"] == json.loads(json.dumps(history[10], default=str)),
             "D5 authorization or retained D4 evidence differs",
         )
-    if d5r:
+    if d5r or d6:
         prior_d5 = attempt.parent.parent / "d5-review/analysis.json"
         predecessor = read_json(prior_d5)
+        retry = pilot_plan if d6 else plan
         require(
             history[11]["role"] == D5_ROLE
             and history[11]["complete"]
-            and digest(prior_d5) == plan["D5_analysis_sha256"]
+            and digest(prior_d5) == retry["D5_analysis_sha256"]
             and predecessor["role"] == D5_ROLE
             and predecessor["status"] == "diagnostic-incomplete"
-            and predecessor["proposal_sha256"] == plan["D5_plan_sha256"]
+            and predecessor["proposal_sha256"] == retry["D5_plan_sha256"]
             and predecessor["runs"]["E1"]["status"] == "invalid"
             and predecessor["d5_assessment"]["optimization_signal"] == "unverified"
             and predecessor["resource_release"] == json.loads(json.dumps(history[11], default=str)),
             "D5-R retained D5 thermal stop or release differs",
+        )
+    if d6:
+        prior_d5r = attempt.parent.parent / "d5-r-review/analysis.json"
+        predecessor = read_json(prior_d5r)
+        require(
+            history[12]["role"] == D5R_ROLE
+            and history[12]["complete"]
+            and digest(prior_d5r) == plan["D5R_analysis_sha256"]
+            and predecessor["role"] == D5R_ROLE
+            and predecessor["status"] == "diagnostic-complete"
+            and predecessor["proposal_sha256"] == plan["D5R_plan_sha256"]
+            and predecessor["d5_assessment"]["optimization_signal"] == "unverified"
+            and predecessor["resource_release"] == json.loads(json.dumps(history[12], default=str)),
+            "D6 retained D5-R diagnostic or release differs",
         )
     resource = history[-1]
     planned = read_json(attempt / "planned.json")
@@ -757,7 +797,11 @@ def review(attempt, proposal_path):
     else:
         rows = []
     verify_thermal_run_order(
-        rows, prospective=prospective, require_reviewable_pilot=d5r and resource["complete"]
+        rows,
+        prospective=prospective,
+        require_reviewable_pilot=(d5r or d6) and resource["complete"],
+        expected_runs=D6_RUNS if d6 else RUNS,
+        stepped=D6_STEPPED if d6 else (),
     )
     samples_path = node / "d2-device.jsonl"
     samples = []
@@ -781,12 +825,21 @@ def review(attempt, proposal_path):
     target = None
     client_pids, engine_pids, environments = set(), set(), set()
     valid_metrics, requests = {}, {}
+    step_traces, d6_clients = {}, {}
     for row in rows:
         identity = row["id"]
         pilot = identity == RUNS[0]
         rate = rates[identity] if d4 else expected["arrival_rate_rps"]
-        d5_expected_profile = d5_profile(capacity_plan, identity) if d5 else None
-        if d5:
+        d5_expected_profile = (
+            d5_profile(capacity_plan, "E1" if d6 else identity) if capacity else None
+        )
+        if d6:
+            capture = "pilot" if pilot else "step" if identity in D6_STEPPED else "endpoint"
+            require(
+                row["pair_id"] == role and row.get("d6_capture") == capture,
+                f"D6 indexed capture differs for {identity}",
+            )
+        if capacity:
             require(
                 all(
                     type(row.get(name)) is int and row[name] == value
@@ -807,7 +860,7 @@ def review(attempt, proposal_path):
             runs[identity] = {"status": "incomplete", "returncode": row.get("returncode")}
             if d4:
                 runs[identity]["rate_rps"] = rate
-            if d5:
+            if capacity:
                 runs[identity]["max_num_active_seqs"] = d5_expected_profile["max_num_active_seqs"]
             if latest and not pilot:
                 runs[identity]["conditioning_95s_shadow"] = {
@@ -833,7 +886,7 @@ def review(attempt, proposal_path):
             job,
             git_files,
             commit,
-            **({"d5_expected_profile": d5_expected_profile} if d5 else {}),
+            **({"d5_expected_profile": d5_expected_profile} if capacity else {}),
         )
         if native_timing:
             verify_native_sources(thermal_plan, read_json(leaf / "raw/sources.json"))
@@ -849,7 +902,7 @@ def review(attempt, proposal_path):
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d4_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
-        if d5:
+        if capacity:
             d5_configs = {
                 D3_PROPOSAL_NAME: capacity_plan["D3_plan_sha256"],
                 D5_PREVIOUS_ANALYSIS: capacity_plan["D4_analysis_sha256"],
@@ -858,6 +911,11 @@ def review(attempt, proposal_path):
             if d5r:
                 d5_configs[D5_PROPOSAL_NAME] = plan["D5_plan_sha256"]
                 d5_configs[D5R_PREVIOUS_ANALYSIS] = plan["D5_analysis_sha256"]
+            if d6:
+                d5_configs[D5_PROPOSAL_NAME] = pilot_plan["D5_plan_sha256"]
+                d5_configs[D5R_PROPOSAL_NAME] = plan["D5R_plan_sha256"]
+                d5_configs[D5R_PREVIOUS_ANALYSIS] = pilot_plan["D5_analysis_sha256"]
+                d5_configs[D6_PREVIOUS_ANALYSIS] = plan["D5R_analysis_sha256"]
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d5_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
@@ -882,6 +940,21 @@ def review(attempt, proposal_path):
                 f"D2-R conditioning and cleanup lie outside the owned engine for {identity}",
             )
         client, engine = (read_json(leaf / "raw" / f"{name}.json") for name in ("client", "engine"))
+        if d6:
+            verify_step_sources(plan, read_json(leaf / "raw/sources.json"))
+            require(
+                client.get("d6_capture") == row["d6_capture"] and client.get("tier") == "endpoint",
+                f"D6 client tier or capture differs for {identity}",
+            )
+        if d6 and identity in D6_STEPPED:
+            trace = read_json(leaf / "raw/d6-step.json")
+            require(trace["status"] == row["d6_step_status"], "D6 indexed trace status differs")
+            if thermal["status"] != "admitted":
+                require(trace["status"] != "complete", "D6 untimed leaf claims complete capture")
+            if trace["status"] != "complete":
+                step_traces[identity] = audit_step_trace(
+                    trace, client, plan["trace"], leaf_end_ns=row["ended_monotonic_ns"]
+                )
         if d4:
             profile = engine["profile"]
             require(
@@ -924,7 +997,9 @@ def review(attempt, proposal_path):
             leaf_samples,
             limits,
             target,
-            pilot_temperature_range=plan["pilot_target_median_c"] if d5r and pilot else None,
+            pilot_temperature_range=(pilot_plan if d6 else plan)["pilot_target_median_c"]
+            if (d5r or d6) and pilot
+            else None,
         )
         owned_windows = [
             (thermal["conditioning_start_ns"], thermal["conditioning_end_ns"]),
@@ -953,14 +1028,14 @@ def review(attempt, proposal_path):
         }
         if d4:
             runs[identity]["rate_rps"] = rate
-        if d5:
+        if capacity:
             runs[identity]["max_num_active_seqs"] = engine["profile"]["max_num_active_seqs"]
         if latest and not pilot:
             runs[identity]["conditioning_95s_shadow"] = conditioning_shadow(
                 thermal, prelude, plan["shadow_conditioning_cap_s"]
             )
         if pilot:
-            target = verified_pilot_target(thermal, prelude, strict=d5r)
+            target = verified_pilot_target(thermal, prelude, strict=d5r or d6)
             if target is None:
                 prelude["verified"] = False
                 prelude["issues"].append("pilot_target_unverified")
@@ -1001,10 +1076,109 @@ def review(attempt, proposal_path):
             runs[identity]["native_timing"] = timing_leaf(
                 client, engine, workload, gates, leaf_end_ns=row["ended_monotonic_ns"]
             )
+        if d6:
+            d6_clients[identity] = client
+            if identity in D6_STEPPED and trace["status"] == "complete":
+                require(
+                    runs[identity]["native_timing"]["clock"]["verified"],
+                    f"D6 host trace clock is unverified for {identity}",
+                )
+                step_traces[identity] = audit_step_trace(
+                    trace, client, plan["trace"], leaf_end_ns=row["ended_monotonic_ns"]
+                )
         if complete:
             valid_metrics[identity] = metrics
             requests[identity] = {row["request_id"]: row for row in client["requests"]}
     require(len(environments) <= 1, "D2 node clock domain or engine profile varied")
+
+    if d6:
+        node_path = node / "d6-result.json"
+        lineage = {
+            "role": role,
+            "proposal_sha256": proposal_sha,
+            "inherited_d3_proposal_sha256": capacity_plan["D3_plan_sha256"],
+            "inherited_d5_proposal_sha256": pilot_plan["D5_plan_sha256"],
+            "inherited_d5r_proposal_sha256": plan["D5R_plan_sha256"],
+            "retained_d4_analysis_sha256": capacity_plan["D4_analysis_sha256"],
+            "retained_d5_analysis_sha256": pilot_plan["D5_analysis_sha256"],
+            "retained_d5r_analysis_sha256": plan["D5R_analysis_sha256"],
+            "input_sha256": D1_INPUT_SHA,
+        }
+        audited = sum("metrics" in run for run in runs.values())
+        traces_complete = all(
+            step_traces.get(identity, {}).get("verified") for identity in D6_STEPPED
+        )
+        if node_path.exists():
+            require(
+                read_json(node_path)
+                == {
+                    **lineage,
+                    "status": "diagnostic-complete"
+                    if audited == len(D6_RUNS) - 1 and traces_complete
+                    else "diagnostic-incomplete",
+                    "audited_runs": audited,
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+                "D6 node result differs from independent evidence",
+            )
+        elif resource["complete"]:
+            raise ValueError("Completed D6 lacks the node result")
+        for first, second in zip(D6_RUNS[1:], D6_RUNS[2:], strict=False):
+            require(
+                second not in runs
+                or (
+                    runs.get(first, {}).get("endpoint_evidence_complete")
+                    and runs[first]["native_timing"]["status"] == "complete"
+                    and (first not in D6_STEPPED or step_traces.get(first, {}).get("verified"))
+                ),
+                "D6 continued after independently invalid endpoint or step evidence",
+            )
+        thermal_pairs = [
+            {
+                "reference": first,
+                "observed": second,
+                "thermal": compare_thermal(
+                    runs[first]["in_window"], runs[second]["in_window"], limits
+                )
+                if all("in_window" in runs.get(key, {}) for key in (first, second))
+                else None,
+            }
+            for first, second in (("E1", "E2"), ("E1", "E3"), ("E2", "E3"))
+        ]
+        heat_verified = (
+            resource["complete"]
+            and target is not None
+            and all(
+                runs.get(identity, {}).get("pre_t0_verified") is True
+                and runs[identity]["prelude"]["verified"]
+                for identity in D6_RUNS[1:]
+            )
+            and all(pair["thermal"] and pair["thermal"]["comparable"] for pair in thermal_pairs)
+        )
+        assessment = assess_d6(runs, d6_clients, step_traces, gates, heat_verified=heat_verified)
+        for identity, trace in step_traces.items():
+            runs[identity]["step_trace"] = trace
+        return {
+            **lineage,
+            "status": "diagnostic-complete"
+            if heat_verified and traces_complete and len(valid_metrics) == len(D6_RUNS) - 1
+            else "diagnostic-incomplete",
+            "retained_original_C3": {"status": "blocked", "stage_result_sha256": C3_BLOCKED_SHA},
+            "execution_commit": commit,
+            "analysis_commit": commit,
+            "resource_release": resource,
+            "resource_ledger": history,
+            "device_journal_sha256": digest(samples_path) if samples_path.exists() else None,
+            "verified_thermal_target": target,
+            "runs": runs,
+            "pairs": thermal_pairs,
+            "d6_assessment": assessment,
+            "decision": {
+                "thermal_control": "verified" if heat_verified else "unverified",
+                "localization": assessment["localization"],
+                "qualification_started": False,
+            },
+        }
 
     if d5:
         node_path = node / ("d5-r-result.json" if d5r else "d5-result.json")

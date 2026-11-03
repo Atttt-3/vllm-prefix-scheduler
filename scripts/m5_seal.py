@@ -36,7 +36,7 @@ def verify_analysis(execution, analysis):
 
 
 def validate_profile(profile, run, config, source, git_files, *, d5_expected_profile=None):
-    if run.get("pair_id") in ("D5", "D5-R"):
+    if run.get("pair_id") in ("D5", "D5-R", "D6"):
         require(d5_expected_profile is not None, "D5 capacity profile expectations are required")
     baseline = read_json(ROOT / config["baseline_config"])
     expected = {
@@ -75,12 +75,13 @@ def validate_profile(profile, run, config, source, git_files, *, d5_expected_pro
     if d5_expected_profile is not None:
         active_cap = d5_expected_profile.get("max_num_active_seqs")
         require(
-            run["pair_id"] in ("D5", "D5-R")
+            run["pair_id"] in ("D5", "D5-R", "D6")
             and run["mode"] == "guarded"
             and run["tier"] == "endpoint"
             and run["mechanism"] is None
             and type(active_cap) is int
             and active_cap in (4, 5)
+            and (run["pair_id"] != "D6" or active_cap == 4)
             and all(type(value) is int for value in d5_expected_profile.values())
             and d5_expected_profile
             == {
@@ -169,7 +170,7 @@ def sealed_leaf(
     expected_layer = "performance" if planned["phase"] == "formal" else "gpu"
     if d5_expected_profile is not None:
         require(
-            planned["role"] in ("D5", "D5-R") and planned["phase"] == "calibration",
+            planned["role"] in ("D5", "D5-R", "D6") and planned["phase"] == "calibration",
             "D5 capacity profile cannot be used outside its diagnostic allocation",
         )
     require(
@@ -231,6 +232,10 @@ def sealed_leaf(
         name: bind(raw / name, f"{run['run']}/{name}", "artifacts")
         for name in ("client.json", "engine.json", "sources.json")
     }
+    if planned["role"] == "D6" and run["d6_capture"] == "step":
+        name = "d6-step.json"
+        raw_hashes[name] = bind(raw / name, f"{run['run']}/{name}", "artifacts")
+        require(raw_hashes[name] == run["d6_step_sha256"], "D6 step trace differs from index")
     client, engine = (read_json(raw / name) for name in ("client.json", "engine.json"))
     node = read_json(directory / "node/allocation.json")["node"].split(".")[0]
     require(

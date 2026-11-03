@@ -38,6 +38,8 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D5_ROLE,
     D5R_PLAN_FILENAME,
     D5R_ROLE,
+    D6_PLAN_FILENAME,
+    D6_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
@@ -84,6 +86,11 @@ from vllm_prefix_scheduler.m5_d5r import (  # noqa: E402
     D5R_PREVIOUS_ANALYSIS,
     D5R_PROPOSAL_NAME,
     d5r_specs,
+)
+from vllm_prefix_scheduler.m5_d6 import (  # noqa: E402
+    D6_PREVIOUS_ANALYSIS,
+    D6_PROPOSAL_NAME,
+    d6_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -196,7 +203,8 @@ from vllm_prefix_scheduler.m5_campaign import read_json
 from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
 from vllm_prefix_scheduler.m5_d4 import D4_INPUT_8_NAME, D4_INPUT_6_NAME, D4_PREVIOUS_ANALYSIS, d4_specs
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_specs
-from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, d5r_specs
+from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, D5R_PROPOSAL_NAME, d5r_specs
+from vllm_prefix_scheduler.m5_d6 import D6_PREVIOUS_ANALYSIS, d6_specs
 config, proposal = map(Path, sys.argv[1:3])
 staged = proposal.parent
 common = (staged / "original-c3-result.json", staged / D3_PROPOSAL_NAME)
@@ -206,10 +214,16 @@ if sys.argv[3] == "D4":
 elif sys.argv[3] == "D5":
     specs = d5_specs(read_json(config), proposal, staged / "input.json",
                      *common, staged / D5_PREVIOUS_ANALYSIS)
-else:
+elif sys.argv[3] == "D5-R":
     specs = d5r_specs(read_json(config), proposal, staged / "input.json",
                       common[0], staged / D5_PROPOSAL_NAME, common[1],
                       staged / D5_PREVIOUS_ANALYSIS, staged / D5R_PREVIOUS_ANALYSIS)
+else:
+    assert sys.argv[3] == "D6"
+    specs = d6_specs(read_json(config), proposal, staged / "input.json",
+                     common[0], staged / D5R_PROPOSAL_NAME, staged / D5_PROPOSAL_NAME,
+                     common[1], staged / D5_PREVIOUS_ANALYSIS, staged / D5R_PREVIOUS_ANALYSIS,
+                     staged / D6_PREVIOUS_ANALYSIS)
 print(json.dumps(specs))
 """
     result = remote(
@@ -420,6 +434,7 @@ def submit(args):
                 D4_ROLE: 10,
                 D5_ROLE: 11,
                 D5R_ROLE: 12,
+                D6_ROLE: 13,
             }
             require(
                 len(history) == previous_slots[args.role]
@@ -522,6 +537,47 @@ def submit(args):
                 retained_analyses = {
                     D3_PROPOSAL_NAME: inherited,
                     D4_PREVIOUS_ANALYSIS: prior_analysis,
+                }
+            elif args.role == D6_ROLE:
+                previous = HISTORY / "d5-r-01"
+                require(
+                    history[-1]["role"] == D5R_ROLE
+                    and history[-1] == audit_attempt(previous, require_completed=True),
+                    "D6 requires the retained D5-R allocation and release",
+                )
+                proposal = CONFIG.with_name(D6_PLAN_FILENAME)
+                inherited_d5r = CONFIG.with_name(D5R_PLAN_FILENAME)
+                inherited_d5 = CONFIG.with_name(D5_PLAN_FILENAME)
+                inherited_d3 = CONFIG.with_name(D3_PLAN_FILENAME)
+                previous_d4 = HISTORY.parent / "d4-review/analysis.json"
+                previous_d5 = HISTORY.parent / "d5-review/analysis.json"
+                previous_d5r = HISTORY.parent / "d5-r-review/analysis.json"
+                diagnostic_run_specs = d6_specs(
+                    config,
+                    proposal,
+                    input_table,
+                    old_result,
+                    inherited_d5r,
+                    inherited_d5,
+                    inherited_d3,
+                    previous_d4,
+                    previous_d5,
+                    previous_d5r,
+                )
+                report = read_json(previous_d5r)
+                require(
+                    report["resource_release"] == json.loads(json.dumps(history[-1], default=str))
+                    and report["execution_commit"]
+                    == read_json(previous / "planned.json")["execution_commit"],
+                    "D6 retained D5-R analysis is detached from the prior release",
+                )
+                retained_analyses = {
+                    D3_PROPOSAL_NAME: inherited_d3,
+                    D5_PROPOSAL_NAME: inherited_d5,
+                    D5R_PROPOSAL_NAME: inherited_d5r,
+                    D5_PREVIOUS_ANALYSIS: previous_d4,
+                    D5R_PREVIOUS_ANALYSIS: previous_d5,
+                    D6_PREVIOUS_ANALYSIS: previous_d5r,
                 }
             else:
                 is_d5r = args.role == D5R_ROLE
@@ -636,6 +692,7 @@ def submit(args):
                 D4_ROLE: D4_PROPOSAL_NAME,
                 D5_ROLE: D5_PROPOSAL_NAME,
                 D5R_ROLE: D5R_PROPOSAL_NAME,
+                D6_ROLE: D6_PROPOSAL_NAME,
             }
             name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
@@ -648,7 +705,7 @@ def submit(args):
             for filename, analysis in retained_analyses.items():
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
-            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE):
+            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE):
                 node_specs = preflight_diagnostic_stage(
                     ssh,
                     paths["remote_gpu_environment"] / "bin/python",
