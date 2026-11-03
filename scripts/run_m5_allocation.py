@@ -28,6 +28,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D2R_ROLE,
     D3_PREVIOUS_ANALYSIS,
     D3_ROLE,
+    D4_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -43,7 +44,19 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
 )
 from vllm_prefix_scheduler.m5_contract import validate_formal_table  # noqa: E402
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r110_specs, d2r_specs, d3_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
+    D3_PROPOSAL_NAME,
+    d2_specs,
+    d2r110_specs,
+    d2r_specs,
+    d3_specs,
+)
+from vllm_prefix_scheduler.m5_d4 import (  # noqa: E402
+    D4_INPUT_6_NAME,
+    D4_INPUT_8_NAME,
+    D4_PREVIOUS_ANALYSIS,
+    d4_specs,
+)
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -279,7 +292,8 @@ def main():
         D2R110_ROLE: d2r110_specs,
         D3_ROLE: d3_specs,
     }
-    d2 = args.role in d2_planners
+    d4 = args.role == D4_ROLE
+    d2 = d4 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
     retained_configs = []
     retained_result = {}
@@ -305,7 +319,25 @@ def main():
                 rates = report["selected_rates"]
             else:
                 dress_reports.append(report)
-    if diagnostic:
+    if d4:
+        require(
+            auxiliary is not None and digest(auxiliary) == authorization["d4_plan_sha256"],
+            "D4 staged plan differs from authorization",
+        )
+        staged = auxiliary.parent
+        inherited = staged / D3_PROPOSAL_NAME
+        original_c3 = staged / "original-c3-result.json"
+        previous_d3 = staged / D4_PREVIOUS_ANALYSIS
+        d4_tables = {8: staged / D4_INPUT_8_NAME, 6: staged / D4_INPUT_6_NAME}
+        specs = d4_specs(
+            config, auxiliary, d4_tables[8], d4_tables[6], original_c3, inherited, previous_d3
+        )
+        d4_target = read_json(auxiliary)["target"]
+        d4_table_hashes = {
+            int(rate): row["sha256"] for rate, row in d4_target["arrival_tables"].items()
+        }
+        retained_configs = [inherited, d4_tables[8], previous_d3, original_c3]
+    elif diagnostic:
         require(auxiliary is not None, "diagnostic requires its reviewed plan and archived input")
         diagnostic_table = auxiliary.parent / "input.json"
         if args.role == D2R_ROLE:
@@ -439,7 +471,12 @@ def main():
         nonlocal active, owner_path
         leaf = args.output / spec["id"]
         leaf.mkdir()
-        if diagnostic:
+        if d4:
+            table = leaf / "input.json"
+            rate = spec["rate_rps"]
+            shutil.copyfile(d4_tables[rate], table)
+            require(digest(table) == d4_table_hashes[rate], "D4 leaf input copy differs")
+        elif diagnostic:
             table = leaf / "input.json"
             shutil.copyfile(diagnostic_table, table)
             require(digest(table) == D1_INPUT_SHA, "diagnostic input copy differs")
@@ -488,13 +525,15 @@ def main():
                 "--d2-role",
                 "pilot" if pilot else "measure",
                 "--d2-plan",
-                str(auxiliary),
+                str(inherited if d4 else auxiliary),
                 "--d2-samples",
                 str(d2_samples),
             ]
             if not pilot:
                 target = args.output / "thermal-pilot/raw/d2-thermal.json"
                 command += ["--d2-target", str(target)]
+            if d4:
+                command += ["--d4-plan", str(auxiliary), "--d4-preheat-input", str(d4_tables[8])]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -648,7 +687,26 @@ def main():
         for spec in specs:
             if not run_spec(spec):
                 break
-        if d2:
+        if d4:
+            count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
+            atomic_write(
+                args.output / "d4-result.json",
+                {
+                    "status": "diagnostic-complete" if count == 4 else "diagnostic-incomplete",
+                    "role": D4_ROLE,
+                    "proposal_sha256": digest(auxiliary),
+                    "inherited_d3_proposal_sha256": digest(inherited),
+                    "retained_d3_analysis_sha256": digest(previous_d3),
+                    "preheat_input_sha256": d4_table_hashes[8],
+                    "measurement_input_sha256": {
+                        str(rate): digest(path) for rate, path in d4_tables.items()
+                    },
+                    "measure_order_rps": d4_target["measure_order_rps"],
+                    "audited_runs": count,
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+            )
+        elif d2:
             count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
             atomic_write(
                 args.output / "d2-result.json",

@@ -11,7 +11,7 @@ from pathlib import Path
 
 from m3_sources import collect_sources, sha256
 
-from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE, D3_ROLE
+from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE, D3_ROLE, read_json, require
 from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan, d3_plan
 from vllm_prefix_scheduler.m5_d3 import (
     bind_loaded_sources,
@@ -19,6 +19,7 @@ from vllm_prefix_scheduler.m5_d3 import (
     snapshot_native_metrics,
     verify_clock_brackets,
 )
+from vllm_prefix_scheduler.m5_d4 import d4_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -287,7 +288,7 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
     thermal["reason"] = "conditioning deadline without an admissible plateau"
 
 
-async def _run(args, config, workload, client, *, native_stats_type=None):
+async def _run(args, config, workload, client, *, native_stats_type=None, preheat_workload=None):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
     from vllm.sampling_params import RequestOutputKind
@@ -341,7 +342,7 @@ async def _run(args, config, workload, client, *, native_stats_type=None):
         plan = json.loads(args.d2_plan.read_text())
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
         conditioning = plan["conditioning"]
-        plan_sha = sha256(args.d2_plan)
+        plan_sha = sha256(args.d4_plan or args.d2_plan)
         target, pilot_gpu = None, None
         if args.d2_role == "measure":
             pilot = json.loads(args.d2_target.read_text())
@@ -448,8 +449,16 @@ async def _run(args, config, workload, client, *, native_stats_type=None):
             raise RuntimeError("M5 mechanism override not reflected in actual block count")
 
         if d2_thermal is not None:
+            conditioning_workload = workload if preheat_workload is None else preheat_workload
             await _d2_condition(
-                args, workload, llm, params, drain, d2_thermal, conditioning, deadline_ns
+                args,
+                conditioning_workload,
+                llm,
+                params,
+                drain,
+                d2_thermal,
+                conditioning,
+                deadline_ns,
             )
             if args.d2_role == "pilot" or d2_thermal["plateau"] is None:
                 return
@@ -574,6 +583,46 @@ async def _run(args, config, workload, client, *, native_stats_type=None):
             _dump(args.output / "d2-thermal.json", d2_thermal)
 
 
+def _d4_replay_inputs(args, workload):
+    proposal, inherited = d4_plan(args.d4_plan, args.d2_plan)
+    target = proposal["target"]
+    preheat_rate = target["preheat_rate_rps"]
+    rates = dict(
+        zip(
+            inherited["target"]["fresh_engines"],
+            [preheat_rate, *target["measure_order_rps"]],
+            strict=True,
+        )
+    )
+    require(
+        args.pair_id in rates and (args.d2_role == "pilot") == (args.pair_id == "thermal-pilot"),
+        "D4 leaf identity differs from the frozen order",
+    )
+    measure_rate = rates[args.pair_id]
+    require(
+        sha256(args.input) == target["arrival_tables"][str(measure_rate)]["sha256"]
+        and workload["scenario"] == target["scenario"]
+        and workload["seed"] == target["seed"]
+        and workload["rate_rps"] == measure_rate
+        and len(workload["requests"]) == target["count_per_engine"],
+        "D4 measured input differs from the frozen leaf",
+    )
+    require(
+        sha256(args.d4_preheat_input) == target["arrival_tables"][str(preheat_rate)]["sha256"],
+        "D4 preheat input differs from the frozen 8 rps table",
+    )
+    preheat = read_json(args.d4_preheat_input)
+    require(
+        preheat["rate_rps"] == preheat_rate
+        and preheat["scenario"] == workload["scenario"]
+        and preheat["seed"] == workload["seed"]
+        and preheat["sampling"] == workload["sampling"]
+        and len(preheat["requests"]) == len(workload["requests"]),
+        "D4 preheat workload differs from the frozen input contract",
+    )
+    return inherited["native_timing"], preheat
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for field in ("config", "input", "model", "output"):
@@ -585,7 +634,7 @@ def main():
     parser.add_argument("--pair-id", required=True)
     parser.add_argument("--mechanism", choices=("pressure", "ample"))
     parser.add_argument("--d2-role", choices=("pilot", "measure"))
-    for field in ("d2-plan", "d2-samples", "d2-target"):
+    for field in ("d2-plan", "d2-samples", "d2-target", "d4-plan", "d4-preheat-input"):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -600,7 +649,12 @@ def main():
     ):
         parser.error("M5 input, phase and mode do not match the frozen design")
     d2_files = (args.d2_plan, args.d2_samples, args.d2_target)
+    if (args.d4_plan is None) != (args.d4_preheat_input is None) or (
+        args.d4_plan is not None and args.d2_role is None
+    ):
+        parser.error("D4 requires its plan and 8 rps preheat input with a thermal replay role")
     native_timing = None
+    preheat_workload = None
     if args.d2_role is None:
         if any(path is not None for path in d2_files):
             parser.error("D2 evidence paths require --d2-role")
@@ -612,6 +666,11 @@ def main():
         != ("calibration", "guarded", "endpoint", None)
     ):
         parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
+    elif args.d4_plan is not None:
+        try:
+            native_timing, preheat_workload = _d4_replay_inputs(args, workload)
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            parser.error(str(error))
     else:
         plan = json.loads(args.d2_plan.read_text())
         if plan["role"] == D2R_ROLE:
@@ -665,7 +724,16 @@ def main():
         native_stats_type = None
         if native_timing is not None:
             native_stats_type = bind_loaded_sources(source, native_timing["source_sha256"])
-        asyncio.run(_run(args, config, workload, client, native_stats_type=native_stats_type))
+        asyncio.run(
+            _run(
+                args,
+                config,
+                workload,
+                client,
+                native_stats_type=native_stats_type,
+                preheat_workload=preheat_workload,
+            )
+        )
     finally:
         _dump(args.output / "client.json", client)
 

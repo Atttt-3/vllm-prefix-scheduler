@@ -32,6 +32,8 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D3_PLAN_FILENAME,
     D3_PREVIOUS_ANALYSIS,
     D3_ROLE,
+    D4_PLAN_FILENAME,
+    D4_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
@@ -61,6 +63,13 @@ from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
     d2r110_specs,
     d2r_specs,
     d3_specs,
+)
+from vllm_prefix_scheduler.m5_d4 import (  # noqa: E402
+    D4_INPUT_6_NAME,
+    D4_INPUT_8_NAME,
+    D4_PREVIOUS_ANALYSIS,
+    D4_PROPOSAL_NAME,
+    d4_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -162,6 +171,38 @@ def upload(ssh, path, content):
     # Create once, or prove this is the exact same staged input.
     stage = 'set -eu; umask 077; mkdir -p -- "$(dirname -- "$1")"; if [ -f "$1" ]; then cmp -s "$1" -; else (set -C; cat > "$1"); fi'
     remote(ssh, ["bash", "-c", stage, "m5-stage", path], data=content)
+
+
+def preflight_d4_stage(ssh, python, checkout, proposal, specs):
+    # Validate the uploaded paths with the exact node interpreter before any allocation.
+    program = """
+import json, sys
+from pathlib import Path
+from vllm_prefix_scheduler.m5_campaign import read_json
+from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
+from vllm_prefix_scheduler.m5_d4 import D4_INPUT_8_NAME, D4_INPUT_6_NAME, D4_PREVIOUS_ANALYSIS, d4_specs
+config, proposal = map(Path, sys.argv[1:])
+staged = proposal.parent
+specs = d4_specs(read_json(config), proposal, staged / D4_INPUT_8_NAME,
+                 staged / D4_INPUT_6_NAME, staged / "original-c3-result.json",
+                 staged / D3_PROPOSAL_NAME, staged / D4_PREVIOUS_ANALYSIS)
+print(json.dumps(specs))
+"""
+    result = remote(
+        ssh,
+        [
+            "env",
+            f"PYTHONPATH={checkout / 'src'}",
+            python,
+            "-c",
+            program,
+            checkout / REMOTE_CONFIG,
+            proposal,
+        ],
+    )
+    observed = json.loads(result.stdout)
+    require(observed == specs, "D4 staged node plan differs from controller preflight")
+    return observed
 
 
 def snapshot_previous(history, role, phase, args, commit):
@@ -345,7 +386,14 @@ def submit(args):
         stage_index = 0
         retained_analyses = {}
         if diagnostic:
-            previous_slots = {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7, D2R110_ROLE: 8, D3_ROLE: 9}
+            previous_slots = {
+                D1_ROLE: 5,
+                D2_ROLE: 6,
+                D2R_ROLE: 7,
+                D2R110_ROLE: 8,
+                D3_ROLE: 9,
+                D4_ROLE: 10,
+            }
             require(
                 len(history) == previous_slots[args.role]
                 and all(row["phase"] == "calibration" for row in history),
@@ -354,6 +402,7 @@ def submit(args):
             old_c3 = HISTORY / "c3-01" / "node"
             input_table = old_c3 / "mixed-2-endpoint" / "input.json"
             old_result = old_c3 / "calibration-result.json"
+            diagnostic_inputs = {"input.json": input_table}
             if args.role == D1_ROLE:
                 proposal = HISTORY.parent / "c3-retest-review" / "proposed-matrix.json"
                 d1_specs(read_json(CONFIG), proposal, input_table, old_result)
@@ -395,7 +444,7 @@ def submit(args):
                     D2R_PREVIOUS_ANALYSIS: retained_analysis,
                     D2R110_PREVIOUS_ANALYSIS: retained_d2r,
                 }
-            else:
+            elif args.role == D3_ROLE:
                 previous = HISTORY / "d2-r110-01"
                 require(
                     history[-1]["role"] == D2R110_ROLE
@@ -420,6 +469,32 @@ def submit(args):
                     D2R_PREVIOUS_ANALYSIS: retained_analysis,
                     D2R110_PREVIOUS_ANALYSIS: retained_d2r,
                     D3_PREVIOUS_ANALYSIS: retained_d2r110,
+                }
+            else:
+                previous = HISTORY / "d3-01"
+                require(
+                    history[-1]["role"] == D3_ROLE
+                    and history[-1] == audit_attempt(previous, require_completed=True),
+                    "D4 requires the retained D3 allocation and release",
+                )
+                proposal = CONFIG.with_name(D4_PLAN_FILENAME)
+                inherited = CONFIG.with_name(D3_PLAN_FILENAME)
+                prior_analysis = HISTORY.parent / "d3-review/analysis.json"
+                input_6 = HISTORY.parent / "d4-review/prepared" / D4_INPUT_6_NAME
+                d4_run_specs = d4_specs(
+                    config, proposal, input_table, input_6, old_result, inherited, prior_analysis
+                )
+                report = read_json(prior_analysis)
+                require(
+                    report["resource_release"] == json.loads(json.dumps(history[-1], default=str))
+                    and report["execution_commit"]
+                    == read_json(previous / "planned.json")["execution_commit"],
+                    "D4 retained D3 analysis is detached from the prior release",
+                )
+                diagnostic_inputs = {D4_INPUT_8_NAME: input_table, D4_INPUT_6_NAME: input_6}
+                retained_analyses = {
+                    D3_PROPOSAL_NAME: inherited,
+                    D4_PREVIOUS_ANALYSIS: prior_analysis,
                 }
         else:
             if args.phase == "calibration" and calibration_roles != CALIBRATION:
@@ -478,22 +553,33 @@ def submit(args):
         upload(ssh, remote_auth, args.authorization.read_text())
         aux = "-"
         auxiliary_hash = None
+        d4_node_specs = None
         if diagnostic:
             staged_names = {
                 D2R_ROLE: D2R_PROPOSAL_NAME,
                 D2R110_ROLE: D2R110_PROPOSAL_NAME,
                 D3_ROLE: D3_PROPOSAL_NAME,
+                D4_ROLE: D4_PROPOSAL_NAME,
             }
             name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
             upload(ssh, aux, proposal.read_bytes().decode("utf-8"))
-            upload(ssh, aux.parent / "input.json", input_table.read_bytes().decode("utf-8"))
+            for filename, table in diagnostic_inputs.items():
+                upload(ssh, aux.parent / filename, table.read_bytes().decode("utf-8"))
             upload(
                 ssh, aux.parent / "original-c3-result.json", old_result.read_bytes().decode("utf-8")
             )
             for filename, analysis in retained_analyses.items():
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
+            if args.role == D4_ROLE:
+                d4_node_specs = preflight_d4_stage(
+                    ssh,
+                    paths["remote_gpu_environment"] / "bin/python",
+                    checkout,
+                    aux,
+                    d4_run_specs,
+                )
         elif args.phase == "formal":
             _, previous = completed[("calibration", "C6")]
             aux = PurePosixPath(previous["remote_attempt"]) / "formal-freeze.json"
@@ -532,6 +618,8 @@ def submit(args):
         staging = HISTORY.parent / f"pre-intent-{args.attempt}-{clock_domain}"
         staging.mkdir(mode=0o700)
         (staging / "authorization.json").write_bytes(args.authorization.read_bytes())
+        if d4_node_specs is not None:
+            durable_write(staging / "d4-stage-preflight.json", {"runs": d4_node_specs})
         durable_write(staging / "pre-submission-queue.json", before_queue)
         durable_write(
             staging / "planned.json",
