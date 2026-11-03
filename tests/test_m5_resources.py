@@ -481,7 +481,7 @@ def test_intent_is_durable_before_invoke_and_unreturned_submission_blocks(
     config = tmp_path / "config.json"
     commit = "a" * 40
     write(auth, {"max_attempts": 1})
-    write(config, {"resource_schema_version": 2})
+    write(config, {"resource_schema_version": 2, "calibration": {}})
     monkeypatch.setattr(controller, "HISTORY", history)
     monkeypatch.setattr(controller, "CONFIG", config)
     monkeypatch.setattr(controller, "controller_boot_id", lambda: BOOT)

@@ -3,7 +3,15 @@
 import hashlib
 import json
 
-from .m5_campaign import D2_ROLE, D2R_ROLE, digest, read_json, require
+from .m5_campaign import (
+    D2_ROLE,
+    D2R110_ROLE,
+    D2R_OFFICIAL_ANALYSIS_SHA256,
+    D2R_ROLE,
+    digest,
+    read_json,
+    require,
+)
 from .m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA
 
 D2_PROPOSAL_SHA = "1d23948556bc102b1151e3bb4215ca2e161ce17fa786b5752ff8fe42f7eed96c"
@@ -11,6 +19,9 @@ D2_D1_REANALYSIS_SHA = "a635b73e59ba3d8725c61cfc868369dfeaf146b9e6750ff12bf5ed19
 D2_ANALYSIS_SHA = "0f369e956dd62373a310d467054d684e371b63303662563b7eba790ed12400ba"
 D2R_MEASURED_CAP_S = 95
 D2R_PROPOSAL_NAME = "proposed-d2-r.json"
+D2R_PROPOSAL_SHA = "fe0fde4fa66c498ffafc1c5f1f8fb89c25492a7a3ee6edbb7d06fc1dddcd3eba"
+D2R110_PROPOSAL_NAME = "proposed-d2-r110.json"
+D2R110_MEASURED_CAP_S = 110
 _D2_INVARIANTS_SHA = "8c3695364073476f638a125a2404d0155c61fd98728c56578ee39a6ccc0f78dc"
 
 
@@ -60,6 +71,51 @@ def d2r_plan(plan):
 
 def d2r_specs(config, proposal, table, original):
     return _specs(config, d2r_plan(read_json(proposal)), table, original, D2R_ROLE)
+
+
+def d2r110_plan(plan):
+    require(
+        plan["role"] == D2R110_ROLE
+        and plan["retained_D2R"]
+        == {
+            "status": "diagnostic-incomplete",
+            "proposal_sha256": D2R_PROPOSAL_SHA,
+            "analysis_sha256": D2R_OFFICIAL_ANALYSIS_SHA256,
+        },
+        "D2-R110 role or retained D2-R analysis differs",
+    )
+    conditioning, budget = plan["conditioning"], plan["budget"]
+    require(
+        all(
+            type(actual) is int and actual == expected
+            for actual, expected in (
+                (conditioning["per_measured_engine_cap_s"], D2R110_MEASURED_CAP_S),
+                (plan["shadow_conditioning_cap_s"], D2R_MEASURED_CAP_S),
+                (budget["four_conditioning_envelope_seconds"], 4 * D2R110_MEASURED_CAP_S),
+                (budget["job_overhead_and_cleanup_seconds"], 120),
+                (budget["estimated_work_envelope_seconds"], 1035),
+            )
+        ),
+        "D2-R110 measured cap, shadow or budget differs",
+    )
+    d2r_plan(
+        {
+            **plan,
+            "role": D2R_ROLE,
+            "conditioning": {**conditioning, "per_measured_engine_cap_s": D2R_MEASURED_CAP_S},
+            "budget": {
+                **budget,
+                "four_conditioning_envelope_seconds": 4 * D2R_MEASURED_CAP_S,
+                "job_overhead_and_cleanup_seconds": 160,
+                "estimated_work_envelope_seconds": 1015,
+            },
+        }
+    )
+    return plan
+
+
+def d2r110_specs(config, proposal, table, original):
+    return _specs(config, d2r110_plan(read_json(proposal)), table, original, D2R110_ROLE)
 
 
 def _specs(config, plan, table, original, role):

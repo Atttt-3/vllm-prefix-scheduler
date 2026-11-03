@@ -22,10 +22,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D2_ROLE,
+    D2R110_PREVIOUS_ANALYSIS,
+    D2R110_ROLE,
     D2R_PREVIOUS_ANALYSIS,
     D2R_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
+    bind_d2r110_inputs,
     bind_d2r_inputs,
     check_authorization,
     digest,
@@ -35,7 +38,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     require,
 )
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r110_specs, d2r_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -265,10 +268,11 @@ def main():
     require(args.role in roles, "M5 role outside approved budget")
     freeze = read_json(freeze_path) if freeze_path else None
     diagnostic = args.role in DIAGNOSTIC_ROLES
-    d2r = args.role == D2R_ROLE
-    d2 = args.role in (D2_ROLE, D2R_ROLE)
-    retained_analysis = None
-    retained_d2_sha = None
+    d2_planners = {D2_ROLE: d2_specs, D2R_ROLE: d2r_specs, D2R110_ROLE: d2r110_specs}
+    d2 = args.role in d2_planners
+    thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
+    retained_configs = []
+    retained_result = {}
     rates = None
     dress_reports = []
     if auxiliary and freeze is None and not diagnostic:
@@ -294,10 +298,28 @@ def main():
     if diagnostic:
         require(auxiliary is not None, "diagnostic requires its reviewed plan and archived input")
         diagnostic_table = auxiliary.parent / "input.json"
-        if d2r:
+        if args.role == D2R_ROLE:
             retained_analysis = auxiliary.parent / D2R_PREVIOUS_ANALYSIS
-            retained_d2_sha = bind_d2r_inputs(authorization, auxiliary, retained_analysis)
-        plan_specs = {D2R_ROLE: d2r_specs, D2_ROLE: d2_specs}.get(args.role, d1_specs)
+            retained_configs.append(retained_analysis)
+            retained_result = {
+                "role": D2R_ROLE,
+                "retained_d2_analysis_sha256": bind_d2r_inputs(
+                    authorization, auxiliary, retained_analysis
+                ),
+            }
+        elif args.role == D2R110_ROLE:
+            retained_analysis = auxiliary.parent / D2R_PREVIOUS_ANALYSIS
+            retained_d2r = auxiliary.parent / D2R110_PREVIOUS_ANALYSIS
+            d2_sha, d2r_sha = bind_d2r110_inputs(
+                authorization, auxiliary, retained_analysis, retained_d2r
+            )
+            retained_configs.extend((retained_analysis, retained_d2r))
+            retained_result = {
+                "role": D2R110_ROLE,
+                "retained_d2_analysis_sha256": d2_sha,
+                "retained_d2r_analysis_sha256": d2r_sha,
+            }
+        plan_specs = d2_planners.get(args.role, d1_specs)
         specs = plan_specs(
             config, auxiliary, diagnostic_table, auxiliary.parent / "original-c3-result.json"
         )
@@ -369,7 +391,7 @@ def main():
             thermal_stream = stack.enter_context(d2_samples.open("x")) if d2 else None
             next_sample = time.monotonic()
             while not stop_sampling.is_set():
-                observed = snapshot(d2=d2, ownership=True)
+                observed = snapshot(d2=d2 or thermal_context, ownership=True)
                 stream.write(json.dumps(observed) + "\n")
                 stream.flush()
                 if thermal_stream is not None and "thermal" in observed:
@@ -473,8 +495,8 @@ def main():
         collect += ["--artifact", str(raw / "engine.json")]
         if d2:
             collect += ["--config", str(auxiliary), "--artifact", str(raw / "d2-thermal.json")]
-            if d2r:
-                collect += ["--config", str(retained_analysis)]
+            for retained_config in retained_configs:
+                collect += ["--config", str(retained_config)]
             if not pilot:
                 collect += ["--config", str(target)]
         collect += ["--", python, "scripts/m5_owned.py", str(owner_path), str(ack), *command]
@@ -601,11 +623,7 @@ def main():
                     "input_sha256": D1_INPUT_SHA,
                     "audited_runs": count,
                     "retained_c3_sha256": C3_BLOCKED_SHA,
-                    **(
-                        {"role": D2R_ROLE, "retained_d2_analysis_sha256": retained_d2_sha}
-                        if d2r
-                        else {}
-                    ),
+                    **retained_result,
                 },
             )
         elif diagnostic:

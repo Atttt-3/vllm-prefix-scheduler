@@ -11,8 +11,8 @@ from pathlib import Path
 
 from m3_sources import collect_sources, sha256
 
-from vllm_prefix_scheduler.m5_campaign import D2R_ROLE
-from vllm_prefix_scheduler.m5_d2 import d2r_plan
+from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE
+from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -318,7 +318,7 @@ async def _run(args, config, workload, client):
         from m5_d2_thermal import target_from_plateau
 
         plan = json.loads(args.d2_plan.read_text())
-        prospective = plan["role"] == D2R_ROLE
+        prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(args.d2_plan)
         target, pilot_gpu = None, None
@@ -562,6 +562,8 @@ def main():
         plan = json.loads(args.d2_plan.read_text())
         if plan["role"] == D2R_ROLE:
             d2r_plan(plan)
+        elif plan["role"] == D2R110_ROLE:
+            d2r110_plan(plan)
         planned = plan["target"]
         expected_id = (
             args.pair_id == "thermal-pilot"

@@ -4,16 +4,17 @@ import argparse
 import json
 from pathlib import Path
 
+from m5_c3_bundle import c3_bundle, c3_bundle_bytes, c3_bundle_digest
 from m5_seal import git_identity, sealed_leaf, verify_analysis
 from plan_m5_calibration import evaluate_stage
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
-    CALIBRATION,
     DIAGNOSTIC_ROLES,
     TASK,
     check_freeze,
     config_matrix,
     digest,
+    qualification_roles,
     read_json,
     require,
 )
@@ -35,6 +36,7 @@ def freeze_campaign(config_path, history, commit, output):
     verify_analysis(commit, commit)
     config = read_json(config_path)
     matrix = config_matrix(config)
+    roles = qualification_roles(config)
     audit_history(history)
     stages = {}
     for directory in submitted_attempts(history):
@@ -55,12 +57,12 @@ def freeze_campaign(config_path, history, commit, output):
             stage = planned["role"]
             require(stage not in stages, "duplicate completed calibration stage")
             stages[stage] = (directory, planned, resource["job_id"])
-    require(set(stages) == set(CALIBRATION), "all six qualified M5 calibration stages required")
+    require(set(stages) == set(roles), "complete qualified M5 calibration roles required")
     output.mkdir(parents=True, exist_ok=False)
     catalog = git_identity(commit)
     reports, report_hashes = {}, {}
     config_hash = digest(config_path)
-    for stage in CALIBRATION:
+    for stage in roles:
         directory, planned, job = stages[stage]
         node = directory / "node"
         index = read_json(node / "index.json")
@@ -92,7 +94,7 @@ def freeze_campaign(config_path, history, commit, output):
             )
             row.update(inputs=bound["inputs"], run=bound["run"], audit=bound["audit"])
         write(private / "index.json", index)
-        rates = reports["C2"]["selected_rates"] if stage in CALIBRATION[2:] else None
+        rates = reports["C2"]["selected_rates"] if stage not in ("C1", "C2") else None
         dress = [reports["C4"], reports["C5"]] if stage == "C6" else ()
         recomputed = evaluate_stage(
             config, stage, private / "index.json", rates, dress, config_sha256=config_hash
@@ -105,6 +107,15 @@ def freeze_campaign(config_path, history, commit, output):
         )
         write(private / "reviewed-result.json", recomputed)
         reports[stage], report_hashes[stage] = recomputed, digest(result)
+    if "C3" not in report_hashes:
+        bound = c3_bundle(
+            config_path, history, {stage: row[0] for stage, row in stages.items()}, commit
+        )
+        with (output / "c3-bundle.json").open("xb") as stream:
+            stream.write(c3_bundle_bytes(bound))
+        for stage in ("C3-burst", "C3-mixed"):
+            del report_hashes[stage]
+        report_hashes["C3"] = c3_bundle_digest(bound)
     table_dir = stages["C6"][0] / "node/tables"
     require(
         {file.name for file in table_dir.iterdir()} == {f"{pair}.json" for pair in matrix},

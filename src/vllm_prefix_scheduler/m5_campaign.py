@@ -9,12 +9,21 @@ TASK = "M5-paired-performance"
 BASELINE = "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b"
 MODES = ("native", "off", "prefix", "guarded")
 CALIBRATION = tuple(f"C{i}" for i in range(1, 7))
+SPLIT_C3_ROLES = ("C3-burst", "C3-mixed")
 D1_ROLE = "C3-D1"
 D2_ROLE = "D2-E-E"
 D2R_ROLE = "D2-R"
 D2R_PLAN_FILENAME = "m5-d2r.json"
 D2R_PREVIOUS_ANALYSIS = "previous-d2-analysis.json"
-DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE)
+D2R_OFFICIAL_ANALYSIS_SHA256 = "67ef91b0052f59289ec648f84ed88ce161046e737cc54fdf2668ff51062beb72"
+D2R110_ROLE = "D2-R110"
+D2R110_PLAN_FILENAME = "m5-d2r110.json"
+D2R110_PREVIOUS_ANALYSIS = "previous-d2-r-analysis.json"
+DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE, D2R110_ROLE)
+REVIEWED_DIAGNOSTIC_PLANS = {
+    D2R_ROLE: (8, "d2r_plan_sha256", D2R_PLAN_FILENAME),
+    D2R110_ROLE: (9, "d2r110_plan_sha256", D2R110_PLAN_FILENAME),
+}
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
 
@@ -135,7 +144,8 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         "record the explicit user's budget approval reference",
     )
     roles = record["roles"]
-    permitted = (*CALIBRATION, *DIAGNOSTIC_ROLES) if phase == "calibration" else matrix
+    qualifying = qualification_roles(config)
+    permitted = (*qualifying, *DIAGNOSTIC_ROLES) if phase == "calibration" else matrix
     require(
         type(roles) is list and roles and all(role in permitted for role in roles),
         "authorization roles outside this phase",
@@ -159,19 +169,34 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
             roles == [D2_ROLE] and record["max_attempts"] == 7,
             "D2 is limited to one new diagnostic allocation",
         )
-    if D2R_ROLE in roles:
+    for role, (limit, key, filename) in REVIEWED_DIAGNOSTIC_PLANS.items():
+        if role in roles:
+            require(
+                roles == [role] and record["max_attempts"] == limit,
+                f"{role} is limited to one new diagnostic allocation",
+            )
+            require(
+                is_hash(record.get(key))
+                and record[key] == digest(Path(config_path).with_name(filename)),
+                f"{role} authorization is detached from the reviewed plan",
+            )
+        else:
+            require(key not in record, f"{role} plan hash outside its exclusive authorization")
+    if (
+        phase == "calibration"
+        and qualifying != CALIBRATION
+        and any(role in qualifying for role in roles)
+    ):
         require(
-            roles == [D2R_ROLE] and record["max_attempts"] == 8,
-            "D2-R is limited to one new diagnostic allocation",
-        )
-        require(
-            is_hash(record.get("d2r_plan_sha256"))
-            and record["d2r_plan_sha256"] == digest(Path(config_path).with_name(D2R_PLAN_FILENAME)),
-            "D2-R authorization is detached from the reviewed plan",
+            tuple(roles) == qualifying
+            and record["max_attempts"] == 16
+            and is_hash(record.get("d2r110_analysis_sha256")),
+            "split C3 requires its exclusive seven-slot qualification authorization",
         )
     else:
         require(
-            "d2r_plan_sha256" not in record, "D2-R plan hash outside its exclusive authorization"
+            "d2r110_analysis_sha256" not in record,
+            "D2-R110 result hash outside split C3 qualification authorization",
         )
     if phase == "formal":
         require(freeze_path is not None, "formal authorization requires the frozen tables")
@@ -182,20 +207,56 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
     return roles
 
 
+def qualification_roles(config):
+    if config["calibration"].get("split_c3") is True:
+        roles = (*CALIBRATION[:2], *SPLIT_C3_ROLES, *CALIBRATION[3:])
+        require(
+            config["budget"]["split_calibration_allocations"] == len(roles),
+            "split C3 physical allocation count differs",
+        )
+        return roles
+    return CALIBRATION
+
+
 def bind_d2r_inputs(record, plan, previous):
     require(
         record["roles"] == [D2R_ROLE] and digest(plan) == record["d2r_plan_sha256"],
         "D2-R staged plan differs from authorization",
     )
-    expected = read_json(plan)["retained_D2"]
-    require(digest(previous) == expected["analysis_sha256"], "D2-R retained D2 analysis differs")
+    return bind_retained_d2_analysis(read_json(plan)["retained_D2"], previous, D2R_ROLE)
+
+
+def bind_retained_d2_analysis(expected, previous, role):
+    require(digest(previous) == expected["analysis_sha256"], f"{role} retained D2 analysis differs")
     predecessor = read_json(previous)
     require(
         expected["status"] == predecessor["status"] == "diagnostic-incomplete"
         and expected["proposal_sha256"] == predecessor["proposal_sha256"],
-        "D2-R predecessor is not the retained incomplete D2",
+        f"{role} predecessor is not the retained incomplete D2",
     )
     return expected["analysis_sha256"]
+
+
+def bind_d2r110_inputs(record, plan, previous, previous_d2r):
+    require(
+        record["roles"] == [D2R110_ROLE] and digest(plan) == record["d2r110_plan_sha256"],
+        "D2-R110 staged plan differs from authorization",
+    )
+    proposal = read_json(plan)
+    d2_sha = bind_retained_d2_analysis(proposal["retained_D2"], previous, D2R110_ROLE)
+    retained = proposal["retained_D2R"]
+    require(
+        retained["analysis_sha256"] == digest(previous_d2r) == D2R_OFFICIAL_ANALYSIS_SHA256,
+        "D2-R110 retained D2-R analysis differs",
+    )
+    predecessor = read_json(previous_d2r)
+    require(
+        predecessor["role"] == D2R_ROLE
+        and retained["status"] == predecessor["status"] == "diagnostic-incomplete"
+        and retained["proposal_sha256"] == predecessor["proposal_sha256"],
+        "D2-R110 predecessor is not the retained incomplete D2-R",
+    )
+    return d2_sha, retained["analysis_sha256"]
 
 
 def formal_specs(config, freeze, role):

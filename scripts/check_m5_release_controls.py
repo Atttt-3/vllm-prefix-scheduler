@@ -223,6 +223,11 @@ def run_controls(args):
 
     source_history = output / "source_mismatch" / "attempts"
     shutil.copytree(args.history, source_history, copy_function=os.link)
+    if read_json(args.config)["calibration"].get("split_c3") is True:
+        previous = args.history.parent / "d2-r110-review" / "analysis.json"
+        target = source_history.parent / "d2-r110-review" / "analysis.json"
+        target.parent.mkdir()
+        shutil.copyfile(previous, target)
     raw_sources = (
         source_history / owner.name / "node" / Path(first["run"]).parent.name / "raw/sources.json"
     )

@@ -7,8 +7,10 @@ from pathlib import Path
 
 from .m5_campaign import (
     D2_ROLE,
+    D2R110_ROLE,
     D2R_ROLE,
     JOB_PREFIX,
+    REVIEWED_DIAGNOSTIC_PLANS,
     TASK,
     digest,
     exact_int,
@@ -440,15 +442,17 @@ def audit_attempt(directory, *, require_completed=False):
         == (record["auxiliary_sha256"] if record["phase"] == "formal" else None),
         "allocation authorization or phase budget differs",
     )
-    if record["role"] == D2R_ROLE:
+    role = record["role"]
+    if role in REVIEWED_DIAGNOSTIC_PLANS:
+        limit, key, _ = REVIEWED_DIAGNOSTIC_PLANS[role]
         require(
             strict
             and record["phase"] == "calibration"
-            and authorization["roles"] == [D2R_ROLE]
-            and authorization["max_attempts"] == 8
-            and is_hash(authorization["d2r_plan_sha256"])
-            and authorization["d2r_plan_sha256"] == record["auxiliary_sha256"],
-            "D2-R resource binding differs from its one-slot reviewed authorization",
+            and authorization["roles"] == [role]
+            and authorization["max_attempts"] == limit
+            and is_hash(authorization.get(key))
+            and authorization[key] == record["auxiliary_sha256"],
+            f"{role} resource binding differs from its one-slot reviewed authorization",
         )
     started = monotonic(binding["started_monotonic_ns"])
     ended = monotonic(allocation["ended_monotonic_ns"])
@@ -630,5 +634,14 @@ def audit_history(root):
                 and audits[index - 1]["role"] == D2_ROLE
                 and audits[index - 1]["complete"],
                 "D2-R resource history differs from the approved eighth allocation",
+            )
+        elif row["role"] == D2R110_ROLE:
+            require(
+                index == 8
+                and phase == "calibration"
+                and used[phase] == 9
+                and audits[index - 1]["role"] == D2R_ROLE
+                and audits[index - 1]["complete"],
+                "D2-R110 resource history differs from the approved ninth allocation",
             )
     return audits

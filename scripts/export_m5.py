@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from m5_c3_bundle import c3_bundle, c3_bundle_digest
 from m5_seal import git_identity, sealed_leaf, verify_analysis
 
 from vllm_prefix_scheduler.m5_campaign import (
@@ -17,12 +18,14 @@ from vllm_prefix_scheduler.m5_campaign import (
     DIAGNOSTIC_ROLES,
     MODES,
     SCENARIOS,
+    SPLIT_C3_ROLES,
     TASK,
     check_authorization,
     check_freeze,
     digest,
     formal_specs,
     is_hash,
+    qualification_roles,
     read_json,
     require,
 )
@@ -225,6 +228,7 @@ def collect(config_path, freeze_path, history, analysis_commit, output):
     matrix, _ = public_freeze(freeze, config_path)
     verify_analysis(execution, analysis_commit)
     config = read_json(config_path)
+    calibration_roles = qualification_roles(config)
     releases = audit_history(history)
     tables, stages, candidates = None, {}, {}
     private_releases = []
@@ -278,18 +282,27 @@ def collect(config_path, freeze_path, history, analysis_commit, output):
             require(role not in stages, "duplicate qualified calibration stage")
             report = path / "node/calibration-result.json"
             require(
-                digest(report) == freeze["calibration_sha256"][role]
-                and read_json(report)["status"] == "qualified",
-                "calibration report is outside the formal freeze",
+                read_json(report)["status"] == "qualified", "calibration report is not qualified"
             )
-            stages[role] = report
+            if role not in SPLIT_C3_ROLES:
+                require(
+                    digest(report) == freeze["calibration_sha256"][role],
+                    "calibration report is outside the formal freeze",
+                )
+            stages[role] = path
             if role == "C6":
                 tables = path / "node/tables"
         else:
             require(planned["auxiliary_sha256"] == digest(freeze_path), "formal run freeze differs")
             require(role not in candidates, "duplicate completed formal pair")
             candidates[role] = (path, planned, resource["job_id"])
-    require(set(stages) == set(CALIBRATION) and tables is not None, "calibration incomplete")
+    require(set(stages) == set(calibration_roles) and tables is not None, "calibration incomplete")
+    if calibration_roles != CALIBRATION:
+        bundle = c3_bundle(config_path, history, stages, execution)
+        require(
+            c3_bundle_digest(bundle) == freeze["calibration_sha256"]["C3"],
+            "split C3 original evidence is outside the formal freeze",
+        )
     require(set(candidates) == set(matrix), "formal matrix incomplete")
     output.mkdir(parents=True, exist_ok=False)
     catalog = git_identity(execution)
@@ -415,7 +428,7 @@ def public_allocations(request, matrix):
         require(
             (
                 phase == "calibration"
-                and role in (*CALIBRATION, *DIAGNOSTIC_ROLES)
+                and role in (*CALIBRATION, *SPLIT_C3_ROLES, *DIAGNOSTIC_ROLES)
                 or phase == "formal"
                 and role in matrix
             )

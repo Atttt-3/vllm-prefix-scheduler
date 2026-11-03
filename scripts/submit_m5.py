@@ -17,28 +17,38 @@ from m4_processes import atomic_write
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from m5_c3_bundle import c3_bundle, c3_bundle_digest, verify_d2r110_qualification  # noqa: E402
+
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     CALIBRATION,
     D1_ROLE,
     D2_ROLE,
+    D2R110_PLAN_FILENAME,
+    D2R110_PREVIOUS_ANALYSIS,
+    D2R110_ROLE,
     D2R_PLAN_FILENAME,
     D2R_PREVIOUS_ANALYSIS,
     D2R_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
+    SPLIT_C3_ROLES,
     TASK,
+    bind_d2r110_inputs,
     bind_d2r_inputs,
     check_authorization,
     digest,
     id_ok,
+    qualification_roles,
     read_json,
     require,
 )
 from vllm_prefix_scheduler.m5_d1 import d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
     D2_D1_REANALYSIS_SHA,
+    D2R110_PROPOSAL_NAME,
     D2R_PROPOSAL_NAME,
     d2_specs,
+    d2r110_specs,
     d2r_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
@@ -308,8 +318,10 @@ def submit(args):
     )
     auth = read_json(args.authorization)
     allowed = check_authorization(auth, CONFIG, commit, args.phase, freeze_path=args.freeze)
+    config = read_json(CONFIG)
+    calibration_roles = qualification_roles(config)
     require(
-        read_json(CONFIG)["resource_schema_version"] == RESOURCE_SCHEMA_VERSION,
+        config["resource_schema_version"] == RESOURCE_SCHEMA_VERSION,
         "configuration M5 resource schema differs",
     )
     require(args.role in allowed and id_ok(args.attempt), "attempt or role outside authorization")
@@ -320,10 +332,10 @@ def submit(args):
         completed = snapshot_previous(HISTORY, args.role, args.phase, auth, commit)
         diagnostic = args.role in DIAGNOSTIC_ROLES
         stage_index = 0
-        retained_analysis = None
+        retained_analyses = {}
         if diagnostic:
             require(
-                len(history) == {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7}[args.role]
+                len(history) == {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7, D2R110_ROLE: 8}[args.role]
                 and all(row["phase"] == "calibration" for row in history),
                 "diagnostic history is outside its single approved allocation",
             )
@@ -345,7 +357,7 @@ def submit(args):
                     "D2 D1 reanalysis evidence differs",
                 )
                 d2_specs(read_json(CONFIG), proposal, input_table, old_result)
-            else:
+            elif args.role == D2R_ROLE:
                 require(
                     history[-1]["role"] == D2_ROLE
                     and history[-1] == audit_attempt(HISTORY / "d2-01", require_completed=True),
@@ -355,11 +367,31 @@ def submit(args):
                 retained_analysis = HISTORY.parent / "d2-independent-review" / "analysis.json"
                 bind_d2r_inputs(auth, proposal, retained_analysis)
                 d2r_specs(read_json(CONFIG), proposal, input_table, old_result)
+                retained_analyses[D2R_PREVIOUS_ANALYSIS] = retained_analysis
+            else:
+                require(
+                    history[-1]["role"] == D2R_ROLE
+                    and history[-1] == audit_attempt(HISTORY / "d2-r-01", require_completed=True),
+                    "D2-R110 requires the retained D2-R allocation and release",
+                )
+                proposal = CONFIG.with_name(D2R110_PLAN_FILENAME)
+                retained_analysis = HISTORY.parent / "d2-independent-review" / "analysis.json"
+                retained_d2r = HISTORY.parent / "d2-r-review" / "analysis.json"
+                bind_d2r110_inputs(auth, proposal, retained_analysis, retained_d2r)
+                d2r110_specs(read_json(CONFIG), proposal, input_table, old_result)
+                retained_analyses = {
+                    D2R_PREVIOUS_ANALYSIS: retained_analysis,
+                    D2R110_PREVIOUS_ANALYSIS: retained_d2r,
+                }
         else:
+            if args.phase == "calibration" and calibration_roles != CALIBRATION:
+                verify_d2r110_qualification(HISTORY, auth)
             stage_index = (
-                CALIBRATION.index(args.role) if args.phase == "calibration" else len(CALIBRATION)
+                calibration_roles.index(args.role)
+                if args.phase == "calibration"
+                else len(calibration_roles)
             )
-            for stage in CALIBRATION[:stage_index]:
+            for stage in calibration_roles[:stage_index]:
                 require(
                     ("calibration", stage) in completed,
                     f"required qualified calibration stage {stage} missing",
@@ -385,29 +417,38 @@ def submit(args):
         aux = "-"
         auxiliary_hash = None
         if diagnostic:
-            name = D2R_PROPOSAL_NAME if retained_analysis is not None else proposal.name
+            name = {D2R_ROLE: D2R_PROPOSAL_NAME, D2R110_ROLE: D2R110_PROPOSAL_NAME}.get(
+                args.role, proposal.name
+            )
             aux = remote_auth.parent / name
             upload(ssh, aux, proposal.read_bytes().decode("utf-8"))
             upload(ssh, aux.parent / "input.json", input_table.read_bytes().decode("utf-8"))
             upload(
                 ssh, aux.parent / "original-c3-result.json", old_result.read_bytes().decode("utf-8")
             )
-            if retained_analysis is not None:
-                upload(
-                    ssh,
-                    aux.parent / D2R_PREVIOUS_ANALYSIS,
-                    retained_analysis.read_bytes().decode("utf-8"),
-                )
+            for filename, analysis in retained_analyses.items():
+                upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
         elif args.phase == "formal":
             c6, previous = completed[("calibration", "C6")]
             freeze = read_json(args.freeze)
-            for stage in CALIBRATION:
+            for stage in calibration_roles:
+                if stage in SPLIT_C3_ROLES:
+                    continue
                 path, _ = completed[("calibration", stage)]
                 require(
                     digest(path / "node/calibration-result.json")
                     == freeze["calibration_sha256"][stage],
                     "formal freeze detached from qualified calibration",
+                )
+            if calibration_roles != CALIBRATION:
+                stages = {
+                    stage: completed[("calibration", stage)][0] for stage in calibration_roles
+                }
+                bundle = c3_bundle(CONFIG, HISTORY, stages, commit)
+                require(
+                    c3_bundle_digest(bundle) == freeze["calibration_sha256"]["C3"],
+                    "formal freeze detached from split C3 qualification",
                 )
             for pair, wanted in freeze["tables"].items():
                 require(

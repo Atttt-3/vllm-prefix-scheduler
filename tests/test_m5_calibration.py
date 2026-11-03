@@ -1,9 +1,11 @@
 """Local subprocess controls for the calibration plan and decision gates."""
 
 import hashlib
+import importlib.util
 import json
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -26,14 +28,14 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def cli(action, stage, output, *options):
+def cli(action, stage, output, *options, config=CONFIG):
     return subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
             action,
             "--config",
-            str(CONFIG),
+            str(config),
             "--stage",
             stage,
             "--output",
@@ -47,26 +49,26 @@ def cli(action, stage, output, *options):
     )
 
 
-def rates_file(root):
+def rates_file(root, config=CONFIG):
     return write(
         root / "rates.json",
         {
             "stage": "C2",
             "status": "qualified",
             "selected_rates": {"burst": 3, "mixed": 4},
-            "config_sha256": digest(CONFIG),
+            "config_sha256": digest(config),
         },
     )
 
 
-def stage_plan(root, stage, *options):
+def stage_plan(root, stage, *options, config=CONFIG):
     out = root / f"plan-{stage}.json"
-    result = cli("plan", stage, out, *options)
+    result = cli("plan", stage, out, *options, config=config)
     assert result.returncode == 0, result.stderr
     return read(out)
 
 
-def evidence_index(root, plan):
+def evidence_index(root, plan, config=CONFIG):
     rows = []
     for spec in plan["runs"]:
         leaf = root / spec["id"]
@@ -88,7 +90,7 @@ def evidence_index(root, plan):
                 "pair_id": spec["id"],
                 "phase": "diagnostic" if spec["scenario"] == "mechanism" else "calibration",
                 "status": "valid",
-                "config_sha256": digest(CONFIG),
+                "config_sha256": digest(config),
                 "input_sha256": digest(inputs),
                 "metrics": {
                     "duration_ns": {
@@ -99,7 +101,15 @@ def evidence_index(root, plan):
                     },
                     "strata": {
                         "all": {
-                            "counts": {"planned": spec["count"], "completed": spec["count"]},
+                            "counts": {
+                                **dict.fromkeys(
+                                    ("planned", "completed", "submitted", "timely_first_token"),
+                                    spec["count"],
+                                ),
+                                **dict.fromkeys(
+                                    ("failed", "cancelled", "timeout", "unfinished"), 0
+                                ),
+                            },
                             "ttft_ns": {"p95": 10_000_000},
                             "completion_rate": 1.0,
                             "timely_first_token_rate": 1.0,
@@ -111,7 +121,7 @@ def evidence_index(root, plan):
                         "last_terminal_tokens_per_s": 64.0,
                     },
                     "stage_costs_ns": {
-                        key: {"n": 5}
+                        key: {"n": 5, "max": 100}
                         for key in (
                             "schedule",
                             "schedule_envelope",
@@ -122,8 +132,14 @@ def evidence_index(root, plan):
                         )
                     },
                     "max_outstanding": 1,
+                    "kv_blocks": 5000,
                     "submit_lag_ns": {"n": spec["count"], "p99": 1000, "max": 1000},
                 },
+                **(
+                    {"measurement_schema_version": 2}
+                    if plan["stage"] in ("C3-burst", "C3-mixed")
+                    else {}
+                ),
             },
         )
         rows.append(
@@ -218,6 +234,233 @@ def test_overhead_gate_uses_last_terminal_throughput(tmp_path):
     assert result.returncode == 2
     assert read(blocked)["status"] == "blocked"
     assert "paired tolerance" in read(blocked)["reasons"][0]
+
+
+@pytest.fixture
+def split_calibration(tmp_path):
+    config = read(CONFIG)
+    config["calibration"]["split_c3"] = True
+    config_path = write(tmp_path / "split-config.json", config)
+    return config_path, rates_file(tmp_path, config_path)
+
+
+def split_report(root, scenario, config, rates):
+    stage = f"C3-{scenario}"
+    root.mkdir()
+    plan = stage_plan(root, stage, "--rates", rates, config=config)
+    index = evidence_index(root, plan, config)
+    report = root / "report.json"
+    result = cli("evaluate", stage, report, "--rates", rates, "--index", index, config=config)
+    assert result.returncode == 0, result.stderr
+    return plan, index, report
+
+
+def test_split_c3_requires_prospective_opt_in(tmp_path):
+    config = read(CONFIG)
+    config["calibration"].pop("split_c3", None)
+    legacy = write(tmp_path / "legacy.json", config)
+    rates = rates_file(tmp_path, legacy)
+    output = tmp_path / "plan.json"
+    result = cli("plan", "C3-burst", output, "--rates", rates, config=legacy)
+    assert result.returncode == 2 and not output.exists()
+    assert "C3 split is not enabled" in result.stderr
+
+
+@pytest.mark.parametrize("scenario", ("burst", "mixed"))
+def test_split_c3_produces_two_balanced_blocks_and_eight_comparisons(
+    tmp_path, split_calibration, scenario
+):
+    config, rates = split_calibration
+    plan, _, result = split_report(tmp_path / scenario, scenario, config, rates)
+    assert plan["estimated_mode_work_seconds"] + plan["allocation_reserve_seconds"] <= 1050
+    leaves = plan["runs"]
+    assert [row["tier"] for row in leaves[:8]] == [
+        "endpoint",
+        "light",
+        "light",
+        "endpoint",
+        "light",
+        "endpoint",
+        "endpoint",
+        "light",
+    ]
+    assert {row["count"] for row in leaves} == {60}
+    rate, mode = (3, "native") if scenario == "burst" else (4, "guarded")
+    assert {(row["rate_rps"], row["mode"]) for row in leaves} == {(rate, mode)}
+    base = read(config)["calibration"]["seed_base"] + (220 if scenario == "burst" else 230)
+    assert [row["seed"] for row in leaves[:8]] == [base + 1] * 4 + [base + 2] * 4
+    assert [row["id"] for row in leaves[8:]] == (
+        ["mixed-split-stages"] if scenario == "mixed" else []
+    )
+    result = read(result)
+    assert result["qualification_protocol"] == "c3-balanced-split-v1"
+    assert result["status"] == "qualified"
+    assert result["blocks"][0]["input_sha256"] != result["blocks"][1]["input_sha256"]
+    assert Counter(row["kind"] for row in result["comparisons"]) == {"E/L": 4, "E/E": 2, "L/L": 2}
+    assert all(row["qualified"] for row in result["comparisons"])
+    for row in result["comparisons"]:
+        assert row["input_sha256"] == result["runs"][row["observed"]]["input_sha256"]
+        if row["kind"] == "E/L":
+            assert row["reference"].endswith("-endpoint")
+            assert row["observed"].endswith("-light")
+
+
+@pytest.mark.parametrize("kind", ("E/E", "L/L", "E/L"))
+def test_split_c3_blocks_each_contrast_independently(tmp_path, split_calibration, kind):
+    config, rates = split_calibration
+    root = tmp_path / "burst"
+    plan, index, _ = split_report(root, "burst", config, rates)
+    if kind == "E/E":
+        p95 = (10_000_000, 11_500_000, 11_500_000, 13_000_000)
+    elif kind == "L/L":
+        p95 = (11_500_000, 10_000_000, 13_000_000, 11_500_000)
+    else:
+        p95 = (10_000_000, 13_000_000, 13_000_000, 10_000_000)
+    for leaf, value in zip(plan["runs"][:4], p95, strict=True):
+        path = root / leaf["id"] / "audit.json"
+        audit = read(path)
+        audit["metrics"]["strata"]["all"]["ttft_ns"]["p95"] = value
+        write(path, audit)
+    output = root / "blocked.json"
+    result = cli("evaluate", "C3-burst", output, "--rates", rates, "--index", index, config=config)
+    assert result.returncode == 2, result.stderr
+    report = read(output)
+    assert report["status"] == "blocked"
+    assert {row["kind"] for row in report["comparisons"] if not row["qualified"]} == {kind}
+    assert report["reasons"] == [f"{kind} comparison exceeds an original paired tolerance"]
+
+
+@pytest.mark.parametrize("measure, original", (("requests", 4), ("tokens", 64)))
+def test_split_c3_checks_both_last_terminal_throughputs(
+    tmp_path, split_calibration, measure, original
+):
+    config, rates = split_calibration
+    root = tmp_path / "burst"
+    plan, index, _ = split_report(root, "burst", config, rates)
+    for leaf in plan["runs"][1:3]:
+        path = root / leaf["id"] / "audit.json"
+        audit = read(path)
+        throughput = audit["metrics"]["throughput"]
+        throughput[f"last_terminal_{measure}_per_s"] = original * 0.94
+        throughput[f"fixed_{measure}_per_s"] = original
+        write(path, audit)
+    output = root / "blocked.json"
+    result = cli("evaluate", "C3-burst", output, "--rates", rates, "--index", index, config=config)
+    assert result.returncode == 2, result.stderr
+    report = read(output)
+    rejected = [row for row in report["comparisons"] if not row["qualified"]]
+    assert len(rejected) == 2 and all(row["kind"] == "E/L" for row in rejected)
+    assert all(
+        row["relative_throughput_delta"][measure] == pytest.approx(-0.06) for row in rejected
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("table-bytes", "kv-capacity", "wrong-tier", "missing-leaf", "v1-audit", "late-submit"),
+)
+def test_split_c3_refuses_mislabeled_or_unpaired_evidence(tmp_path, split_calibration, mutation):
+    config, rates = split_calibration
+    root = tmp_path / "mixed"
+    _, index, _ = split_report(root, "mixed", config, rates)
+    index_data = read(index)
+    row = index_data["runs"][0]
+    path = Path(row["audit"])
+    audit = read(path)
+    if mutation == "table-bytes":
+        inputs = Path(row["inputs"])
+        inputs.write_text(inputs.read_text() + "\n")
+        audit["input_sha256"] = digest(inputs)
+    elif mutation == "kv-capacity":
+        audit["metrics"]["kv_blocks"] += 1
+    elif mutation == "wrong-tier":
+        audit["tier"] = "light"
+    elif mutation == "v1-audit":
+        del audit["measurement_schema_version"]
+    elif mutation == "late-submit":
+        audit["metrics"]["submit_lag_ns"]["max"] = 25_000_001
+    else:
+        index_data["runs"].pop()
+        write(index, index_data)
+    write(path, audit)
+    output = root / "invalid.json"
+    result = cli("evaluate", "C3-mixed", output, "--rates", rates, "--index", index, config=config)
+    assert result.returncode == 2
+    assert "evidence rejected" in result.stderr
+    assert not output.exists()
+
+
+def test_split_c3_retains_failed_denominator_and_unexercised_profile(tmp_path, split_calibration):
+    config, rates = split_calibration
+    root = tmp_path / "mixed"
+    plan, index, _ = split_report(root, "mixed", config, rates)
+    leaf = plan["runs"][0]["id"]
+    path = root / leaf / "audit.json"
+    incomplete = read(path)
+    incomplete["metrics"]["strata"]["all"]["counts"].update(
+        completed=59, failed=1, timely_first_token=59
+    )
+    write(path, incomplete)
+    profile = root / "mixed-split-stages/audit.json"
+    no_commit = read(profile)
+    no_commit["metrics"]["stage_costs_ns"]["queue_commit"]["max"] = 0
+    write(profile, no_commit)
+    output = root / "blocked.json"
+    result = cli("evaluate", "C3-mixed", output, "--rates", rates, "--index", index, config=config)
+    assert result.returncode == 2, result.stderr
+    report = read(output)
+    assert report["incomplete_runs"] == [leaf]
+    assert report["observations"][leaf]["counts"]["failed"] == 1
+    assert Counter(row["status"] for row in report["comparisons"]) == {
+        "incomplete": 2,
+        "qualified": 6,
+    }
+    assert report["reasons"] == [
+        "split leaves lack all 60 completed and timely requests",
+        "profile did not exercise all declared scheduler measurements",
+    ]
+
+
+def test_aggregate_c3_rebuilds_both_reports_and_keeps_original_failure(
+    tmp_path, split_calibration, monkeypatch
+):
+    config, rates = split_calibration
+    burst, mixed = [split_report(tmp_path / key, key, config, rates) for key in ("burst", "mixed")]
+    original = write(tmp_path / "original-c3.json", {"stage": "C3", "status": "blocked"})
+    spec = importlib.util.spec_from_file_location("test_split_aggregate", SCRIPT)
+    calibration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(calibration)
+    monkeypatch.setattr(calibration, "C3_BLOCKED_SHA", digest(original))
+    options = {"config_sha256": digest(config), "original_c3": original}
+    selected = read(rates)["selected_rates"]
+    aggregate = calibration.aggregate_c3(read(config), (burst[-1], mixed[-1]), selected, **options)
+    assert aggregate["status"] == "qualified" and aggregate["stage"] == "C3"
+    assert aggregate["retained_original_c3"] == {"status": "blocked", "sha256": digest(original)}
+    assert aggregate["split_reports"]["C3-burst"]["report_sha256"] == digest(burst[-1])
+    with pytest.raises(ValueError, match="both ordered C3 split reports"):
+        calibration.aggregate_c3(read(config), (mixed[-1],), selected, **options)
+    with pytest.raises(ValueError, match="source or order differs"):
+        calibration.aggregate_c3(read(config), (mixed[-1], burst[-1]), selected, **options)
+    forged = read(mixed[-1])
+    forged["comparisons"][0]["qualified"] = False
+    write(mixed[-1], forged)
+    with pytest.raises(ValueError, match="decisions differ from reconstruction"):
+        calibration.aggregate_c3(read(config), (burst[-1], mixed[-1]), selected, **options)
+    profile = mixed[-1].parent / "mixed-split-stages/audit.json"
+    data = read(profile)
+    data["metrics"]["stage_costs_ns"]["score"]["max"] = 0
+    write(profile, data)
+    blocked = mixed[-1].parent / "blocked.json"
+    result = cli(
+        "evaluate", "C3-mixed", blocked, "--rates", rates, "--index", mixed[1], config=config
+    )
+    assert result.returncode == 2, result.stderr
+    aggregate = calibration.aggregate_c3(read(config), (burst[-1], blocked), selected, **options)
+    assert aggregate["status"] == "blocked"
+    assert aggregate["reasons"] == ["C3-mixed did not qualify"]
+    original.write_text(original.read_text() + "\n")
+    with pytest.raises(ValueError, match="original C3 blocked result differs"):
+        calibration.aggregate_c3(read(config), (burst[-1], mixed[-1]), selected, **options)
 
 
 def diagnostic_evidence(root):

@@ -16,6 +16,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     TASK,
     config_matrix,
     digest,
+    qualification_roles,
     read_json,
 )
 from vllm_prefix_scheduler.m5_contract import audit_run, comparable, paired_summary
@@ -24,6 +25,102 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import export_m5  # noqa: E402
+import m5_c3_bundle  # noqa: E402
+
+
+def test_split_c3_bundle_binds_leaf_bytes_and_resource_releases(tmp_path, monkeypatch):
+    config = ROOT / "configs/m5-performance.json"
+    commit = "a" * 40
+    roles = qualification_roles(read_json(config))
+    stages = {role: tmp_path / role for role in roles}
+    for attempt in stages.values():
+        attempt.mkdir()
+        put(attempt / "authorization.json", {"d2r110_analysis_sha256": "d" * 64})
+    for i, stage in enumerate(("C2", "C3-burst", "C3-mixed")):
+        attempt = tmp_path / stage
+        node = attempt / "node"
+        leaf = node / "leaf"
+        (leaf / "raw").mkdir(parents=True)
+        (leaf / "collector").mkdir()
+        stages[stage] = attempt
+        put(
+            attempt / "planned.json",
+            {
+                "role": stage,
+                "phase": "calibration",
+                "execution_commit": commit,
+                "config_sha256": digest(config),
+            },
+        )
+        put(node / "allocation-sources.json", {"execution_commit": commit})
+        put(attempt / "terminal.json", {"job": i, "state": "COMPLETED"})
+        audit = put(leaf / "audit.json", {})
+        table = put(leaf / "input.json", {})
+        put(
+            node / "index.json",
+            {
+                "stage": stage,
+                "runs": [{"id": "leaf", "audit_sha256": digest(audit), "elapsed_seconds": 1}],
+            },
+        )
+        put(
+            node / "calibration-result.json",
+            {
+                "stage": stage,
+                "status": "qualified",
+                "config_sha256": digest(config),
+                "selected_rates": {"burst": 3, "mixed": 8},
+                "runs": {
+                    "leaf": {
+                        "audit_sha256": digest(audit),
+                        "input_sha256": digest(table),
+                        "elapsed_seconds": 1,
+                    }
+                },
+            },
+        )
+        for filename in (
+            "raw/client.json",
+            "raw/engine.json",
+            "raw/sources.json",
+            "collector/manifest.json",
+            "collector/acceptance.json",
+        ):
+            put(leaf / filename, {})
+
+    def release(attempt, *, require_completed):
+        assert require_completed is True
+        terminal = attempt / "terminal.json"
+        return {"job_id": read_json(terminal)["job"], "terminal_sha256": digest(terminal)}
+
+    monkeypatch.setattr(m5_c3_bundle, "audit_attempt", release)
+    monkeypatch.setattr(m5_c3_bundle, "verify_d2r110_qualification", lambda *_args: "d" * 64)
+    monkeypatch.setattr(
+        m5_c3_bundle, "attempt_evidence_paths", lambda attempt: [attempt / "terminal.json"]
+    )
+    monkeypatch.setattr(
+        m5_c3_bundle, "aggregate_c3", lambda *_args, **_kwargs: {"status": "qualified"}
+    )
+
+    def binding():
+        return m5_c3_bundle.c3_bundle_digest(
+            m5_c3_bundle.c3_bundle(config, tmp_path, stages, commit)
+        )
+
+    original = binding()
+    target = stages["C3-burst"] / "node/leaf/raw/client.json"
+    put(target, {"different": True})
+    assert binding() != original
+    put(target, {})
+    assert binding() == original
+    auth = stages["C4"] / "authorization.json"
+    put(auth, {"d2r110_analysis_sha256": "e" * 64})
+    with pytest.raises(ValueError, match="bind different D2-R110 reviews"):
+        binding()
+    put(auth, {"d2r110_analysis_sha256": "d" * 64})
+    put(stages["C3-burst"] / "terminal.json", {"job": 2, "state": "COMPLETED"})
+    with pytest.raises(ValueError, match="share an allocation identity"):
+        binding()
 
 
 @pytest.fixture

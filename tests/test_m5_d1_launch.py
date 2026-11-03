@@ -34,7 +34,7 @@ def test_d1_budget_is_exclusive_and_not_a_formal_prerequisite():
     assert check_authorization(approval, CONFIG, COMMIT, "calibration") == [D1_ROLE]
     assert CALIBRATION == ("C1", "C2", "C3", "C4", "C5", "C6")
     for unauthorized in (
-        {"roles": ["C3", D1_ROLE]},
+        {"roles": ["C3-burst", D1_ROLE]},
         {"max_attempts": 7, "max_requested_minutes": 140},
     ):
         with pytest.raises(ValueError, match="last original calibration allocation"):

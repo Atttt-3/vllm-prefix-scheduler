@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from vllm_prefix_scheduler.m5_d2 import d2r_plan
+from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 NS = 1_000_000_000
@@ -126,6 +126,20 @@ def test_d2r_plan_retains_original_thermal_and_performance_thresholds():
         d2r_plan(plan)
 
 
+def test_d2r110_plan_retains_original_thermal_performance_and_shadow():
+    plan = json.loads((ROOT / "configs/m5-d2r110.json").read_text())
+    assert d2r110_plan(plan) is plan
+    with pytest.raises(ValueError, match="cap, shadow or budget differs"):
+        d2r110_plan({**plan, "shadow_conditioning_cap_s": 96})
+    with pytest.raises(ValueError, match="retained D2-R analysis differs"):
+        d2r110_plan({**plan, "retained_D2R": {**plan["retained_D2R"], "analysis_sha256": "b" * 64}})
+    plan["conditioning"]["pilot_plateau"]["max_temp_span_c"] += 1
+    with pytest.raises(
+        ValueError, match="original input, thermal checks, stability gate or budget"
+    ):
+        d2r110_plan(plan)
+
+
 def d2r_prelude(d2):
     limits = {**LIMITS, "per_measured_engine_cap_s": 95}
     target = {"temperature_c": 50, "sm_clock_mhz": 1000, "memory_clock_mhz": 5000}
@@ -198,3 +212,55 @@ def test_d2r_rejects_late_decision_and_extended_reported_cutoff(d2):
     assert "conditioning_fixed_cutoff_differs" in report["issues"]
     assert "preheat_plateau_decision_outside_conditioning_deadline" in report["issues"]
     assert report["selected_plateau"] is None
+
+
+@pytest.mark.parametrize(
+    ("reset", "decision", "status", "checked"),
+    [
+        (95 * NS, 96 * NS, "eligible", 1),
+        (95 * NS, 96 * NS + 1, "not_eligible", 0),
+        (97 * NS, 98 * NS, "not_eligible", 0),
+    ],
+)
+def test_d2r110_shadow_requires_full_reset_and_decision_by_95s(
+    d2, reset, decision, status, checked
+):
+    raw, workload, samples, limits, target = d2r_prelude(d2)
+    limits["per_measured_engine_cap_s"] = 110
+    raw["conditioning_cutoff_ns"] = 111 * NS
+    raw["conditioning_end_ns"] = decision + 1
+    raw["waves"][0].update(reset_after_ns=reset, plateau_decision_ns=decision)
+    prelude = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert prelude["verified"], prelude["issues"]
+    shadow = d2.conditioning_shadow(raw, prelude, 95)
+    assert shadow["cutoff_ns"] == 96 * NS
+    assert shadow["status"] == status
+    assert shadow["completed_checked_waves"] == checked
+    assert shadow["qualifying_checkpoint_ns"] == (decision if status == "eligible" else None)
+
+
+def test_d2r110_shadow_preserves_missing_and_expired_evidence(d2):
+    raw, workload, samples, limits, target = d2r_prelude(d2)
+    limits["per_measured_engine_cap_s"] = 110
+    raw.update(conditioning_cutoff_ns=111 * NS, conditioning_end_ns=111 * NS, plateau=None)
+    raw["waves"][0].update(sample_observed_through_ns=75 * NS)
+    prelude = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert not prelude["verified"]
+    assert d2.conditioning_shadow(raw, prelude, 95)["status"] == "not_eligible"
+
+    raw["conditioning_end_ns"] = 95 * NS
+    prelude = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert d2.conditioning_shadow(raw, prelude, 95)["status"] == "unverified"
+
+
+def test_d2r110_shadow_does_not_decide_post_primer_admission(d2):
+    raw, workload, samples, limits, target = d2r_prelude(d2)
+    limits["per_measured_engine_cap_s"] = 110
+    raw.update(
+        conditioning_cutoff_ns=111 * NS,
+        status="invalid",
+        reason="pre-t0 temperature, freshness or GPU identity outside limits",
+    )
+    prelude = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert prelude["producer_status"] == "invalid"
+    assert d2.conditioning_shadow(raw, prelude, 95)["status"] == "eligible"

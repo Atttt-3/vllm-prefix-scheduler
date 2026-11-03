@@ -355,6 +355,7 @@
     }
   ],
   "calibration": {
+    "split_c3": true,
     "stages": [
       "C1",
       "C2",
@@ -379,6 +380,7 @@
     "gpus_per_allocation": 1,
     "minutes_per_allocation": 20,
     "calibration_allocations": 6,
+    "split_calibration_allocations": 7,
     "formal_allocations": 16,
     "serial": true,
     "unknown_terminal_blocks": true

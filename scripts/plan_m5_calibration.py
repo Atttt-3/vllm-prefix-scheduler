@@ -1,4 +1,4 @@
-"""Generate and evaluate the six predeclared M5 calibration allocations."""
+"""Generate and evaluate frozen M5 calibration allocations."""
 
 import argparse
 import hashlib
@@ -8,7 +8,29 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from vllm_prefix_scheduler.m5_campaign import is_hash, read_json  # noqa: E402
+from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA  # noqa: E402
+
 STAGES = ("C1", "C2", "C3", "C4", "C5", "C6")
+C3_SPLIT_STAGES = ("C3-burst", "C3-mixed")
+C3_SPLIT_PROTOCOL = "c3-balanced-split-v1"
+C3_SPLIT_COUNT = 60
+C3_BLOCK_TIERS = (
+    ("endpoint", "light", "light", "endpoint"),
+    ("light", "endpoint", "endpoint", "light"),
+)
+C3_COMPLETION_FIELDS = ("planned", "submitted", "completed", "timely_first_token")
+C3_TERMINAL_FIELDS = ("completed", "failed", "cancelled", "timeout", "unfinished")
+C3_PROFILE_FIELDS = (
+    "schedule",
+    "window",
+    "score",
+    "sort_exclusive",
+    "queue_commit",
+    "schedule_envelope",
+)
 KEY_SCENARIOS = ("burst", "mixed")
 CONTROL_SCENARIOS = ("ample", "all-cold", "serial")
 MODES = ("native", "off", "prefix", "guarded")
@@ -44,12 +66,34 @@ def file_sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def c3_split_gate(config):
+    gates = config["gates"]
+    require(
+        config["calibration"].get("split_c3") is True, "C3 split is not enabled in configuration"
+    )
+    require(
+        config.get("measurement_schema_version") == 2
+        and config["calibration"]["pilot_count"] == C3_SPLIT_COUNT
+        and (
+            gates["overhead_ttft_ns"],
+            gates["overhead_ttft_rel"],
+            gates["overhead_throughput_rel"],
+        )
+        == (2_000_000, 0.05, 0.05)
+        and (gates["submit_p99_ns"], gates["submit_max_ns"], gates["deadline_ns"])
+        == (5_000_000, 25_000_000, 30_000_000_000)
+        and gates["max_allocation_work_s"] == 1050,
+        "C3 split measurement version, request count or original tolerance differs",
+    )
+    return gates
+
+
 def plan_stage(config, stage, rates=None, serial_interval_ms=None):
     """Return the exact ordered run specs for a stage or the final C6 wave."""
     contract = config["calibration"]
     budget = config["budget"]
     require(
-        stage in STAGES
+        stage in (*STAGES, *C3_SPLIT_STAGES)
         and tuple(contract["stages"]) == STAGES
         and tuple(config["modes"]) == MODES
         and budget["calibration_allocations"] == len(STAGES)
@@ -63,7 +107,7 @@ def plan_stage(config, stage, rates=None, serial_interval_ms=None):
     require(type(seed_base) is int and 51_000 <= seed_base <= 51_400, "invalid pilot seeds")
     require(type(count) is int and 20 <= count <= 100 and count % 20 == 0, "invalid pilot count")
     require(config["request_count"] == 500, "M5 full-length request count differs")
-    if stage in {"C3", "C4", "C5", "C6"}:
+    if stage in {"C3", "C4", "C5", "C6", *C3_SPLIT_STAGES}:
         require(
             type(rates) is dict
             and set(rates) == set(KEY_SCENARIOS)
@@ -129,6 +173,23 @@ def plan_stage(config, stage, rates=None, serial_interval_ms=None):
                         rate=rates[scenario],
                     )
         add("mixed-stages", "mixed", 213, "guarded", "profile", rate=rates["mixed"])
+    elif stage in C3_SPLIT_STAGES:
+        c3_split_gate(config)
+        scenario, mode, seed = (
+            ("burst", "native", 220) if stage == "C3-burst" else ("mixed", "guarded", 230)
+        )
+        for block, order in enumerate(C3_BLOCK_TIERS, 1):
+            for position, tier in enumerate(order, 1):
+                add(
+                    f"{scenario}-b{block}-{position}-{tier}",
+                    scenario,
+                    seed + block,
+                    mode,
+                    tier,
+                    rate=rates[scenario],
+                )
+        if scenario == "mixed":
+            add("mixed-split-stages", scenario, 233, mode, "profile", rate=rates[scenario])
     elif stage in {"C4", "C5"}:
         scenario, seed, order = (
             ("burst", 301, ORDER) if stage == "C4" else ("mixed", 401, ORDER[::-1])
@@ -268,6 +329,244 @@ def observer_comparison(metrics, gates):
     return comparisons
 
 
+def c3_observation(metrics):
+    all_requests = metrics["strata"]["all"]
+    counts = all_requests["counts"]
+    return {
+        "counts": {name: counts[name] for name in (*C3_COMPLETION_FIELDS, *C3_TERMINAL_FIELDS[1:])},
+        "kv_blocks": metrics["kv_blocks"],
+        "ttft_p95_ns": all_requests["ttft_ns"]["p95"],
+        "submit_lag_ns": {name: metrics["submit_lag_ns"][name] for name in ("n", "p99", "max")},
+        "last_terminal_throughput": {
+            kind: metrics["throughput"][f"last_terminal_{kind}_per_s"]
+            for kind in ("requests", "tokens")
+        },
+    }
+
+
+def c3_comparison(block, kind, reference, observed, observations, evidence, gates):
+    a, b = observations[reference["id"]], observations[observed["id"]]
+    outcome = {
+        "block": block,
+        "kind": kind,
+        "reference": reference["id"],
+        "observed": observed["id"],
+        "seed": reference["seed"],
+        "input_sha256": evidence[reference["id"]]["input_sha256"],
+        "reference_ttft_p95_ns": a["ttft_p95_ns"],
+        "observed_ttft_p95_ns": b["ttft_p95_ns"],
+        "ttft_delta_ns": None,
+        "ttft_tolerance_ns": None,
+        "relative_throughput_delta": None,
+        "qualified": False,
+    }
+    if any(
+        row["counts"]["completed"] != C3_SPLIT_COUNT
+        or row["counts"]["timely_first_token"] != C3_SPLIT_COUNT
+        for row in (a, b)
+    ):
+        return {**outcome, "status": "incomplete"}
+    delta = b["ttft_p95_ns"] - a["ttft_p95_ns"]
+    tolerance = max(gates["overhead_ttft_ns"], a["ttft_p95_ns"] * gates["overhead_ttft_rel"])
+    throughput = {
+        kind: (b["last_terminal_throughput"][kind] - base) / base
+        for kind, base in a["last_terminal_throughput"].items()
+    }
+    qualified = abs(delta) <= tolerance and all(
+        abs(value) <= gates["overhead_throughput_rel"] for value in throughput.values()
+    )
+    return {
+        **outcome,
+        "ttft_delta_ns": delta,
+        "ttft_tolerance_ns": tolerance,
+        "relative_throughput_delta": throughput,
+        "qualified": qualified,
+        "status": "qualified" if qualified else "outside-tolerance",
+    }
+
+
+def c3_split_report(config, stage, specs, evidence, observations, stages, config_sha256):
+    gates = c3_split_gate(config)
+    scenario = specs[0]["scenario"]
+    order = [spec["id"] for spec in specs]
+    require(list(evidence) == list(observations) == order, "C3 split report run inventory differs")
+    incomplete = []
+    for identity in order:
+        run, observation = evidence[identity], observations[identity]
+        require(
+            is_hash(run["audit_sha256"])
+            and is_hash(run["input_sha256"])
+            and number(run["elapsed_seconds"], 1e-9),
+            f"{identity}: split audit identity or elapsed time invalid",
+        )
+        counts = observation["counts"]
+        complete = all(counts[name] == C3_SPLIT_COUNT for name in C3_COMPLETION_FIELDS)
+        require(
+            set(counts) == set((*C3_COMPLETION_FIELDS, *C3_TERMINAL_FIELDS))
+            and all(
+                type(value) is int and 0 <= value <= C3_SPLIT_COUNT for value in counts.values()
+            )
+            and counts["planned"]
+            == sum(counts[key] for key in C3_TERMINAL_FIELDS)
+            == C3_SPLIT_COUNT
+            and max(counts["completed"], counts["timely_first_token"]) <= counts["submitted"],
+            f"{identity}: split request denominators differ",
+        )
+        p95 = observation["ttft_p95_ns"]
+        throughput = observation["last_terminal_throughput"]
+        lag = observation["submit_lag_ns"]
+        require(
+            lag["n"] == counts["submitted"] == C3_SPLIT_COUNT
+            and number(lag["p99"])
+            and number(lag["max"])
+            and lag["p99"] <= lag["max"]
+            and lag["p99"] <= gates["submit_p99_ns"]
+            and lag["max"] <= gates["submit_max_ns"],
+            f"{identity}: split submission lag evidence invalid",
+        )
+        require(
+            type(observation["kv_blocks"]) is int
+            and observation["kv_blocks"] > 1
+            and (number(p95, 1) if counts["completed"] else p95 is None)
+            and set(throughput) == {"requests", "tokens"}
+            and all(number(value, 1e-9 if complete else 0) for value in throughput.values()),
+            f"{identity}: split TTFT, throughput or KV capacity evidence invalid",
+        )
+        if not complete:
+            incomplete.append(identity)
+    require(
+        len({row["kv_blocks"] for row in observations.values()}) == 1,
+        "C3 split observed different physical KV capacities",
+    )
+    comparisons = []
+    blocks = []
+    for block, start in enumerate((0, 4), 1):
+        leaves = specs[start : start + 4]
+        table_hashes = {evidence[spec["id"]]["input_sha256"] for spec in leaves}
+        require(len(table_hashes) == 1, "C3 split block does not share a frozen arrival table")
+        blocks.append(
+            {
+                "block": block,
+                "seed": leaves[0]["seed"],
+                "input_sha256": table_hashes.pop(),
+                "ordered_runs": [spec["id"] for spec in leaves],
+            }
+        )
+        for a, b in ((leaves[0], leaves[1]), (leaves[2], leaves[3])):
+            reference, observed = (a, b) if a["tier"] == "endpoint" else (b, a)
+            comparisons.append(
+                c3_comparison(block, "E/L", reference, observed, observations, evidence, gates)
+            )
+        for kind, tier in (("E/E", "endpoint"), ("L/L", "light")):
+            reference, observed = [spec for spec in leaves if spec["tier"] == tier]
+            comparisons.append(
+                c3_comparison(block, kind, reference, observed, observations, evidence, gates)
+            )
+    require(
+        blocks[0]["input_sha256"] != blocks[1]["input_sha256"],
+        "C3 split reused one input across blocks",
+    )
+    measured = sum(run["elapsed_seconds"] for run in evidence.values())
+    reasons = []
+    if incomplete:
+        reasons.append("split leaves lack all 60 completed and timely requests")
+    for kind in ("E/E", "L/L", "E/L"):
+        if any(row["kind"] == kind and row["status"] == "outside-tolerance" for row in comparisons):
+            reasons.append(f"{kind} comparison exceeds an original paired tolerance")
+    if measured + PAIR_MARGIN_SECONDS > gates["max_allocation_work_s"]:
+        reasons.append("split measured work plus reserve exceeds the working limit")
+    if scenario == "mixed":
+        if any(
+            not number(stages.get(name, {}).get("n"), 1)
+            or not number(stages.get(name, {}).get("max"), 1)
+            for name in C3_PROFILE_FIELDS
+        ):
+            reasons.append("profile did not exercise all declared scheduler measurements")
+    else:
+        require(stages is None, "burst split cannot substitute an extra profile leaf")
+    return {
+        "schema_version": 2,
+        "qualification_protocol": C3_SPLIT_PROTOCOL,
+        "stage": stage,
+        "scenario": scenario,
+        "rate_rps": specs[0]["rate_rps"],
+        "status": "blocked" if reasons else "qualified",
+        "runs": evidence,
+        "observations": observations,
+        "blocks": blocks,
+        "comparisons": comparisons,
+        "incomplete_runs": incomplete,
+        "measured_run_seconds": measured,
+        "projected_work_seconds": measured + PAIR_MARGIN_SECONDS,
+        "stage_costs_ns": stages,
+        "reasons": reasons,
+        **({"config_sha256": config_sha256} if config_sha256 is not None else {}),
+    }
+
+
+def aggregate_c3(config, stage_reports, rates, *, config_sha256, original_c3):
+    """Reconstruct two decisions before binding them into the prospective logical C3 result."""
+    require(is_hash(config_sha256), "C3 split aggregate requires a configuration hash")
+    original_c3 = Path(original_c3)
+    retained = file_sha256(original_c3)
+    original = read_json(original_c3)
+    require(
+        retained == C3_BLOCKED_SHA
+        and original.get("stage") == "C3"
+        and original.get("status") == "blocked",
+        "retained original C3 blocked result differs",
+    )
+    require(
+        len(stage_reports) == len(C3_SPLIT_STAGES), "both ordered C3 split reports are required"
+    )
+    summaries = {}
+    for stage, path in zip(C3_SPLIT_STAGES, stage_reports, strict=True):
+        path = Path(path)
+        report = read_json(path)
+        require(
+            report.get("schema_version") == 2
+            and report.get("qualification_protocol") == C3_SPLIT_PROTOCOL
+            and report.get("stage") == stage
+            and report.get("config_sha256") == config_sha256,
+            f"{stage}: split report source or order differs",
+        )
+        specs = plan_stage(config, stage, rates)["runs"]
+        rebuilt = c3_split_report(
+            config,
+            stage,
+            specs,
+            report["runs"],
+            report["observations"],
+            report["stage_costs_ns"],
+            config_sha256,
+        )
+        require(rebuilt == report, f"{stage}: split decisions differ from reconstruction")
+        summaries[stage] = {
+            "status": report["status"],
+            "report_sha256": file_sha256(path),
+            "rate_rps": report["rate_rps"],
+            "runs": report["runs"],
+            "comparisons": report["comparisons"],
+            "reasons": report["reasons"],
+        }
+    reasons = [
+        f"{stage} did not qualify"
+        for stage, row in summaries.items()
+        if row["status"] != "qualified"
+    ]
+    return {
+        "schema_version": 2,
+        "stage": "C3",
+        "qualification_protocol": C3_SPLIT_PROTOCOL,
+        "status": "blocked" if reasons else "qualified",
+        "config_sha256": config_sha256,
+        "retained_original_c3": {"status": "blocked", "sha256": retained},
+        "selected_rates": rates,
+        "split_reports": summaries,
+        "reasons": reasons,
+    }
+
+
 def native_rate_selection(specs, metrics, gates):
     pilots = []
     selected = {}
@@ -303,7 +602,8 @@ def native_rate_selection(specs, metrics, gates):
 
 def load_stage_evidence(config, stage, index_path, rates, config_sha256):
     index_path = Path(index_path)
-    index = read(index_path)
+    reader = read_json if stage in C3_SPLIT_STAGES else read
+    index = reader(index_path)
     require(
         index.get("schema_version") == 1 and index.get("stage") == stage,
         "calibration index schema/stage differs",
@@ -327,8 +627,13 @@ def load_stage_evidence(config, stage, index_path, rates, config_sha256):
         require(number(elapsed) and elapsed > 0, f"{identity}: invalid measured wall time")
         path = index_path.parent / row["audit"]
         input_path = index_path.parent / row["inputs"]
-        report = read(path)
+        report = reader(path)
         require(report.get("pair_id") == identity, f"{identity}: audit run identity differs")
+        if stage in C3_SPLIT_STAGES:
+            require(
+                report.get("measurement_schema_version") == 2,
+                f"{identity}: split audit measurement version differs",
+            )
         inputs_hash = file_sha256(input_path)
         require(report.get("input_sha256") == inputs_hash, f"{identity}: audit input hash differs")
         if config_sha256 is not None:
@@ -336,7 +641,7 @@ def load_stage_evidence(config, stage, index_path, rates, config_sha256):
                 report.get("config_sha256") == config_sha256,
                 f"{identity}: audit config hash differs",
             )
-        measured = validate_run(spec, report, read(input_path))
+        measured = validate_run(spec, report, reader(input_path))
         require(
             sum(
                 measured["duration_ns"][part]
@@ -365,6 +670,16 @@ def evaluate_stage(config, stage, index_path, rates=None, dress_reports=(), *, c
     specs, rows, evidence, metrics = load_stage_evidence(
         config, stage, index_path, rates, config_sha256
     )
+    if stage in C3_SPLIT_STAGES:
+        return c3_split_report(
+            config,
+            stage,
+            specs,
+            evidence,
+            {identity: c3_observation(values) for identity, values in metrics.items()},
+            metrics["mixed-split-stages"]["stage_costs_ns"] if stage == "C3-mixed" else None,
+            config_sha256,
+        )
     gates = config["gates"]
     measured = {key: row["elapsed_seconds"] for key, row in evidence.items()}
     result = {
@@ -643,7 +958,7 @@ def main():
     for action in ("plan", "evaluate"):
         command = commands.add_parser(action)
         command.add_argument("--config", type=Path, required=True)
-        command.add_argument("--stage", choices=STAGES, required=True)
+        command.add_argument("--stage", choices=(*STAGES, *C3_SPLIT_STAGES), required=True)
         command.add_argument("--rates", type=Path, help="Qualified C2 result JSON")
         command.add_argument("--output", type=Path, required=True)
         if action == "plan":
@@ -651,6 +966,9 @@ def main():
         else:
             command.add_argument("--index", type=Path, required=True)
             command.add_argument("--dress-report", action="append", type=Path, default=[])
+    aggregate = commands.add_parser("aggregate-c3")
+    for name in ("config", "rates", "burst-report", "mixed-report", "original-c3", "output"):
+        aggregate.add_argument(f"--{name}", type=Path, required=True)
     args = parser.parse_args()
     try:
         config = read(args.config)
@@ -667,6 +985,14 @@ def main():
             rates = source["selected_rates"]
         if args.action == "plan":
             result = plan_stage(config, args.stage, rates, args.serial_interval_ms)
+        elif args.action == "aggregate-c3":
+            result = aggregate_c3(
+                config,
+                (args.burst_report, args.mixed_report),
+                rates,
+                config_sha256=config_sha256,
+                original_c3=args.original_c3,
+            )
         else:
             result = evaluate_stage(
                 config,
