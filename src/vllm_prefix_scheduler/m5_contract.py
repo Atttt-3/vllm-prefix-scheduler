@@ -743,12 +743,12 @@ def boundary_gate(engine, client, inputs, tier):
                 "inflight_prefills",
                 "guard_records",
                 "observation_errors",
+                "pending_batches",
             )
             counts = (
                 "deferred_frees",
                 "request_blocks",
                 "non_null_ref_sum",
-                "pending_batches",
                 "inflight_tokens",
                 "stale_tokens",
                 "output_placeholders",

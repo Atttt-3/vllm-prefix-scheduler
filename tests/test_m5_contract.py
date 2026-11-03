@@ -264,12 +264,12 @@ def setup_capture(tmp_path):
         "inflight_prefills",
         "guard_records",
         "observation_errors",
+        "pending_batches",
     )
     count_keys = (
         "deferred_frees",
         "request_blocks",
         "non_null_ref_sum",
-        "pending_batches",
         "inflight_tokens",
         "stale_tokens",
         "output_placeholders",
@@ -380,6 +380,7 @@ def test_real_auditor_subprocess_reconstructs_requests_batches_and_denominators(
         ("wrong_native_prompt", "actual native prompt"),
         ("wrong_native_output", "consumed native outputs"),
         ("startup_residue", "native scheduler residual"),
+        ("pending_batch_residue", "native scheduler residual"),
         ("missing_boundary", "drain boundary missing"),
     ],
 )
@@ -414,6 +415,8 @@ def test_real_auditor_subprocess_fails_closed(tmp_path, mutation, reason):
         engine["batches"][1]["outputs"][0]["token_ids"] = [99]
     elif mutation == "startup_residue":
         engine["boundaries"][0]["non_null_ref_sum"] = 1
+    elif mutation == "pending_batch_residue":
+        engine["boundaries"][0]["pending_batches"] = [1]
     elif mutation == "missing_boundary":
         engine["boundaries"].pop()
     put(tmp_path / "client.json", client)
