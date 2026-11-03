@@ -1,5 +1,7 @@
 {
   "schema_version": 1,
+  "measurement_schema_version": 2,
+  "resource_schema_version": 2,
   "task_id": "M5-paired-performance",
   "baseline_commit": "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b",
   "baseline_config": "configs/baseline-3090.json",

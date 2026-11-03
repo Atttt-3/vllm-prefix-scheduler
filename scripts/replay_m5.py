@@ -356,7 +356,9 @@ async def _run(args, config, workload, client):
         llm = AsyncLLM.from_engine_args(AsyncEngineArgs(**options))
         phases["load_end_ns"] = time.monotonic_ns()
         limit = config.get("observation_buffer_rows", 250_000)
-        armed = await rpc("m5_arm", tier=args.tier, limit=limit)
+        armed = await rpc(
+            "m5_arm", tier=args.tier, limit=limit, schema_version=client["schema_version"]
+        )
         samples = []
         for _ in range(5):
             send_ns = time.monotonic_ns()
@@ -556,7 +558,7 @@ def main():
     os.environ["M5_WINDOW"] = str(config["window"])
     args.output.mkdir(parents=True, exist_ok=False)
     client = {
-        "schema_version": 1,
+        "schema_version": config.get("measurement_schema_version", 1),
         "task_id": config["task_id"],
         "pair_id": args.pair_id,
         "scenario": workload["scenario"],

@@ -23,6 +23,10 @@ M5 从总站验收的 M4 交付 `f4d94d3d22a967efeeb3a00bc13f6a6b8591835b` 起�
 
 GPU 工作以成功物化的原生 forward、实际 runner 请求切片和 CUDA 位置为依据。有效位置按原始 prompt 边界划分 prefill 与 decode，按同一代以前已执行位置的交集识别重算。派发、物化、消费、丢弃、padding 和缺证分列。采集在内存中有界，排空后落盘。实际位置以同流异步复制和既有同步点获取。C3 单独比较 endpoint 与 light，校验 TTFT p95 和吞吐的扰动。profile 单列取窗口、评分、排序、提交与整次调度的计时范围。阶段分位数不可相加。
 
+新冻结使用 M5 测量 schema 2，外层 collector 仍沿用既有 schema 2。审查从 seed 和场景配置复算到达、请求标签、提示形状和前缀族。每个有候选的批次须有对应的决策记录。仅客户端采集的公平性指标为不可观测。全冷逐请求核对客户端报告和同代、同批的首次分配与 runner 起点。淘汰明细绑定实际物理块和原生分配事件，并与分配事件的淘汰计数核对。具有未来热需求的移除键只用于标记可能受影响的复用。实际损失仍依赖后续命中与 runner 证据。
+
+正式配对主吞吐使用共同计划窗口，另列实际运行窗口和排空。C3、D1 和 D2 的扰动比较继续使用各轮末终态窗口，容限为 TTFT p95 绝对差至多 `max(2 ms, 参考轮 p95 × 5%)`，请求与 token 吞吐各在 ±5% 内。profile 中 `schedule` 包住调度父类调用，`schedule_envelope` 另计外层观测、影子窗口及记录成本。两者都包含其区间内启用的钩子，均需结合采集档位解释。
+
 ## 作业和预算
 
 校准、正式均使用明确的 M5 授权文件。每次请求 20 分钟、单卡、严格串行，工作截止 1,050 秒。提交前验证 watcher ready，提交后保存回执、权威终态、退出码、全队列和 watcher 退出。逐作业记录 GPU UUID、前中后状态、子进程所有权和退出残留。失败和重试计入已授权额度，未知终态会阻断后续提交。
@@ -58,12 +62,14 @@ python scripts/submit_m5.py --authorization PRIVATE_FORMAL_AUTH --phase formal -
 
 每次调用只提交一个获批角色。完成前一校准作业后方可顺序启动下一角色。可执行命令、控制端账本、计算节点结果和重算文件在新的忽略目录 `runs/M5-paired-performance/` 下。若终态、下载或清理证据缺失，保留目录并核对该作业，后续提交由门槛阻断。
 
+新作业在调用 `sbatch` 前持久化提交意图。遇到终态查询或证据传输中断时，用 `python scripts/submit_m5.py --resume --attempt ATTEMPT_ID` 按原回执恢复同一作业的证据。恢复过程保留原 watcher 的提交前 ready 证据。提交意图存在但回执不确定时继续阻断后续作业。新资源记录按采样时间和引擎进程组核对活跃 GPU 进程的归属。
+
 ## 独立审查与交付
 
-`freeze_m5.py` 从 schema 2 collector 和 Git 对象核对源文件与原始输入，再独立复算六个校准作业并绑定正式表。分析使用同一冻结代码，实际执行、分析和文档交付 SHA 分别记录。正式导出分两步。先用 `export_m5.py review` 核对完整配对、来源和全作业释放，再用 `check_m5_release_controls.py` 在封存原件上跑子进程控制。独立审查人签认 A–F 后用 `export_m5.py release` 生成数值与哈希白名单。逐轮表包含相对原生的配对差以及 guarded−prefix。报告中位数、范围、方向和失败分母，负对照为描述性结果。最终区分命令、证据、行为与性能状态，给出实际执行、分析和交付 SHA、原件索引及资源账本。
+`freeze_m5.py` 从 schema 2 collector 和 Git 对象核对源文件与原始输入，再独立复算六个校准作业并绑定正式表。分析使用同一冻结代码，实际执行、分析和文档交付 SHA 分别记录。正式导出先用 `export_m5.py review` 核对完整配对、来源和全作业释放，再用 `check_m5_release_controls.py` 从封存原件运行子进程正负控。负控按指定的退出码和拒绝原因核验。独立审查人核对 A–F、审查包与控制记录，并通过协调渠道交付签认文件 SHA。发布时重新从封存原件复算，核对签认和控制记录绑定后再写出白名单。逐轮表包含相对原生的配对差以及 guarded−prefix。报告中位数、范围、方向和失败分母，负对照为描述性结果。最终区分命令、证据、行为与性能状态，给出实际执行、分析和交付 SHA、原件索引及资源账本。
 
 ```bash
 python scripts/export_m5.py review --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --analysis-commit ANALYSIS_SHA --output runs/M5-paired-performance/formal-review
 python scripts/check_m5_release_controls.py --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --review-dir runs/M5-paired-performance/formal-review --output runs/M5-paired-performance/formal-controls
-python scripts/export_m5.py release --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --review-dir runs/M5-paired-performance/formal-review --decision PRIVATE_INDEPENDENT_DECISION --controls runs/M5-paired-performance/formal-controls/controls.json --output evidence/M5-paired-performance
+python scripts/export_m5.py release --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --review-dir runs/M5-paired-performance/formal-review --decision PRIVATE_INDEPENDENT_DECISION --approved-decision-sha256 DECISION_SHA_FROM_REVIEWER --controls runs/M5-paired-performance/formal-controls/controls.json --output evidence/M5-paired-performance
 ```

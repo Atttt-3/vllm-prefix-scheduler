@@ -260,13 +260,19 @@ def _profile(worker):
 class M5WorkerExtension:
     """RPC boundaries stay outside the natural-arrival measured path."""
 
-    def m5_arm(self, tier, limit):
+    def m5_arm(self, tier, limit, schema_version=1):
         global _state
-        if _state is not None or type(limit) is not int or limit < 1:
+        if (
+            _state is not None
+            or type(limit) is not int
+            or limit < 1
+            or type(schema_version) is not int
+            or schema_version not in (1, 2)
+        ):
             raise RuntimeError("M5 already armed or invalid journal limit")
         profile = _profile(self)
         _state = {
-            "schema_version": 1,
+            "schema_version": schema_version,
             "clock": clock_identity(),
             "profile": profile,
             "batches": [],
@@ -358,6 +364,7 @@ def _define_native_classes():
             self._m5_index = 0
             self._m5_current = None
             self._m5_allocation = None
+            self._m5_allocation_id = 0
             self._install_cache_observers()
 
         def _install_cache_observers(self):
@@ -374,7 +381,13 @@ def _define_native_classes():
                     return original_allocate(manager_ref(), request, *args, **kwargs)
                 scheduler = scheduler_ref()
                 before = pool_ref().get_num_free_blocks()
-                scheduler._m5_allocation = request
+                scheduler._m5_allocation_id += 1
+                context = {
+                    "allocation_id": scheduler._m5_allocation_id,
+                    "request": request,
+                    "eviction_count": 0,
+                }
+                scheduler._m5_allocation = context
                 try:
                     result = original_allocate(manager_ref(), request, *args, **kwargs)
                 finally:
@@ -392,6 +405,14 @@ def _define_native_classes():
                             "success": result is not None,
                             "hit_tokens": kwargs.get("num_new_computed_tokens", 0),
                             "at_ns": time.monotonic_ns(),
+                            **(
+                                {
+                                    "allocation_id": context["allocation_id"],
+                                    "eviction_count": context["eviction_count"],
+                                }
+                                if _state["schema_version"] == 2
+                                else {}
+                            ),
                         },
                     )
 
@@ -412,9 +433,15 @@ def _define_native_classes():
                 result = original_evict(pool_ref(), block)
                 if _state is not None and result:
                     scheduler = scheduler_ref()
-                    request = scheduler._m5_allocation
+                    context = scheduler._m5_allocation
+                    if context is not None:
+                        context["eviction_count"] += 1
 
                     def record():
+                        if _state["schema_version"] == 2 and context is None:
+                            # The pinned full-attention path has no connector or checkpoint evictions.
+                            raise RuntimeError("M5 native eviction outside an allocation")
+                        request = None if context is None else context["request"]
                         keys = [bytes(get_block_hash(key)).hex() for key in removed_hashes]
                         _append(
                             "evictions",
@@ -426,6 +453,11 @@ def _define_native_classes():
                                 "cache_key": keys[0],
                                 "removed_cache_keys": keys,
                                 "at_ns": time.monotonic_ns(),
+                                **(
+                                    {"allocation_id": context["allocation_id"]}
+                                    if _state["schema_version"] == 2
+                                    else {}
+                                ),
                             },
                         )
 
@@ -467,6 +499,11 @@ def _define_native_classes():
         def schedule(self, throttle_prefills=False):
             if _state is None:
                 return super().schedule(throttle_prefills=throttle_prefills)
+            envelope_start = (
+                time.monotonic_ns()
+                if _state["schema_version"] == 2 and _state["tier"] == "profile"
+                else None
+            )
             self._m5_index += 1
             self._m5_current = {
                 "candidates": [],
@@ -486,6 +523,8 @@ def _define_native_classes():
             end_ns = time.monotonic_ns()
             _observe("schedule", self._record_batch, output, end_ns, end_ns - start_ns)
             self._m5_current = None
+            if envelope_start is not None and not _state["errors"]:
+                _state["batches"][-1]["schedule_envelope_ns"] = time.monotonic_ns() - envelope_start
             return output
 
         def _shadow_window(self):

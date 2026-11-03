@@ -112,7 +112,14 @@ def evidence_index(root, plan):
                     },
                     "stage_costs_ns": {
                         key: {"n": 5}
-                        for key in ("schedule", "window", "score", "sort_exclusive", "queue_commit")
+                        for key in (
+                            "schedule",
+                            "schedule_envelope",
+                            "window",
+                            "score",
+                            "sort_exclusive",
+                            "queue_commit",
+                        )
                     },
                     "max_outstanding": 1,
                     "submit_lag_ns": {"n": spec["count"], "p99": 1000, "max": 1000},
@@ -337,6 +344,8 @@ def test_control_calibration_rederives_serial_spacing_and_budgets(tmp_path):
         audit_path = Path(row["audit"])
         audit = read(audit_path)
         audit["metrics"]["strata"]["all"]["cached_tokens"] = {"n": 500, "max": 0}
+        if row["id"] == "all-cold-full":
+            audit["metrics"]["all_cold_zero_hit"] = True
         if row["id"] == "ample-full":
             inputs_path = Path(row["inputs"])
             inputs = {
@@ -380,6 +389,15 @@ def test_control_calibration_rederives_serial_spacing_and_budgets(tmp_path):
     assert report["serial_interval_ms"] == 230
     assert report["control_projection_factor"] == 1.14
     assert report["ample_capacity_upper_bound_blocks"] == 5001
+
+    cold = tmp_path / "all-cold-full/audit.json"
+    data = read(cold)
+    data["metrics"].pop("all_cold_zero_hit")
+    write(cold, data)
+    blocked = tmp_path / "blocked-cold.json"
+    result = cli("evaluate", "C6", blocked, *args)
+    assert result.returncode == 2
+    assert read(blocked)["reasons"] == ["all-cold control lacks per-request zero-hit evidence"]
 
     pilot = tmp_path / "serial-pilot/audit.json"
     data = read(pilot)

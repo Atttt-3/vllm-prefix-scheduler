@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .m5_campaign import JOB_PREFIX, TASK, digest, exact_int, read_json, require
+from .m5_campaign import JOB_PREFIX, TASK, digest, exact_int, id_ok, read_json, require
 
 TERMINAL = {
     "COMPLETED",
@@ -19,6 +19,9 @@ TERMINAL = {
     "DEADLINE",
     "REVOKED",
 }
+RESOURCE_SCHEMA_VERSION = 2
+QUEUE_QUERY = 'squeue -h -o "%i|%T|%j"'
+QUEUE_ATTEMPTS = 3
 
 
 def monotonic(value):
@@ -83,9 +86,16 @@ def slurm_terminal(terminal, job, name):
 
 
 def queue_clear(active, job):
-    require(active["returncode"] == 0 and not active["stderr"].strip(), "full queue query failed")
     require(
-        active["command"][-1] == 'squeue -h -o "%i|%T|%j"',
+        type(active["returncode"]) is int
+        and active["returncode"] == 0
+        and type(active["stdout"]) is str
+        and type(active["stderr"]) is str
+        and not active["stderr"].strip(),
+        "full queue query failed",
+    )
+    require(
+        active["command"][-1] == QUEUE_QUERY,
         "queue evidence must cover the full queue",
     )
     for line in active["stdout"].splitlines():
@@ -97,63 +107,282 @@ def queue_clear(active, job):
         )
 
 
-def audit_attempt(directory, *, require_completed=False):
+def observe_clear_queue(query, job, pause, *, attempts=QUEUE_ATTEMPTS):
+    """Retain every read-only full-queue observation, including failed attempts."""
+    records = []
+    for i in range(attempts):
+        row = query(QUEUE_QUERY)
+        records.append(row)
+        try:
+            queue_clear(row, job)
+        except ValueError:
+            if i + 1 < attempts:
+                pause(1)
+        else:
+            return records, True
+    return records, False
+
+
+def receipt_job(receipt):
+    match = re.fullmatch(r"([1-9][0-9]*)(?:;[A-Za-z0-9][A-Za-z0-9_.-]*)?\n?", receipt["stdout"])
+    require(
+        type(receipt["returncode"]) is int
+        and receipt["returncode"] == 0
+        and match is not None
+        and not receipt.get("stderr", "").strip(),
+        "ambiguous or failed submission receipt",
+    )
+    return match[1]
+
+
+def audit_submission(directory):
+    """Validate the original receipt and readiness, without inferring a job from the queue."""
     directory = Path(directory)
     record = read_json(directory / "planned.json")
     ready = read_json(directory / "watcher/monitor-ready.json")
-    receipt = read_json(directory / "submission.json")
-    terminal = read_json(directory / "watcher/slurm-final.json")
-    active = read_json(directory / "watcher/active-final.json")
-    watcher_exit = read_json(directory / "watcher-exit.json")
-    job = receipt["stdout"].strip().split(";")[0]
+    version = record.get("resource_schema_version", 1)
     require(
-        receipt["returncode"] == 0 and job.isascii() and job.isdecimal(),
-        "ambiguous or failed submission receipt",
+        type(version) is int and version in (1, RESOURCE_SCHEMA_VERSION),
+        "unknown M5 resource schema version",
     )
+    intent_path = directory / "submission-intent.json"
+    if version == RESOURCE_SCHEMA_VERSION:
+        intent = read_json(intent_path)
+    else:
+        require(not intent_path.exists(), "M5 resource schema downgrade")
+    receipt = read_json(directory / "submission.json")
+    job = receipt_job(receipt)
+    domain = record["clock_domain"]
     require(
-        ready["ready"] is True
-        and watcher_exit["returncode"] == 0
-        and ready["pid"] == watcher_exit["pid"]
+        record["task_id"] == TASK
+        and record["job_name"] == JOB_PREFIX + record["attempt"]
+        and ready["ready"] is True
         and ready["attempt_id"] == record["attempt"]
         and ready["campaign_id"] == TASK
         and ready["campaign_sha256"] == record["config_sha256"]
         and ready["project_commit"] == record["execution_commit"]
-        and record["attempt"] == directory.name,
+        and record["attempt"] == directory.name
+        and ready["clock_domain"] == receipt["clock_domain"] == domain,
         "watcher/attempt binding differs",
     )
-    domain = record["clock_domain"]
-    require(
-        all(
-            row["clock_domain"] == domain
-            for row in (ready, receipt, terminal, active, watcher_exit)
+    ready_ns, started_ns, received_ns = map(
+        monotonic,
+        (
+            ready["observed_monotonic_ns"],
+            receipt["command_started_ns"],
+            receipt["observed_monotonic_ns"],
         ),
-        "controller clock domain mismatch",
     )
-    marks = [ready["observed_monotonic_ns"], receipt["command_started_ns"]]
-    marks.extend(row["observed_monotonic_ns"] for row in (receipt, terminal, active, watcher_exit))
-    marks = [monotonic(value) for value in marks]
+    require(ready_ns < started_ns < received_ns, "watcher time order invalid")
+    if version == RESOURCE_SCHEMA_VERSION:
+        argv = receipt["argv"]
+        require(
+            intent["argv"] == argv
+            and argv[:2] == ["sbatch", "--parsable"]
+            and f"--job-name={record['job_name']}" in argv
+            and intent["clock_domain"] == domain
+            and intent["command_started_ns"] == started_ns
+            and intent["planned_sha256"] == digest(directory / "planned.json")
+            and intent["watcher_ready_sha256"] == digest(directory / "watcher/monitor-ready.json")
+            and intent["pre_submission_queue_sha256"]
+            == digest(directory / "pre-submission-queue.json")
+            and receipt["intent_sha256"] == digest(intent_path)
+            and record["authorization_sha256"] == digest(directory / "authorization.json")
+            and re.fullmatch(r"[a-fA-F0-9-]{36}", record["controller_boot_id"]) is not None,
+            "original submission intent/receipt binding differs",
+        )
+        pre_queue = read_json(directory / "pre-submission-queue.json")
+        queue_journal_gate(pre_queue, domain, None, None, ready_ns)
+        require(
+            record["pre_submission_queue"] == pre_queue[-1]["stdout"],
+            "planned full queue differs from retained observation",
+        )
+    return record, ready, receipt, job
+
+
+def queue_journal_gate(rows, domain, job, terminal_ns, end_ns):
+    require(1 <= len(rows) <= QUEUE_ATTEMPTS, "full queue retry evidence missing or unbounded")
+    stamps = [monotonic(row["observed_monotonic_ns"]) for row in rows]
+    require(
+        (terminal_ns is None or terminal_ns < stamps[0])
+        and stamps[-1] < end_ns
+        and all(a < b for a, b in zip(stamps, stamps[1:], strict=False))
+        and all(
+            row["clock_domain"] == domain and row["command"][-1] == QUEUE_QUERY for row in rows
+        ),
+        "full queue retry evidence ordering or query differs",
+    )
+    for row in rows[:-1]:
+        try:
+            queue_clear(row, job)
+        except ValueError:
+            continue
+        raise ValueError("full queue retried after a successful observation")
+    queue_clear(rows[-1], job)
+
+
+def journal_rows(path):
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def audit_controller_release(directory, submission=None):
+    directory = Path(directory)
+    record, ready, receipt, job = submission or audit_submission(directory)
+    domain = record["clock_domain"]
+    received_ns = receipt["observed_monotonic_ns"]
+    recovery = directory / "recovery"
+    if (recovery / "release.json").exists():
+        require(record.get("resource_schema_version") == RESOURCE_SCHEMA_VERSION, "legacy recovery")
+        release = read_json(recovery / "release.json")
+        require(
+            release["controller_boot_id"] == record["controller_boot_id"]
+            and release["receipt_sha256"] == digest(directory / "submission.json")
+            and release["intent_sha256"] == digest(directory / "submission-intent.json")
+            and release["clock_domain"] == domain
+            and release["original_pid_not_live"] is True,
+            "read-only recovery detached from original submission",
+        )
+        original_exit = directory / "watcher-exit.json"
+        original_end_ns = received_ns
+        if original_exit.exists():
+            original = read_json(original_exit)
+            require(
+                original["clock_domain"] == domain and original["pid"] == ready["pid"],
+                "original watcher exit differs",
+            )
+            original_end_ns = monotonic(original["observed_monotonic_ns"])
+        terminal_path = recovery / "slurm-final.json"
+        terminal = read_json(terminal_path)
+        active = read_json(recovery / "active-final.json")
+        require(
+            terminal["clock_domain"] == active["clock_domain"] == domain
+            and received_ns
+            <= original_end_ns
+            < release["started_monotonic_ns"]
+            < terminal["observed_monotonic_ns"]
+            < active["observed_monotonic_ns"]
+            < release["observed_monotonic_ns"]
+            and release["terminal_sha256"] == digest(terminal_path)
+            and release["active_sha256"] == digest(recovery / "active-final.json")
+            and release["queue_journal_sha256"] == digest(recovery / "queue-watch.jsonl"),
+            "read-only recovery evidence chronology or hashes differ",
+        )
+        rows = journal_rows(recovery / "queue-watch.jsonl")
+        require(rows and rows[-1] == active, "recovery queue observation missing from journal")
+        queue_journal_gate(
+            rows, domain, job, terminal["observed_monotonic_ns"], release["observed_monotonic_ns"]
+        )
+        require(
+            terminal["command"][-1] == f"scontrol show job {job}", "terminal query job mismatch"
+        )
+        return slurm_terminal(terminal, job, record["job_name"]), terminal_path
+
+    terminal_path = directory / "watcher/slurm-final.json"
+    terminal = read_json(terminal_path)
+    active = read_json(directory / "watcher/active-final.json")
+    watcher_exit = read_json(directory / "watcher-exit.json")
+    require(
+        watcher_exit["returncode"] == 0
+        and ready["pid"] == watcher_exit["pid"]
+        and all(row["clock_domain"] == domain for row in (terminal, active, watcher_exit)),
+        "watcher exit or controller clock domain mismatch",
+    )
+    marks = [received_ns] + [
+        monotonic(row["observed_monotonic_ns"]) for row in (terminal, active, watcher_exit)
+    ]
     require(
         all(left < right for left, right in zip(marks, marks[1:], strict=False)),
         "watcher time order invalid",
     )
     require(terminal["command"][-1] == f"scontrol show job {job}", "terminal query job mismatch")
-    journal = [
-        json.loads(line) for line in (directory / "watcher/watch.jsonl").read_text().splitlines()
-    ]
+    journal = journal_rows(directory / "watcher/watch.jsonl")
     require(journal and journal[-1] == terminal, "terminal not in independent watcher journal")
     require(
         all(
             row["clock_domain"] == domain
             and row["command"][-1] == f"scontrol show job {job}"
-            and marks[2] <= row["observed_monotonic_ns"] <= marks[3]
+            and marks[0] < row["observed_monotonic_ns"] <= marks[1]
             for row in journal
         ),
         "watcher journal observation mismatch",
     )
-    state, exit_code, slurm_start, slurm_end, node = slurm_terminal(
-        terminal, job, record["job_name"]
-    )
     queue_clear(active, job)
+    if record.get("resource_schema_version") == RESOURCE_SCHEMA_VERSION:
+        rows = journal_rows(directory / "watcher/queue-watch.jsonl")
+        require(rows and rows[-1] == active, "final queue observation missing from journal")
+        queue_journal_gate(rows, domain, job, marks[1], marks[3])
+    return slurm_terminal(terminal, job, record["job_name"]), terminal_path
+
+
+def engine_groups(runs, payload, job, started, ended):
+    groups = {}
+    for run in runs:
+        if "engine_owner_ack_ns" not in run:
+            require(run.get("returncode") is None, "completed replay lacks an owner ack")
+            continue
+        require(id_ok(run["id"]), "invalid replay owner record path")
+        leaf = payload / run["id"]
+        owner = read_json(leaf / "owner.json")
+        ack = read_json(leaf / "ack.json")
+        pgid = run["engine_pgid"]
+        begin = monotonic(run["engine_owner_ack_ns"])
+        end = monotonic(run.get("ended_monotonic_ns", ended))
+        require(
+            exact_int(pgid, 2, 2**31 - 1)
+            and pgid not in groups
+            and owner["task_id"] == TASK
+            and owner["job_id"] == job
+            and owner["collector_pid"] == run["collector_pid"]
+            and owner["pid"] == owner["pgid"] == pgid
+            and ack == {"job_id": job, "pgid": pgid}
+            and started
+            <= run["started_monotonic_ns"]
+            <= owner["registered_monotonic_ns"]
+            <= begin
+            <= end
+            <= ended,
+            "GPU application engine ownership record differs",
+        )
+        groups[pgid] = (begin, end)
+    return groups
+
+
+def audit_sample_groups(snapshot, apps, groups, ended):
+    ownership = snapshot.get("application_process_groups")
+    require(
+        type(ownership) is list and "application_groups_error" not in snapshot,
+        "GPU application PGID evidence missing",
+    )
+    begin = monotonic(snapshot["application_sample_started_ns"])
+    end = monotonic(snapshot["application_sample_ended_ns"])
+    require(
+        snapshot["monotonic_ns"] <= begin <= end <= ended,
+        "GPU application sample outside allocation",
+    )
+    require(
+        len(ownership) == len(apps) and [row["pid"] for row in ownership] == apps,
+        "GPU application PIDs differ from the device sample",
+    )
+    seen = set()
+    for row in ownership:
+        pgid = row["pgid"]
+        require(
+            type(pgid) is int
+            and pgid in groups
+            and groups[pgid][0] <= end
+            and begin <= groups[pgid][1],
+            "GPU application outside its owned engine process group or time window",
+        )
+        seen.add(pgid)
+    return seen
+
+
+def audit_attempt(directory, *, require_completed=False):
+    directory = Path(directory)
+    submission = audit_submission(directory)
+    record, _, _, job = submission
+    terminal, terminal_path = audit_controller_release(directory, submission)
+    state, exit_code, slurm_start, slurm_end, node = terminal
 
     payload = directory / "node"
     allocation = read_json(payload / "allocation.json")
@@ -170,8 +399,13 @@ def audit_attempt(directory, *, require_completed=False):
         "auxiliary_sha256",
     )
     expected = {**record, "task_id": TASK, "job_id": job}
+    version = record.get("resource_schema_version", 1)
+    strict = version == RESOURCE_SCHEMA_VERSION
     require(
-        all(allocation[key] == binding[key] == expected[key] for key in fields),
+        all(allocation[key] == binding[key] == expected[key] for key in fields)
+        and allocation.get("resource_schema_version", 1)
+        == binding.get("resource_schema_version", 1)
+        == version,
         "allocation binding differs from submission",
     )
     authorization_path = directory / "authorization.json"
@@ -203,7 +437,7 @@ def audit_attempt(directory, *, require_completed=False):
         and 0 < ended - started <= 1200 * 10**9
         and allocation["remaining_processes"] == []
         and allocation["sampler_exited"] is True
-        and allocation.get("rpc_directory_removed", True) is True
+        and allocation.get("rpc_directory_removed", not strict) is True
         and not any("cleanup" in text for text in allocation["errors"]),
         "allocation process cleanup or timing evidence invalid",
     )
@@ -214,7 +448,12 @@ def audit_attempt(directory, *, require_completed=False):
         gpu == final_gpu and not before_apps and not after_apps and final_used <= used + 64,
         "GPU process or memory residue at allocation boundary",
     )
-    during = [json.loads(line) for line in (payload / "gpu-during.jsonl").read_text().splitlines()]
+    gpu_samples = payload / "gpu-during.jsonl"
+    if strict:
+        require(
+            allocation["gpu_during_sha256"] == digest(gpu_samples), "allocation GPU samples differ"
+        )
+    during = journal_rows(gpu_samples)
     times = [monotonic(snapshot["monotonic_ns"]) for snapshot in during]
     require(
         times
@@ -223,23 +462,10 @@ def audit_attempt(directory, *, require_completed=False):
         and all(left < right for left, right in zip(times, times[1:], strict=False)),
         "before/during/after GPU checkpoint order incomplete",
     )
-    seen_apps = set()
-    for snapshot in during:
-        sample_gpu, _, apps = device(snapshot)
-        require(gpu == sample_gpu, "different GPU during allocation")
-        seen_apps.update(apps)
-
     complete = state == "COMPLETED" and exit_code == "0:0"
     require(not require_completed or complete, "allocation did not complete successfully")
     index = payload / "index.json"
-    if complete:
-        require(
-            allocation["work_returncode"] == 0
-            and allocation["errors"] == []
-            and seen_apps
-            and digest(index) == allocation["index_sha256"],
-            "successful allocation lacks bound work/observed GPU",
-        )
+    runs = []
     if index.is_file():
         require(digest(index) == allocation["index_sha256"], "allocation index hash differs")
         runs = read_json(index)["runs"]
@@ -250,6 +476,23 @@ def audit_attempt(directory, *, require_completed=False):
             require(run["remaining_processes"] == [], "replay group residue")
             if complete:
                 require(run["returncode"] == 0, "completed allocation contains failed replay")
+    groups = engine_groups(runs, payload, job, started, ended) if strict else {}
+    seen_apps, seen_groups = set(), set()
+    for snapshot in during:
+        sample_gpu, _, apps = device(snapshot)
+        require(gpu == sample_gpu, "different GPU during allocation")
+        seen_apps.update(apps)
+        if strict:
+            seen_groups.update(audit_sample_groups(snapshot, apps, groups, ended))
+    if complete:
+        require(
+            allocation["work_returncode"] == 0
+            and allocation["errors"] == []
+            and seen_apps
+            and runs
+            and (not strict or seen_groups == groups.keys()),
+            "successful allocation lacks bound work/observed GPU",
+        )
     return {
         "job_id": job,
         "phase": record["phase"],
@@ -262,12 +505,88 @@ def audit_attempt(directory, *, require_completed=False):
         "elapsed_seconds": (slurm_end - slurm_start).total_seconds(),
         "requested_minutes": 20,
         "max_attempts": authorization["max_attempts"],
+        "terminal_sha256": digest(terminal_path),
     }
 
 
+def attempt_evidence_paths(directory):
+    """Return existing evidence consumed by the resource audit plus transport logs."""
+    directory = Path(directory)
+    fixed = (
+        "planned.json",
+        "authorization.json",
+        "submission-intent.json",
+        "submission.json",
+        "pre-submission-queue.json",
+        "watcher.log",
+        "watcher-exit.json",
+        "watcher/monitor-ready.json",
+        "watcher/slurm-final.json",
+        "watcher/active-final.json",
+        "watcher/watch.jsonl",
+        "watcher/queue-watch.jsonl",
+        "recovery/release.json",
+        "recovery/slurm-final.json",
+        "recovery/active-final.json",
+        "recovery/queue-watch.jsonl",
+        "slurm.log",
+        "node/allocation.json",
+        "node/binding.json",
+        "node/index.json",
+        "node/gpu-during.jsonl",
+    )
+    paths = [directory / name for name in fixed if (directory / name).is_file()]
+    transport = directory / "transport"
+    paths.extend(sorted(transport.glob("*.json")))
+    for recovery in sorted(transport.glob("recovery-*")):
+        paths.extend(
+            recovery / name
+            for name in ("slurm-final.json", "active-final.json", "queue-watch.jsonl")
+            if (recovery / name).is_file()
+        )
+    index = directory / "node/index.json"
+    if index.exists():
+        for run in read_json(index)["runs"]:
+            leaf = index.parent / run["id"]
+            if leaf.parent == index.parent:
+                paths.extend(
+                    leaf / name for name in ("owner.json", "ack.json") if (leaf / name).is_file()
+                )
+    return paths
+
+
+def submitted_attempts(root):
+    """Preserve pre-intent archives without treating them as allocation receipts."""
+    paths = []
+    for path in sorted(Path(root).iterdir()):
+        if not path.is_dir():
+            continue
+        plan = read_json(path / "planned.json")
+        pre_intent = (
+            plan.get("resource_schema_version") == RESOURCE_SCHEMA_VERSION
+            and not (path / "submission-intent.json").exists()
+            and not (path / "submission.json").exists()
+        )
+        if pre_intent:
+            require(
+                all(
+                    not (path / name).exists()
+                    for name in (
+                        "node",
+                        "recovery",
+                        "watcher/slurm-final.json",
+                        "watcher/active-final.json",
+                    )
+                ),
+                "unsubmitted attempt contains allocation release evidence",
+            )
+            continue
+        paths.append(path)
+    return paths
+
+
 def audit_history(root):
-    paths = [path for path in Path(root).iterdir() if path.is_dir()]
-    audits = [audit_attempt(path) for path in sorted(paths)]
+    audits = [audit_attempt(path) for path in submitted_attempts(root)]
     jobs = {row["job_id"] for row in audits}
     require(len(jobs) == len(audits), "duplicate owned job receipts")
     audits.sort(key=lambda row: row["slurm_start"])

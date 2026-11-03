@@ -33,6 +33,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
 )
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import d2_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,7 +51,31 @@ def query_gpu(option):
     return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
 
-def snapshot(d2=False):
+def process_groups():
+    try:
+        data = subprocess.check_output(["ps", "-eo", "pid=,pgid="], text=True, timeout=2)
+        return {int(pid): int(pgid) for pid, pgid in (line.split() for line in data.splitlines())}
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+
+
+def application_groups(apps, before):
+    processes = []
+    if apps["returncode"] == 0:
+        for line in apps["stdout"].splitlines():
+            _, pid, _ = (part.strip() for part in line.split(","))
+            pid = int(pid)
+            try:
+                pgid = os.getpgid(pid)
+            except ProcessLookupError:
+                pgid = before.get(pid)
+            except OSError:
+                pgid = None
+            processes.append({"pid": pid, "pgid": pgid})
+    return processes
+
+
+def snapshot(d2=False, ownership=False):
     result = {"monotonic_ns": time.monotonic_ns()}
     base = "--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu"
     thermal_query = None
@@ -63,23 +88,28 @@ def snapshot(d2=False):
         result["thermal_query"] = thermal_query
     if "devices" not in result:
         result["devices"] = query_gpu(base)
+    groups_started = time.monotonic_ns()
+    before = process_groups() if ownership else {}
     apps = query_gpu("--query-compute-apps=gpu_uuid,pid,used_memory")
     result["applications"] = apps
+    try:
+        processes = application_groups(apps, before) if ownership or d2 else []
+        if ownership:
+            result["application_process_groups"] = processes
+            result["application_sample_started_ns"] = groups_started
+            result["application_sample_ended_ns"] = time.monotonic_ns()
+    except ValueError as error:
+        result["application_groups_error"] = str(error)
+        processes = []
     if d2 and thermal_query["returncode"] == 0 and len(fields) == 10 and apps["returncode"] == 0:
         try:
             gpu, _, _, memory, utilization, temperature, sm, mem, pstate, power = (
                 value.strip() for value in fields
             )
-            processes = []
             for line in apps["stdout"].splitlines():
-                uuid, pid, _ = (part.strip() for part in line.split(","))
+                uuid, _, _ = (part.strip() for part in line.split(","))
                 if uuid != gpu:
                     raise ValueError("foreign GPU application record")
-                try:
-                    pgid = os.getpgid(int(pid))
-                except OSError:
-                    pgid = None
-                processes.append({"pid": int(pid), "pgid": pgid})
             thermal = {
                 "monotonic_ns": stamp,
                 "gpu_uuid": gpu,
@@ -219,6 +249,10 @@ def main():
         "dirty GPU checkout",
     )
     config = read_json(args.config)
+    require(
+        config["resource_schema_version"] == RESOURCE_SCHEMA_VERSION,
+        "configuration M5 resource schema differs",
+    )
     auxiliary = None if args.auxiliary == "-" else Path(args.auxiliary)
     freeze_path = auxiliary if args.phase == "formal" else None
     roles = check_authorization(
@@ -285,6 +319,7 @@ def main():
         return (deadline - time.monotonic_ns()) / 10**9
 
     binding = {
+        "resource_schema_version": RESOURCE_SCHEMA_VERSION,
         "task_id": TASK,
         "job_id": job,
         "attempt": args.attempt,
@@ -316,14 +351,15 @@ def main():
     before = snapshot()
 
     d2_samples = args.output / "d2-device.jsonl"
+    gpu_samples = args.output / "gpu-during.jsonl"
 
     def sample():
         with ExitStack() as stack:
-            stream = stack.enter_context((args.output / "gpu-during.jsonl").open("x"))
+            stream = stack.enter_context(gpu_samples.open("x"))
             thermal_stream = stack.enter_context(d2_samples.open("x")) if d2 else None
             next_sample = time.monotonic()
             while not stop_sampling.is_set():
-                observed = snapshot(d2=d2)
+                observed = snapshot(d2=d2, ownership=True)
                 stream.write(json.dumps(observed) + "\n")
                 stream.flush()
                 if thermal_stream is not None and "thermal" in observed:
@@ -465,6 +501,7 @@ def main():
             require(owner_path.exists(), "collector child ownership registration missing")
             pgid = owner_group(owner_path, job, active.pid)
             result["engine_pgid"] = pgid
+            result["engine_owner_ack_ns"] = time.monotonic_ns()
             atomic_write(
                 args.output / "index.json",
                 {"schema_version": 1, "stage": args.role, "runs": results},
@@ -661,6 +698,7 @@ def main():
                 "gpu_before": before,
                 "gpu_after": after,
                 "sampler_exited": not sampler.is_alive(),
+                "gpu_during_sha256": digest(gpu_samples) if gpu_samples.exists() else None,
                 **(
                     {"d2_device_sha256": digest(d2_samples) if d2_samples.exists() else None}
                     if d2

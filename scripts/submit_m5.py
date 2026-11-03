@@ -4,6 +4,7 @@ import argparse
 import fcntl
 import hashlib
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -30,13 +31,23 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
 )
 from vllm_prefix_scheduler.m5_d1 import d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import D2_D1_REANALYSIS_SHA, d2_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_resources import audit_attempt, audit_history  # noqa: E402
+from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
+    RESOURCE_SCHEMA_VERSION,
+    audit_attempt,
+    audit_controller_release,
+    audit_history,
+    audit_submission,
+    observe_clear_queue,
+    slurm_terminal,
+    submitted_attempts,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE = ROOT.parent / "vllm-prefix-scheduler/.local/workspace.json"
 CONFIG = ROOT / "configs/m5-performance.json"
 HISTORY = ROOT / "runs" / TASK / "attempts"
 REMOTE_CONFIG = "configs/m5-performance.json"
+TRANSFER_ATTEMPTS = 3
 
 
 def connection():
@@ -75,6 +86,47 @@ def remote(ssh, argv, *, data=None, timeout=30, check=True):
     )
 
 
+def durable_write(path, value):
+    require(not path.exists(), "controller evidence already exists")
+    atomic_write(path, value)
+    fsync_directory(path.parent)
+
+
+def fsync_directory(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def controller_boot_id():
+    if sys.platform == "darwin":
+        boot = subprocess.check_output(["sysctl", "-n", "kern.bootsessionuuid"], text=True).strip()
+    else:
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+    require(
+        re.fullmatch(r"[a-fA-F0-9-]{36}", boot) is not None, "controller boot identity unavailable"
+    )
+    return boot
+
+
+def remote_query(ssh, command, domain):
+    argv = [*ssh, command]
+    try:
+        result = subprocess.run(argv, capture_output=True, text=True, timeout=15)
+        data = dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        data = dict(returncode=None, stdout="", stderr=str(error))
+    return {
+        **data,
+        "command": argv,
+        "clock_domain": domain,
+        "observed_monotonic_ns": time.monotonic_ns(),
+        "observed_unix_ns": time.time_ns(),
+    }
+
+
 def upload(ssh, path, content):
     # Create once, or prove this is the exact same staged input.
     stage = 'set -eu; umask 077; mkdir -p -- "$(dirname -- "$1")"; if [ -f "$1" ]; then cmp -s "$1" -; else (set -C; cat > "$1"); fi'
@@ -84,8 +136,7 @@ def upload(ssh, path, content):
 def snapshot_previous(history, role, phase, args, commit):
     previous = [
         (path, read_json(path / "planned.json"), audit_attempt(path))
-        for path in sorted(history.iterdir())
-        if path.is_dir()
+        for path in submitted_attempts(history)
     ]
     used = sum(row["phase"] == phase for _, row, _ in previous)
     require(used < args["max_attempts"], "M5 phase attempt budget exhausted")
@@ -98,11 +149,12 @@ def snapshot_previous(history, role, phase, args, commit):
     return completed
 
 
-def transfer(alias, path, output):
+def transfer(alias, path, output, transport):
     require(not output.exists(), "node evidence destination already exists")
-    staging = output.with_name(f"{output.name}-transfer-{uuid.uuid4().hex}")
-    subprocess.run(
-        [
+    batch = uuid.uuid4().hex
+    for attempt in range(1, TRANSFER_ATTEMPTS + 1):
+        staging = transport / f"{batch}-node-partial-{attempt}"
+        argv = [
             "scp",
             "-q",
             "-r",
@@ -112,11 +164,130 @@ def transfer(alias, path, output):
             "ConnectTimeout=8",
             f"{alias}:{path}",
             str(staging),
-        ],
-        check=True,
-        timeout=600,
+        ]
+        try:
+            result = subprocess.run(argv, capture_output=True, text=True, timeout=600)
+            data = dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            data = dict(returncode=None, stdout="", stderr=str(error))
+        durable_write(transport / f"{batch}-node-{attempt}.json", {**data, "command": argv})
+        if data["returncode"] == 0:
+            require(staging.is_dir(), "successful transport did not create node evidence")
+            staging.rename(output)
+            fsync_directory(output.parent)
+            return
+        if attempt < TRANSFER_ATTEMPTS:
+            time.sleep(1)
+    raise ValueError("node evidence transfer retries exhausted")
+
+
+def fetch_evidence(alias, ssh, remote_attempt, log_file, destination):
+    transport = destination / "transport"
+    transport.mkdir(exist_ok=True)
+    if not (destination / "node").exists():
+        transfer(alias, remote_attempt, destination / "node", transport)
+    if (destination / "slurm.log").exists():
+        return
+    batch = uuid.uuid4().hex
+    for attempt in range(1, TRANSFER_ATTEMPTS + 1):
+        row = remote_query(ssh, shlex.join(["cat", str(log_file)]), "transport")
+        log = row.pop("stdout")
+        if row["returncode"] == 0:
+            row["stdout_sha256"] = hashlib.sha256(log.encode()).hexdigest()
+        else:
+            row["stdout"] = log
+        durable_write(transport / f"{batch}-slurm-log-{attempt}.json", row)
+        if row["returncode"] == 0:
+            staging = transport / f"{batch}-slurm-log"
+            staging.write_bytes(log.encode())
+            staging.rename(destination / "slurm.log")
+            fsync_directory(destination)
+            return
+        if attempt < TRANSFER_ATTEMPTS:
+            time.sleep(1)
+    raise ValueError("Slurm log transfer retries exhausted")
+
+
+def recover_release(ssh, destination, submission):
+    record, ready, _, job = submission
+    require(record["controller_boot_id"] == controller_boot_id(), "controller boot changed")
+    require(type(ready["pid"]) is int and ready["pid"] > 1, "invalid original watcher PID")
+    try:
+        os.kill(ready["pid"], 0)
+    except ProcessLookupError:
+        pass
+    else:
+        raise ValueError("original watcher PID is still live")
+    recovery = destination / "recovery"
+    require(not recovery.exists(), "existing recovery evidence cannot be overwritten")
+    transport = destination / "transport"
+    transport.mkdir(exist_ok=True)
+    staging = transport / f"recovery-{uuid.uuid4().hex}"
+    staging.mkdir()
+    domain = record["clock_domain"]
+    started = time.monotonic_ns()
+    terminal = remote_query(ssh, f"scontrol show job {job}", domain)
+    durable_write(staging / "slurm-final.json", terminal)
+    slurm_terminal(terminal, job, record["job_name"])
+    with (staging / "queue-watch.jsonl").open("x") as stream:
+
+        def journal_query(command):
+            row = remote_query(ssh, command, domain)
+            stream.write(json.dumps(row) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+            return row
+
+        records, clear = observe_clear_queue(journal_query, job, time.sleep)
+    durable_write(staging / "active-final.json", records[-1])
+    require(clear, "recovery full queue retries exhausted")
+    durable_write(
+        staging / "release.json",
+        {
+            "controller_boot_id": record["controller_boot_id"],
+            "receipt_sha256": digest(destination / "submission.json"),
+            "intent_sha256": digest(destination / "submission-intent.json"),
+            "clock_domain": domain,
+            "original_pid_not_live": True,
+            "started_monotonic_ns": started,
+            "observed_monotonic_ns": time.monotonic_ns(),
+            "terminal_sha256": digest(staging / "slurm-final.json"),
+            "active_sha256": digest(staging / "active-final.json"),
+            "queue_journal_sha256": digest(staging / "queue-watch.jsonl"),
+        },
     )
-    staging.rename(output)
+    staging.rename(recovery)
+    fsync_directory(destination)
+    audit_controller_release(destination, submission)
+
+
+def resume(attempt):
+    require(id_ok(attempt), "invalid attempt ID")
+    destination = HISTORY / attempt
+    with (HISTORY.parent / "controller.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        submission = audit_submission(destination)
+        record, _, _, job = submission
+        require(
+            record.get("resource_schema_version") == RESOURCE_SCHEMA_VERSION,
+            "read-only recovery requires a durable original submission intent",
+        )
+        alias, paths, _ = connection()
+        ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias]
+        root = paths["m5_checkout"] / "runs" / TASK
+        remote_attempt = root / "node" / attempt
+        require(
+            str(remote_attempt) == record["remote_attempt"]
+            and record["job_name"] == JOB_PREFIX + attempt,
+            "recovery path or job differs from original attempt",
+        )
+        try:
+            audit_controller_release(destination, submission)
+        except (KeyError, TypeError, ValueError, OSError):
+            recover_release(ssh, destination, submission)
+        fetch_evidence(alias, ssh, remote_attempt, root / "slurm" / (attempt + ".log"), destination)
+        result = audit_attempt(destination)
+        print(f"Job {job} release evidence recovered ({result['state']}/{result['exit_code']})")
 
 
 def submit(args):
@@ -127,6 +298,10 @@ def submit(args):
     )
     auth = read_json(args.authorization)
     allowed = check_authorization(auth, CONFIG, commit, args.phase, freeze_path=args.freeze)
+    require(
+        read_json(CONFIG)["resource_schema_version"] == RESOURCE_SCHEMA_VERSION,
+        "configuration M5 resource schema differs",
+    )
     require(args.role in allowed and id_ok(args.attempt), "attempt or role outside authorization")
     HISTORY.mkdir(parents=True, exist_ok=True)
     with (HISTORY.parent / "controller.lock").open("a") as lock:
@@ -177,14 +352,6 @@ def submit(args):
         require(
             not remote(ssh, ["git", "-C", checkout, "status", "--porcelain"]).stdout,
             "remote checkout dirty",
-        )
-        before_queue = remote(ssh, ["squeue", "-h", "-o", "%i|%T|%j"])
-        require(
-            all(
-                not line.split("|")[-1].startswith(JOB_PREFIX)
-                for line in before_queue.stdout.splitlines()
-            ),
-            "an M5 job is visible in the full queue",
         )
         root = checkout / "runs" / TASK
         remote_attempt = root / "node" / args.attempt
@@ -242,16 +409,25 @@ def submit(args):
             upload(ssh, aux, dependencies)
             auxiliary_hash = hashlib.sha256(dependencies.encode()).hexdigest()
 
+        log_path = root / "slurm"
+        remote(ssh, ["mkdir", "-p", log_path])
         destination = HISTORY / args.attempt
-        destination.mkdir()
-        watcher_dir = destination / "watcher"
-        submission = destination / "submission.json"
+        require(not destination.exists(), "local attempt already exists")
         clock_domain = uuid.uuid4().hex
+        boot = controller_boot_id()
+        before_queue, clear = observe_clear_queue(
+            lambda command: remote_query(ssh, command, clock_domain), None, time.sleep
+        )
         job_name = JOB_PREFIX + args.attempt
-        (destination / "authorization.json").write_bytes(args.authorization.read_bytes())
-        atomic_write(
-            destination / "planned.json",
+        staging = HISTORY.parent / f"pre-intent-{args.attempt}-{clock_domain}"
+        staging.mkdir(mode=0o700)
+        (staging / "authorization.json").write_bytes(args.authorization.read_bytes())
+        durable_write(staging / "pre-submission-queue.json", before_queue)
+        durable_write(
+            staging / "planned.json",
             {
+                "resource_schema_version": RESOURCE_SCHEMA_VERSION,
+                "controller_boot_id": boot,
                 "attempt": args.attempt,
                 "task_id": TASK,
                 "job_name": job_name,
@@ -264,9 +440,14 @@ def submit(args):
                 "clock_domain": clock_domain,
                 "remote_attempt": str(remote_attempt),
                 "requested_minutes": 20,
-                "pre_submission_queue": before_queue.stdout,
+                "pre_submission_queue": before_queue[-1]["stdout"],
             },
         )
+        staging.rename(destination)
+        fsync_directory(HISTORY)
+        require(clear, "pre-submission full queue retries exhausted")
+        watcher_dir = destination / "watcher"
+        submission = destination / "submission.json"
         watch_argv = [
             sys.executable,
             str(ROOT / "scripts/watch_m3_campaign.py"),
@@ -288,6 +469,7 @@ def submit(args):
             str(submission),
             "--timeout",
             "86400",
+            "--m5-release",
         ]
         with (destination / "watcher.log").open("xb") as log:
             watch = subprocess.Popen(watch_argv, stdout=log, stderr=subprocess.STDOUT)
@@ -308,9 +490,6 @@ def submit(args):
                     ready["ready"] is True and ready["pid"] == watch.pid,
                     "watcher readiness mismatch",
                 )
-                # Create the Slurm log directory on the gateway before submission.
-                log_path = root / "slurm"
-                remote(ssh, ["mkdir", "-p", log_path])
                 invoke = [
                     "sbatch",
                     "--parsable",
@@ -330,7 +509,22 @@ def submit(args):
                     paths["remote_cache_directory"],
                     aux,
                 ]
+                invoke = list(map(str, invoke))
                 begun = time.monotonic_ns()
+                intent = destination / "submission-intent.json"
+                durable_write(
+                    intent,
+                    {
+                        "argv": invoke,
+                        "clock_domain": clock_domain,
+                        "command_started_ns": begun,
+                        "planned_sha256": digest(destination / "planned.json"),
+                        "watcher_ready_sha256": digest(ready_path),
+                        "pre_submission_queue_sha256": digest(
+                            destination / "pre-submission-queue.json"
+                        ),
+                    },
+                )
                 try:
                     sent = remote(ssh, invoke, check=False)
                     receipt = dict(
@@ -338,14 +532,15 @@ def submit(args):
                     )
                 except (OSError, subprocess.TimeoutExpired) as error:
                     receipt = dict(returncode=None, stdout="", stderr=str(error))
-                atomic_write(
+                durable_write(
                     submission,
                     {
                         **receipt,
                         "command_started_ns": begun,
                         "clock_domain": clock_domain,
                         "observed_monotonic_ns": time.monotonic_ns(),
-                        "argv": list(map(str, invoke)),
+                        "argv": invoke,
+                        "intent_sha256": digest(intent),
                     },
                 )
                 watch_code = watch.wait()
@@ -353,7 +548,7 @@ def submit(args):
                 if watch.poll() is None:
                     watch.terminate()
                     watch.wait(timeout=10)
-                atomic_write(
+                durable_write(
                     destination / "watcher-exit.json",
                     {
                         "pid": watch.pid,
@@ -363,23 +558,37 @@ def submit(args):
                     },
                 )
         require(watch_code == 0, "watcher did not verify terminal and full queue")
-        transfer(alias, remote_attempt, destination / "node")
-        slurm_log = remote(ssh, ["cat", log_path / (args.attempt + ".log")])
-        (destination / "slurm.log").write_text(slurm_log.stdout)
+        audit_controller_release(destination)
+        fetch_evidence(alias, ssh, remote_attempt, log_path / (args.attempt + ".log"), destination)
         result = audit_attempt(destination, require_completed=True)
         print(f"Job {result['job_id']} released and bound to {args.role}")
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--authorization", type=Path, required=True)
-    p.add_argument("--phase", choices=("calibration", "formal"), required=True)
-    p.add_argument("--role", required=True)
+    p.add_argument("--authorization", type=Path)
+    p.add_argument("--phase", choices=("calibration", "formal"))
+    p.add_argument("--role")
     p.add_argument("--attempt", required=True)
     p.add_argument("--freeze", type=Path)
+    p.add_argument("--resume", action="store_true")
     args = p.parse_args()
     try:
-        submit(args)
+        if args.resume:
+            require(
+                all(
+                    value is None
+                    for value in (args.authorization, args.phase, args.role, args.freeze)
+                ),
+                "read-only resume only accepts an attempt ID",
+            )
+            resume(args.attempt)
+        else:
+            require(
+                all(value is not None for value in (args.authorization, args.phase, args.role)),
+                "submission requires authorization, phase and role",
+            )
+            submit(args)
     except (KeyError, TypeError, ValueError, OSError, subprocess.SubprocessError) as error:
         p.exit(1, f"M5 controller stopped: {type(error).__name__}: {error}\n")
 

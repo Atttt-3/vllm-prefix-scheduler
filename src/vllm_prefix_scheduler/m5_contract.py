@@ -54,6 +54,12 @@ def require_ns(value, label):
     return value
 
 
+def measurement_schema(config):
+    version = config.get("measurement_schema_version", 1)
+    require(type(version) is int and version in (1, 2), "unknown M5 measurement schema")
+    return version
+
+
 def token_ids(value):
     return type(value) is list and all(integer(token) for token in value)
 
@@ -91,6 +97,100 @@ def clock_gate(client, engine, gates):
         send <= remote <= recv and recv - send <= gates["max_clock_rtt_ns"],
         "clock handshake outside bound",
     )
+
+
+def workload_geometry_gate(inputs, rules, block, rows, warmup):
+    scenario = inputs["scenario"]
+    prefix = rules["prefix_tokens"]
+    if scenario == "mechanism":
+        require(
+            inputs.get("mechanism") in {"pressure", "ample"}
+            and [(r["request_id"], r["class"]) for r in rows] == [("B", "cold"), ("C", "hot")]
+            and warmup
+            and (warmup[0]["request_id"], warmup[0]["class"], warmup[0]["family"])
+            == ("prime-A", "hot", "A")
+            and warmup[0].get("offset_ns") is None
+            and rows[1]["family"] == "A"
+            and len(rows[0]["prompt_token_ids"]) == rules["cold_prompt_tokens"],
+            "mechanism input identities or prompt geometry differ",
+        )
+        suffix = rules.get("suffix_tokens", 1)
+        require(
+            all(len(r["prompt_token_ids"]) == prefix + suffix for r in (warmup[0], rows[1]))
+            and warmup[0]["prompt_token_ids"] != rows[1]["prompt_token_ids"],
+            "mechanism A/C prompt tails differ from the frozen contract",
+        )
+        capacity = rules["max_model_len"] - rules["output_tokens"]
+        require(
+            all(
+                r["request_id"] == f"prime-filler-{i:03}"
+                and r["class"] == "cold"
+                and r.get("offset_ns") is None
+                and len(r["prompt_token_ids"]) <= capacity
+                and len(r["prompt_token_ids"]) % block == 0
+                for i, r in enumerate(warmup[1:], 1)
+            )
+            and sum(len(r["prompt_token_ids"]) // block for r in warmup)
+            == rules["pressure_blocks"] - 1 - 16,
+            "mechanism APC filler geometry differs",
+        )
+        return
+
+    require(inputs.get("mechanism") is None, "natural input declares a mechanism override")
+    families, hot_percent = rules["families"], rules["hot_percent"]
+    expected_families = {f"family-{i:03}" for i in range(families)}
+    require(len(warmup) == rules["prime_families"], "frozen cache priming count differs")
+    prompt_length = prefix + rules["suffix_tokens"]
+    require(
+        all(len(r["prompt_token_ids"]) == prompt_length for r in (*warmup, *rows)),
+        "frozen prompt length differs",
+    )
+    by_slot, by_family, suffixes = {}, {}, set()
+
+    def check_family(row, slot):
+        family = row["family"]
+        suffix = (family, tuple(row["prompt_token_ids"][prefix:]))
+        require(
+            family in expected_families
+            and by_slot.setdefault(slot, family) == family
+            and by_family.setdefault(family, slot) == slot
+            and suffix not in suffixes,
+            "frozen prefix family rotation or unique suffix differs",
+        )
+        suffixes.add(suffix)
+
+    for i, row in enumerate(warmup):
+        require(
+            row["request_id"] == f"prime-family-{i:03}"
+            and row["class"] == "hot"
+            and row.get("offset_ns") is None,
+            "frozen cache priming row differs",
+        )
+        check_family(row, i)
+    hot_index = 0
+    for i, row in enumerate(rows):
+        if scenario == "burst":
+            burst = rules["burst_size"]
+            group, within = divmod(i, burst)
+            first_hot = burst - (burst * hot_percent // 100)
+            hot = within >= first_hot
+            if hot:
+                reuse = within - first_hot
+                slot = group % min(families, 8)
+                if families > 8 and reuse >= 3:
+                    slot = 8 + (group * 3 + (reuse - 3) // 2) % (families - 8)
+        else:
+            hot = (i + 1) * hot_percent // 100 > i * hot_percent // 100
+            if hot:
+                group, within = divmod(hot_index, 4)
+                slot = (group if within < 2 else group * 2 + within) % families
+                hot_index += 1
+        require(
+            row["request_id"] == f"request-{i:06}" and row["class"] == ("hot" if hot else "cold"),
+            "frozen request identity or hot/cold class differs",
+        )
+        if hot:
+            check_family(row, slot)
 
 
 def workload_gate(inputs, config, pair, phase):
@@ -219,6 +319,8 @@ def workload_gate(inputs, config, pair, phase):
             block_owner.setdefault(first_block, owner) == owner,
             "unrelated requests share first cache block",
         )
+    if measurement_schema(config) == 2:
+        workload_geometry_gate(inputs, config["scenarios"][scenario], block, rows, measured_warmup)
     return expected
 
 
@@ -356,6 +458,7 @@ def add_interval(previous, start, end):
 
 
 def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, native_end):
+    v2 = engine["schema_version"] == 2
     expected_tokens = defaultdict(list)
     enqueues = {}
     all_inputs = {**warmup, **plan}
@@ -403,6 +506,7 @@ def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, n
     work = Counter()
     batches = {}
     schedule_times = []
+    envelope_times = []
     prior_batch_ns = 0
     for row in require_list(engine.get("batches"), "engine batches"):
         require_dict(row, "engine batch")
@@ -416,6 +520,18 @@ def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, n
         prior_batch_ns = at
         duration = row.get("schedule_ns")
         require(integer(duration), "schedule duration missing")
+        if v2:
+            require(
+                row.get("stage") in {"warmup", "measure", "done"}
+                and type(row.get("has_candidates")) is bool,
+                "candidate decision marker missing or invalid",
+            )
+            require(
+                integer(row.get("schedule_envelope_ns"), duration)
+                if tier == "profile"
+                else "schedule_envelope_ns" not in row,
+                "observer-inclusive schedule timing missing, invalid or outside profile",
+            )
         scheduled = require_list(row.get("scheduled"), "scheduled intervals")
         require(row.get("consumed") is True, "batch consume proof missing")
         scheduled_by_id = {}
@@ -451,6 +567,8 @@ def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, n
             require(not set(scheduled_by_id) & set(plan), "measured request outside measure stage")
         if in_measurement:
             schedule_times.append(duration)
+            if v2 and tier == "profile":
+                envelope_times.append(row["schedule_envelope_ns"])
         runner = row.get("runner")
         if not scheduled or tier == "endpoint":
             require(runner is None, "unexpected runner evidence for endpoint/empty batch")
@@ -535,12 +653,16 @@ def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, n
             require(first_at[0] <= row["first_token_ns"], "first token precedes positive dispatch")
     wait = fairness(engine, plan, enqueues, requests, batches, first, mode, config)
     stage_samples = {name: [] for name in ("window", "score", "sort_exclusive", "queue_commit")}
+    profile_batches = set()
     for row in require_list(engine.get("overhead"), "stage overhead"):
         require_dict(row, "stage timing row")
         require(
             tier == "profile" and row.get("batch_id") in batches,
             "stage timing outside profile tier or batch",
         )
+        if v2:
+            require(row["batch_id"] not in profile_batches, "duplicate stage timing batch")
+            profile_batches.add(row["batch_id"])
         window_ns, score, sorting, commit, reorder = (
             row.get(k)
             for k in ("window_ns", "score_ns", "sort_inclusive_ns", "commit_ns", "reorder_ns")
@@ -556,10 +678,17 @@ def engine_batches(engine, plan, warmup, requests, tier, mode, phases, config, n
                 stage_samples, (window_ns, score, sorting - score, commit), strict=True
             ):
                 stage_samples[key].append(value)
+    if v2 and tier == "profile":
+        require(profile_batches == set(batches), "stage timing batch missing")
     return (
         work,
         {
             "schedule": distribution(schedule_times),
+            **(
+                {"schedule_envelope": distribution(envelope_times)}
+                if v2 and tier == "profile"
+                else {}
+            ),
             **{key: distribution(values) for key, values in stage_samples.items()},
         },
         enqueues,
@@ -576,6 +705,11 @@ def fairness(engine, plan, enqueues, requests, batches, first, mode, config):
     competing = 0
     valid_steps = {}
     protected_windows = 0
+    expected_steps = (
+        {row["batch_id"]: row["stage"] for row in engine["batches"] if row["has_candidates"]}
+        if engine["schema_version"] == 2
+        else None
+    )
     for row in require_list(engine.get("decisions"), "candidate decisions"):
         require_dict(row, "candidate decision")
         batch_id = row.get("batch_id")
@@ -586,6 +720,13 @@ def fairness(engine, plan, enqueues, requests, batches, first, mode, config):
         candidates, ordered, protected = (
             require_list(row.get(key), key) for key in ("candidates", "ordered", "protected")
         )
+        if expected_steps is not None:
+            require(
+                candidates
+                and batch_id in expected_steps
+                and row.get("stage") == expected_steps[batch_id],
+                "candidate decision does not match the marked batch",
+            )
         require(
             len(candidates) <= config["window"]
             and len(candidates) == len(set(candidates))
@@ -644,6 +785,12 @@ def fairness(engine, plan, enqueues, requests, batches, first, mode, config):
         if set(protected) & set(plan):
             protected_windows += 1
 
+    if expected_steps is not None:
+        require(
+            valid_steps.keys() == expected_steps.keys(),
+            "candidate decision missing for marked batch",
+        )
+
     order = {identity: i for i, identity in enumerate(enqueues)}
     for younger, (dispatch, batch) in first.items():
         if younger not in plan:
@@ -671,7 +818,9 @@ def fairness(engine, plan, enqueues, requests, batches, first, mode, config):
     return whole, window, by_hot, window_by_hot, competing, protected_windows
 
 
-def stratum_metrics(ids, requests, enqueues, first, whole, window, by_hot, window_by_hot, deadline):
+def stratum_metrics(
+    ids, requests, enqueues, first, whole, window, by_hot, window_by_hot, deadline, *, observed=True
+):
     selected = [requests[identity] for identity in ids]
     completed = [row for row in selected if row["status"] == "completed"]
     counts = {status: sum(row["status"] == status for row in selected) for status in STATUSES}
@@ -702,10 +851,10 @@ def stratum_metrics(ids, requests, enqueues, first, whole, window, by_hot, windo
         "enqueue_to_first_dispatch_ns": distribution(
             [first[i][0] - enqueues[i]["enqueued_ns"] for i in dispatched_ids]
         ),
-        "whole_queue_overtakes": distribution([whole[i] for i in ids]),
-        "window_overtakes": distribution([window[i] for i in ids]),
-        "whole_queue_hot_overtakes": distribution([by_hot[i] for i in ids]),
-        "window_hot_overtakes": distribution([window_by_hot[i] for i in ids]),
+        "whole_queue_overtakes": distribution([whole[i] for i in ids] if observed else []),
+        "window_overtakes": distribution([window[i] for i in ids] if observed else []),
+        "whole_queue_hot_overtakes": distribution([by_hot[i] for i in ids] if observed else []),
+        "window_hot_overtakes": distribution([window_by_hot[i] for i in ids] if observed else []),
         "cached_tokens": distribution(
             [r["cached_tokens"] for r in selected if r["cached_tokens"] is not None]
         ),
@@ -801,10 +950,13 @@ def boundary_gate(engine, client, inputs, tier):
 
 
 def pressure_metrics(engine, config, plan, enqueues, first, requests, native_end, reusable_blocks):
+    v2 = engine["schema_version"] == 2
     evictions = require_list(engine.get("evictions"), "KV evictions")
     allocations = require_list(engine.get("allocations"), "KV allocations")
     preemptions = require_list(engine.get("preemptions"), "preemptions")
-    batch_times = {row["batch_id"]: row["scheduled_ns"] for row in engine["batches"]}
+    batches = {row["batch_id"]: row for row in engine["batches"]}
+    batch_times = {i: row["scheduled_ns"] for i, row in batches.items()}
+    capacity = engine["profile"]["num_gpu_blocks"]
     block_size = config["block_size"]
     hot_blocks = {}
     for identity, row in enqueues.items():
@@ -816,7 +968,10 @@ def pressure_metrics(engine, config, plan, enqueues, first, requests, native_end
             hot_blocks[cache_key] = max(cutoff, hot_blocks.get(cache_key, 0))
 
     known_allocations = set()
-    for row in allocations:
+    allocated_by_id = {}
+    first_admissions = defaultdict(list)
+    previous_allocation_ns = 0
+    for allocation_id, row in enumerate(allocations, 1):
         require_dict(row, "KV allocation")
         identity, batch = row.get("request_id"), row.get("batch_id")
         require(
@@ -834,11 +989,31 @@ def pressure_metrics(engine, config, plan, enqueues, first, requests, native_end
         )
         if row["success"]:
             known_allocations.add((batch, identity))
+        if v2:
+            require(
+                type(row.get("allocation_id")) is int
+                and row["allocation_id"] == allocation_id
+                and type(batch) is int
+                and integer(row.get("eviction_count"))
+                and (row["success"] or row["eviction_count"] == 0)
+                and row.get("stage") == batches[batch].get("stage")
+                and row["free_before"] < capacity
+                and row["free_after"] < capacity,
+                "allocation identity, capacity or eviction count differs",
+            )
+            require(row["at_ns"] >= previous_allocation_ns, "allocation timestamps go backwards")
+            previous_allocation_ns = row["at_ns"]
+            allocated_by_id[allocation_id] = row
+            if row["success"] and identity in first and batch == first[identity][1]:
+                first_admissions[identity].append(row["hit_tokens"])
 
     cached, reusable = 0, 0
+    seen_evictions = Counter()
+    seen_blocks = set()
+    previous_eviction = (0, 0)
     for row in evictions:
         require_dict(row, "KV eviction")
-        if row.get("stage") != "measure":
+        if not v2 and row.get("stage") != "measure":
             continue
         identity, batch = row.get("request_id"), row.get("batch_id")
         require(
@@ -851,8 +1026,54 @@ def pressure_metrics(engine, config, plan, enqueues, first, requests, native_end
             and row["cache_key"],
             "KV eviction unbound",
         )
+        keys = [row["cache_key"]]
+        if v2:
+            allocation_id = row.get("allocation_id")
+            allocation = allocated_by_id.get(allocation_id) if integer(allocation_id, 1) else None
+            require(
+                allocation is not None
+                and allocation["success"]
+                and type(batch) is int
+                and (batch, identity) == (allocation["batch_id"], allocation["request_id"])
+                and row.get("stage") == allocation["stage"]
+                and row["at_ns"] <= allocation["at_ns"]
+                and row["block_id"] < capacity,
+                "KV eviction does not match its successful allocation or physical capacity",
+            )
+            prior_allocation = allocated_by_id.get(allocation_id - 1)
+            require(
+                row["at_ns"] >= previous_eviction[0]
+                and allocation_id >= previous_eviction[1]
+                and (prior_allocation is None or row["at_ns"] >= prior_allocation["at_ns"]),
+                "native eviction journal or allocation timestamp order differs",
+            )
+            previous_eviction = (row["at_ns"], allocation_id)
+            keys = require_list(row.get("removed_cache_keys"), "native removed cache keys")
+            require(
+                keys
+                and keys[0] == row["cache_key"]
+                and all(
+                    type(key) is str
+                    and len(key) == 64
+                    and all(c in "0123456789abcdef" for c in key)
+                    for key in keys
+                )
+                and len(set(keys)) == len(keys),
+                "native removed cache keys missing or invalid",
+            )
+            block = (allocation_id, row["block_id"])
+            require(block not in seen_blocks, "duplicate physical eviction within allocation")
+            seen_blocks.add(block)
+            seen_evictions[allocation_id] += 1
+        if row.get("stage") != "measure":
+            continue
         cached += 1
-        reusable += row["at_ns"] < hot_blocks.get(row["cache_key"], 0)
+        reusable += any(row["at_ns"] < hot_blocks.get(key, 0) for key in keys)
+    if v2:
+        require(
+            all(seen_evictions[i] == row["eviction_count"] for i, row in allocated_by_id.items()),
+            "native allocation eviction count differs from eviction ledger",
+        )
     count = 0
     for row in preemptions:
         require_dict(row, "preemption")
@@ -867,7 +1088,37 @@ def pressure_metrics(engine, config, plan, enqueues, first, requests, native_end
             "preemption event unbound",
         )
         count += row.get("stage") == "measure"
-    return {"cached_evictions": cached, "reusable_evictions": reusable, "preemptions": count}
+    return (
+        {"cached_evictions": cached, "reusable_evictions": reusable, "preemptions": count},
+        first_admissions,
+    )
+
+
+def all_cold_gate(engine, requests, first, admissions):
+    require(
+        any(row["status"] == "completed" for row in requests.values()),
+        "all-cold control lacks a completed request",
+    )
+    first_rows = {
+        r["request_id"]: r
+        for batch in engine["batches"]
+        if batch["runner"] is not None
+        for r in batch["runner"]["rows"]
+        if r["request_id"] in requests and batch["batch_id"] == first[r["request_id"]][1]
+    }
+    for identity, row in requests.items():
+        require(
+            row["cached_tokens"] == 0
+            if row["status"] == "completed"
+            else row["cached_tokens"] in (None, 0),
+            "all-cold request has a positive or missing client cache observation",
+        )
+        if identity in first:
+            require(
+                admissions.get(identity) == [0] and first_rows[identity]["start"] == 0,
+                "all-cold first dispatch lacks zero-hit native allocation and runner evidence",
+            )
+    return True
 
 
 def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, phase="formal"):
@@ -876,9 +1127,13 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
     client = require_dict(read_json(directory / "client.json"), "client evidence")
     engine = require_dict(read_json(directory / "engine.json"), "engine evidence")
     gates = require_dict(config.get("gates"), "M5 gates")
+    version = measurement_schema(config)
+    v2 = version == 2
     require(
         client.get("task_id") == config.get("task_id") == TASK_ID
-        and client.get("schema_version") == engine.get("schema_version") == 1,
+        and type(client.get("schema_version")) is int
+        and type(engine.get("schema_version")) is int
+        and client["schema_version"] == engine["schema_version"] == version,
         "task or trace schema differs",
     )
     config_hash = sha256(config_path)
@@ -961,16 +1216,40 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
     reusable_blocks = (
         config["scenarios"][inputs["scenario"]]["prefix_tokens"] // config["block_size"]
     )
-    pressure = pressure_metrics(
+    pressure, first_admissions = pressure_metrics(
         engine, config, plan, enqueues, first, requests, native_end, reusable_blocks
     )
+    observed = tier != "endpoint"
+    all_cold_zero_hit = None
+    if v2 and inputs["scenario"] == "all-cold" and observed:
+        all_cold_zero_hit = all_cold_gate(engine, requests, first, first_admissions)
+    if v2 and inputs["scenario"] == "ample" and observed:
+        block = config["block_size"]
+        output = inputs["sampling"]["max_tokens"]
+        resident_upper_bound = 1 + sum(
+            (len(row["prompt_token_ids"]) + output + block - 1) // block
+            for row in (*inputs["warmup"], *plan.values())
+        )
+        require(
+            pressure["cached_evictions"] == 0 and resident_upper_bound <= profile["num_gpu_blocks"],
+            "ample control working set exceeds capacity or experienced native eviction",
+        )
     strata = {"all": list(plan)}
     for label in ("hot", "cold"):
         strata[label] = [identity for identity, row in plan.items() if row["class"] == label]
     deadline = gates["deadline_ns"]
     split = {
         label: stratum_metrics(
-            ids, requests, enqueues, first, whole, window, by_hot, window_by_hot, deadline
+            ids,
+            requests,
+            enqueues,
+            first,
+            whole,
+            window,
+            by_hot,
+            window_by_hot,
+            deadline,
+            observed=observed or not v2,
         )
         for label, ids in strata.items()
     }
@@ -1041,9 +1320,9 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
         "kv_blocks": profile["num_gpu_blocks"],
         "max_outstanding": max_outstanding,
         "pressure": {
-            "competing_windows": competing,
-            "protected_windows": protected,
-            **pressure,
+            "competing_windows": competing if observed or not v2 else None,
+            "protected_windows": protected if observed or not v2 else None,
+            **(pressure if observed or not v2 else dict.fromkeys(pressure)),
         },
         "schedule_ns": stage_costs["schedule"],
         "stage_costs_ns": stage_costs,
@@ -1060,8 +1339,24 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
             )
         },
     }
+    if v2:
+        metrics.update(
+            all_cold_zero_hit=all_cold_zero_hit,
+            schedule_envelope_ns=stage_costs.get("schedule_envelope", distribution([])),
+            schedule_timing_scope={
+                "schedule_ns": "inherited_schedule_call",
+                **(
+                    {"schedule_envelope_ns": "observer_inclusive_scheduler"}
+                    if tier == "profile"
+                    else {}
+                ),
+            }
+            if observed
+            else None,
+        )
     return {
         "status": "valid",
+        **({"measurement_schema_version": version} if v2 else {}),
         "phase": phase,
         "tier": tier,
         "pair_id": pair_id,
@@ -1078,9 +1373,11 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
 
 def comparable(result):
     metrics = result["metrics"]
+    v2 = result.get("measurement_schema_version") == 2
+    throughput_basis = "fixed_" if v2 else ""
     values = {
-        "request_throughput": metrics["throughput"]["requests_per_s"],
-        "token_throughput": metrics["throughput"]["tokens_per_s"],
+        "request_throughput": metrics["throughput"][f"{throughput_basis}requests_per_s"],
+        "token_throughput": metrics["throughput"][f"{throughput_basis}tokens_per_s"],
         "schedule_p95_ns": metrics["schedule_ns"]["p95"],
         **metrics["work"],
     }
@@ -1123,6 +1420,7 @@ def paired_summary(rounds):
 
 def audit_matrix(config_path, index):
     config = require_dict(read_json(config_path), "M5 config")
+    version = measurement_schema(config)
     pairs = config_matrix(config)
     catalog = require_list(require_dict(index, "matrix index").get("runs"), "matrix runs")
     expected = [(pair_id, mode) for pair_id, pair in pairs.items() for mode in pair["order"]]
@@ -1165,7 +1463,9 @@ def audit_matrix(config_path, index):
         elif scenario == "all-cold":
             require(
                 all(
-                    run["metrics"]["strata"]["all"]["cached_tokens"]["max"] == 0
+                    run["metrics"]["all_cold_zero_hit"] is True
+                    if version == 2
+                    else run["metrics"]["strata"]["all"]["cached_tokens"]["max"] == 0
                     for run in rounds.values()
                 ),
                 "all-cold control has observed cache hits/missing hits",
@@ -1183,6 +1483,7 @@ def audit_matrix(config_path, index):
         )
     return {
         "status": "valid",
+        **({"measurement_schema_version": version} if version == 2 else {}),
         "pairs": results,
         "scenarios": {
             scenario: {name: paired_summary(deltas) for name, deltas in contrasts.items()}

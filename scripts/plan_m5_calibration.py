@@ -395,6 +395,8 @@ def evaluate_stage(config, stage, index_path, rates=None, dress_reports=(), *, c
         stages = metrics["mixed-stages"]["stage_costs_ns"]
         result["stage_costs_ns"] = stages
         expected = ("schedule", "window", "score", "sort_exclusive", "queue_commit")
+        if config.get("measurement_schema_version", 1) == 2:
+            expected += ("schedule_envelope",)
         if any(stages.get(name, {}).get("n", 0) <= 0 for name in expected):
             reasons.append("profile did not exercise all declared scheduler measurements")
     elif stage in {"C4", "C5"}:
@@ -475,12 +477,17 @@ def control_gate(config, specs, metrics, measured, dress_reports, reasons, ample
     )
     if ample_capacity_upper_bound > metrics["ample-full"]["kv_blocks"]:
         reasons.append("ample cache conservative working set exceeds actual physical capacity")
-    cold = metrics["all-cold-full"]["strata"]["all"]
-    if (
-        cold["cached_tokens"]["max"] != 0
-        or cold["cached_tokens"]["n"] < cold["counts"]["completed"]
-    ):
-        reasons.append("all-cold control showed a positive cache hit")
+    cold_metrics = metrics["all-cold-full"]
+    if config.get("measurement_schema_version", 1) == 2:
+        if cold_metrics.get("all_cold_zero_hit") is not True:
+            reasons.append("all-cold control lacks per-request zero-hit evidence")
+    else:
+        cold = cold_metrics["strata"]["all"]
+        if (
+            cold["cached_tokens"]["max"] != 0
+            or cold["cached_tokens"]["n"] < cold["counts"]["completed"]
+        ):
+            reasons.append("all-cold control showed a positive cache hit")
     if metrics["serial-full"]["max_outstanding"] != 1:
         reasons.append("serial control had overlapping requests")
     return {

@@ -18,7 +18,11 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     require,
 )
 from vllm_prefix_scheduler.m5_contract import audit_run  # noqa: E402
-from vllm_prefix_scheduler.m5_resources import audit_attempt, audit_history  # noqa: E402
+from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
+    audit_attempt,
+    audit_history,
+    submitted_attempts,
+)
 
 
 def write(path, value):
@@ -33,9 +37,7 @@ def freeze_campaign(config_path, history, commit, output):
     matrix = config_matrix(config)
     audit_history(history)
     stages = {}
-    for directory in history.iterdir():
-        if not directory.is_dir():
-            continue
+    for directory in submitted_attempts(history):
         planned = read_json(directory / "planned.json")
         if (
             planned["phase"] != "calibration"
@@ -45,6 +47,11 @@ def freeze_campaign(config_path, history, commit, output):
             continue
         resource = audit_attempt(directory)
         if resource["complete"]:
+            require(
+                planned.get("resource_schema_version", 1)
+                == config.get("resource_schema_version", 1),
+                "completed calibration resource schema differs from freeze",
+            )
             stage = planned["role"]
             require(stage not in stages, "duplicate completed calibration stage")
             stages[stage] = (directory, planned, resource["job_id"])

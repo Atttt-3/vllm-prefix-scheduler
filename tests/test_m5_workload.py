@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from vllm_prefix_scheduler.m5_contract import workload_gate
 from vllm_prefix_scheduler.m5_workload import prepare_workload
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,26 @@ def test_negative_controls_and_exact_mechanism_inputs(config):
     assert a["prompt_token_ids"][-1] != c["prompt_token_ids"][-1]
     assert len(b["prompt_token_ids"]) == 1537
     assert sum(len(row["prompt_token_ids"]) // 16 for row in fillers) == 48
+
+
+@pytest.mark.parametrize(
+    ("scenario", "arguments"),
+    [
+        ("mechanism", {"mechanism": "pressure"}),
+        ("mechanism", {"mechanism": "ample"}),
+        ("burst", {"rate": 3}),
+        ("mixed", {"rate": 8}),
+        ("all-cold", {"rate": 8}),
+        ("ample", {"rate": 8}),
+        ("serial", {"interval_ms": 900}),
+    ],
+)
+def test_v2_audits_generated_workload_geometry(config, scenario, arguments):
+    config["measurement_schema_version"] = 2
+    workload = prepare_workload(config, encode, scenario, 19, **arguments)
+    phase = "diagnostic" if scenario == "mechanism" else "formal"
+    audited = workload_gate(workload, config, None, phase)
+    assert len(audited) == len(workload["requests"])
 
 
 def test_invalid_arrival_spec(config):
