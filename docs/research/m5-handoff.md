@@ -1,6 +1,6 @@
 # M5 部分校准交接
 
-任务 ID 为 `M5-paired-performance`。原校准获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟。原六次额度用完后，D2、D2-R 与 D2-R110 各获批新增一次单卡 20 分钟。累计使用 9 次、180 申请分钟，Slurm 实际运行合计 62 分 35 秒。九次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
+任务 ID 为 `M5-paired-performance`。原校准获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟。原六次额度用完后，D2、D2-R、D2-R110 与 D3 各获批新增一次单卡 20 分钟。累计使用 10 次、200 申请分钟，Slurm 实际运行合计 72 分 37 秒。十次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
 
 | 记录 | 状态 |
 | --- | --- |
@@ -11,6 +11,7 @@
 | D2 实际执行与独立分析 | `3fcb3a53192ddf9e5d0d59003c69f027d73b28da` |
 | D2-R 实际执行与独立分析 | `e4cfe667f937d09652ea9f06ec06e7d66a69c3e9` |
 | D2-R110 实际执行与独立分析 | `9f8637dd23dbb4b26eea71bbb7b5f842aeaab7ca` |
+| D3 实际执行与独立分析 | `f4a492872f7aac917b5d01f37a3f0de97c814f47` |
 | 草稿交付 | 本页所在提交，使用草稿 PR 的完整 head SHA |
 | 命令 | D2 执行候选的完整 `make check` 为 698 通过、3 项固定 Linux 原生 opt-in 跳过 |
 | 证据 | C1–C3 的 27 个真实运行叶及 D1 的 8 个叶均已独立核对原始 collector、源码和复算结果。D2 的热试跑和三个实际启动的叶也已复核 |
@@ -24,7 +25,7 @@
 | C | 16 组、64 模式轮次、32,000 请求的候选矩阵与配对审查器 | 完整同节点原始配对 |
 | D | 真实 runner 区间、受控 prefill 及 C3 阶段计时的独立复算 | 合格轻量采集与完整正式逐轮原件 |
 | E | 校准配对结果、失败分母和保留的扰动反例 | 正式性能、公平性、波动和成本结论 |
-| F | 本地子进程控制和全部九次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
+| F | 本地子进程控制和全部十次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
 
 命令、角色预算、测量定义与重放步骤见 [M5 设计](m5-design.md)。生产调度代码由 M4 继承。原仓库用户修改的 `docs/workflows.md` 保护 SHA-256 为 `c3dca495872357a584ecc2464dc92dafa5e4467d16237f4c11dfdf9ab096bb82`。M1–M4 工作树及历史审查保留，PR #4–#8 与 M5 草稿保持未合并。
 
@@ -129,5 +130,30 @@ python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --histo
 
 ```bash
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r110-01 --proposal configs/m5-d2r110.json --output runs/M5-paired-performance/d2-r110-review/replayed.json
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
+
+## D3 同档积压复现，入队至首次接纳为主要差异区间
+
+作业 `140050` 使用本批唯一一次单 RTX 3090 分配，申请 20 分钟，实际 602 秒，Slurm 终态 `COMPLETED/0:0`。独立 watcher 提交前就绪、权威终态、全队列及退出记录均已核验。GPU 边界为 1→1 MiB，进程、采样器与 IPC 清理通过。执行与审查 SHA 为 `f4a492872f7aac917b5d01f37a3f0de97c814f47`。本地 `UV_OFFLINE=1 make check` 为 819 项通过、3 项固定 Linux opt-in 跳过。登录节点的完整导入探针超时，已安装源码的隔离 CPU 语义试验及同域时钟往返试验通过，计算节点四轮均通过实测来源绑定和前后时钟核验。
+
+四轮共 240 条请求全部完成并按时取得首 token。240 条均有完整原生首 token 和终态分段，三个配对的热状态均可比。表中差值为后者减前者。
+
+| 配对 | TTFT p95 | TTFT 差值 / 容限 | 请求及 token 吞吐变化 | 原门槛 |
+| --- | ---: | ---: | ---: | --- |
+| E1/E2 | 1,073.902 → 640.868 ms | −433.034 / 53.695 ms | +6.851% | 两项越界 |
+| E3/E4 | 653.955 → 757.014 ms | +103.059 / 32.698 ms | −4.733% | TTFT 越界 |
+| E1/E4 | 1,073.902 → 757.014 ms | −316.888 / 53.695 ms | +0.993% | TTFT 越界 |
+
+E1–E4 的客户端未终态峰值为 11、8、8、9，已原生入队且尚未首次接纳的峰值为 7、4、4、5。E1/E2 最后 15 条同 ID 请求中，E2 的 TTFT 差值中位数为 −476.559 ms，入队至首次接纳的差值中位数为 −485.618 ms。这两个分位数分别计算。E1 的 p95 请求 `000059` 按同 ID 对照 E2，TTFT 多 667.359 ms，其中入队至首次接纳多 620.489 ms。
+
+D3 的 E3/E4 方向与 D2-R110 相反，旧 E3/E4 同方向双越界形态未复现。D3 中 E4 的 p95 请求 `000057` 按同 ID 对照 E3，TTFT 多 609.826 ms，其中入队至首次接纳多 536.711 ms。两轮最后结束的请求均为 `000059`，E4 排空多 410.607 ms，其中入队至首次接纳多 175.013 ms、原生首至末输出多 173.967 ms。首次接纳和输出封包之间的区间用于定位经过时间。此次证据未采集实际 GPU runner 工作。
+
+独立脚本与冻结审查器对全部配对和逐请求分段一致。受控热状态下同档波动仍存在，原 C3 保持 `blocked`，原热状态、TTFT 和吞吐门槛保留。资格复验未启动，正式矩阵为 0/64 轮。
+
+私有原件在 `runs/M5-paired-performance/attempts/d3-01/`。`runs/M5-paired-performance/d3-review/` 保存原生源码预检、审查和释放账本。`analysis.json` SHA-256 为 `d7f18b84ac663ce7d6463cdf1ee8547bac0381b414216ba87faaa0db19b401a5`，`raw-independent-compared.json` 为 `08239f07d4c8aabd7c205d6a8982caecd163d247cc4b74e2415bb8e97bfee04a`，`resource-ledger.json` 为 `fcee4fd791c00aa6c6072eb3ef5104e6f9faaa1dcf516a77c51bea2e22b10506`。在执行 SHA 上复放时使用新的输出路径。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d3-01 --proposal configs/m5-d3.json --output runs/M5-paired-performance/d3-review/replayed.json
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
