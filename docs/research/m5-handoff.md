@@ -337,3 +337,41 @@ python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --histo
 **待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 预计作业内 1,040 秒，硬上限 1,050 秒。热试跑后四轮为端点、逐步、逐步、端点，每轮 60 条。提交须绑定冻结 SHA，独立 watcher 先于提交就绪。当前新增 GPU 分配为 0，原 C3 仍为 `blocked`，资格复验未启动，正式矩阵为 0/64。
 
 私有预检位于 `runs/M5-paired-performance/d7-review/`，包含 `preflight/`、`frozen-predecessor-replay/`、`independent-launch-controls/`、`independent-boundary-replay.json`、`observer-source-subprocess-controls.json`、`observer-host-benchmark.json` 和 `login-stage-preflight.json`。 [冻结方案和复放命令](m5-design.md#d7-晚段接纳诊断)
+
+## D7 四轮完成，满槽交接复现
+
+作业 `140066` 使用一张 RTX 3090，申请 20 分钟，实跑 660 秒，Slurm 权威终态为 `COMPLETED/0:0`。冻结执行和独立审查为 `fdfe2452ad30105201097344b0b4705830e011ee`。watcher 在提交前就绪并以 0 退出，最终全队列无 M5 作业。658 份设备样本覆盖五个归属进程组，显存边界为 1→1 MiB，进程、采样器与 IPC 清理通过。累计 15 次实际分配、300 申请分钟、7,143 秒实跑，前 14 次账本逐字节一致。D6 被拒的提交单列保留。
+
+试跑第 11 波、98.679 秒冻结 64.5°C、SM 1,875 MHz、显存 9,501 MHz。四轮按端点、逐步、逐步、端点完成，240 条请求均按时取得首 token 并完成。测量窗中位温度均为 65°C，SM 中位频率为 1,905/1,860/1,860/1,860 MHz，显存频率众数均为 9,501 MHz，六对热状态均可比。
+
+| 轮次 | 完成请求 | TTFT p95 | 末终态请求/s | 末终态 token/s | 首次 ≥50 ms 等待 | 首次持续 ≥500 ms 待接纳 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| E1 端点 | 60/60 | 637.834 ms | 7.332 | 117.313 | 65.907 ms | T0 +4.771 s |
+| E2 逐步 | 60/60 | 632.744 ms | 7.289 | 116.619 | 66.236 ms | T0 +4.569 s |
+| E3 逐步 | 60/60 | 647.140 ms | 7.256 | 116.102 | 90.228 ms | T0 +4.757 s |
+| E4 端点 | 60/60 | 656.308 ms | 7.311 | 116.979 | 66.684 ms | T0 +4.756 s |
+
+| 配对，后者减前者 | TTFT p95 差值 | TTFT 容限 | 请求及 token 吞吐变化 | 原门槛 |
+| --- | ---: | ---: | ---: | --- |
+| E1→E4，端点同档 | +18.474 ms | 31.892 ms | −0.285% | 通过 |
+| E2→E3，逐步同档 | +14.397 ms | 31.637 ms | −0.444% | 通过 |
+| E1→E2，相邻对照 | −5.090 ms | 31.892 ms | −0.591% | 通过 |
+| E4→E3，相邻对照 | −9.168 ms | 32.815 ms | −0.750% | 通过 |
+
+两组补充对照 E1→E3、E4→E2 也通过。D7 本次 ABBA 的采集等价性按冻结诊断规则为 `supported`，范围限于本次负载和窗口。
+
+**积压形成。** 四轮第一次等待 ≥50 ms 的均为 `000030`，入队在 T0 后 3.754–3.767 秒。E2/E3 均直接观察到四槽占满时该请求在队中。原生 step 9 消费批次 8，`000026` 的第 16 个 token 随之产出，运行集合少一项。step 10 的批次 10 接纳 `000030`。从释放到下一次接纳调度为 86.208/86.327 µs。E3 相对 E2 的该请求原生等待多 23.992 ms，其中入队较早 12.477 ms，首次接纳较晚 11.515 ms。两轮逐步采集各核实 25 次释放后接纳，晚段观测的待接纳峰值均为 4。该证据确定了首个显著等待的满槽交接路径。起点前独立比较缺少重复且同构的批次，哪一主机阶段最先触发积压仍为 `unresolved`。
+
+**晚段放大。** 四轮 32 个合格的 500 ms 窗中位数为 21.581–23.653 ms，原 30 ms 双窗信号未复现。E2/E3 各核对 425 个窗前原生序号和一项跨入批次，逐步窗内有 122/121 个正批，分别关联 457/455 个真实 token。D7 晚段出包放大等待的判定为 `unresolved`，冻结审查原因为 `endpoint_late_signature_not_reproduced`。原 D6 的 6–7 秒事后观察保留原归属。
+
+独立复算与冻结审查一致。原 C3 仍为 `blocked`，热门槛、TTFT、吞吐及资格前置继续适用。资格复验未启动，正式矩阵 0/64。完整本地检查为 1,000 通过、3 项固定跳过。
+
+私有原件位于 `runs/M5-paired-performance/attempts/d7-01/`，审查及资源账本位于 `runs/M5-paired-performance/d7-review/`。冻结复算 SHA-256 为 `9c0d4f4c4548522c88546751dc4cb29c6c8535fc565609342265230c20801a83`，独立复算为 `0375d80aff89f81d206cc82cfcc5c8df9ce500c304dc6c852ee603bd1b8e4ff2`，资源账本为 `d50d35d4dadc04909bb13960ca16dcd95ac531cf8d118897967996814f34dfbd`，释放抽查为 `14632141b742ff2607550de1684244061020ccaa1d9f721dc649a1bea5830078`。
+
+在冻结执行 SHA 上使用新输出路径复算。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d7-01 --proposal configs/m5-d7.json --output NEW_PRIVATE_D7_AUDIT
+python runs/M5-paired-performance/d7-review/independent-run.py runs/M5-paired-performance/attempts/d7-01
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
