@@ -23,6 +23,7 @@ from vllm_prefix_scheduler.m5_d4 import d4_plan
 from vllm_prefix_scheduler.m5_d5 import d5_plan, d5_profile
 from vllm_prefix_scheduler.m5_d5r import d5r_plan
 from vllm_prefix_scheduler.m5_d6 import D6_RUNS, D6_STEPPED, d6_plan, d6_sources
+from vllm_prefix_scheduler.m5_d7 import D7_RUNS, d7_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -329,7 +330,7 @@ async def _run(
     preheat_workload=None,
     d5_expected_profile=None,
     pilot_temperature_range=None,
-    d6_options=None,
+    trace_plan=None,
 ):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
@@ -350,10 +351,14 @@ async def _run(
         attention_config={"backend": config["attention_backend"]},
         worker_extension_cls="vllm_prefix_scheduler.m5_observer.M5WorkerExtension",
     )
-    stepped = d6_options is not None and args.pair_id in D6_STEPPED
+    stepped = trace_plan is not None and args.pair_id in D6_STEPPED
     trace_armed = False
     if stepped:
-        options["worker_extension_cls"] = "vllm_prefix_scheduler.m5_d6_observer.D6WorkerExtension"
+        trace_role = trace_plan["role"]
+        trace_key = trace_role.lower()
+        options["worker_extension_cls"] = (
+            f"vllm_prefix_scheduler.m5_{trace_key}_observer.{trace_role}WorkerExtension"
+        )
     if args.tier == "endpoint":
         if args.mode != "native":
             options["scheduler_cls"] = "vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler"
@@ -392,7 +397,8 @@ async def _run(
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(
-            getattr(args, "d6_plan", None)
+            getattr(args, "d7_plan", None)
+            or getattr(args, "d6_plan", None)
             or getattr(args, "d5r_plan", None)
             or args.d5_plan
             or args.d4_plan
@@ -569,7 +575,7 @@ async def _run(
                 d2_thermal["reason"] = f"pre-t0 telemetry invalid: {type(error).__name__}"
                 return
             sample = samples[-1] if samples else None
-            lead = 20_000_000 if d6_options is None else d6_options["trace"]["arm_lead_ns"]
+            lead = 20_000_000 if trace_plan is None else trace_plan["trace"]["arm_lead_ns"]
             measure_start_ns = time.monotonic_ns() + lead
             d2_thermal["pre_t0"] = {
                 "decision_ns": decision_ns,
@@ -592,14 +598,17 @@ async def _run(
                 return
             if stepped:
                 trace_armed = True
-                await rpc(
-                    "m5_d6_arm",
-                    start_ns=measure_start_ns,
-                    end_ns=measure_start_ns + d6_options["trace"]["window_ns"],
-                )
-                client["d6_arm_return_ns"] = time.monotonic_ns()
-                if client["d6_arm_return_ns"] >= measure_start_ns:
-                    d2_thermal["reason"] = "D6 trace arm reached the planned start"
+                trace_start = measure_start_ns + trace_plan["trace"].get("start_offset_ns", 0)
+                arm_arguments = {
+                    "start_ns": trace_start,
+                    "end_ns": trace_start + trace_plan["trace"]["window_ns"],
+                }
+                if trace_role == "D7":
+                    arm_arguments["t0_ns"] = measure_start_ns
+                await rpc(f"m5_{trace_key}_arm", **arm_arguments)
+                client[f"{trace_key}_arm_return_ns"] = time.monotonic_ns()
+                if client[f"{trace_key}_arm_return_ns"] >= measure_start_ns:
+                    d2_thermal["reason"] = f"{trace_role} trace arm reached the planned start"
                     return
             d2_thermal["status"] = "admitted"
             d2_thermal["reason"] = None
@@ -646,14 +655,14 @@ async def _run(
             trace = {"schema_version": 1, "status": "not-started"}
             if trace_armed:
                 try:
-                    trace = await rpc("m5_d6_export")
+                    trace = await rpc(f"m5_{trace_key}_export")
                 except Exception as error:
                     trace = {
                         "schema_version": 1,
                         "status": "incomplete",
                         "errors": [f"trace export failed: {type(error).__name__}"],
                     }
-            _dump(args.output / "d6-step.json", trace)
+            _dump(args.output / f"{trace_key}-step.json", trace)
         if llm is not None:
             try:
                 engine = await rpc("m5_export")
@@ -720,12 +729,19 @@ def _d4_replay_inputs(args, workload):
 
 def _d5_replay_inputs(args, workload):
     temperature_range = None
-    d6 = None
-    if args.d6_plan is not None:
-        d6, retry, plan, inherited = d6_plan(
+    trace_plan = None
+    if args.d7_plan is not None:
+        trace_plan, retry, plan, inherited = d7_plan(
+            args.d7_plan, args.d6_plan, args.d5r_plan, args.d5_plan, args.d2_plan
+        )
+        temperature_range = retry["pilot_target_median_c"]
+        leaves = D7_RUNS
+    elif args.d6_plan is not None:
+        trace_plan, retry, plan, inherited = d6_plan(
             args.d6_plan, args.d5r_plan, args.d5_plan, args.d2_plan
         )
         temperature_range = retry["pilot_target_median_c"]
+        leaves = D6_RUNS
     elif args.d5r_plan is None:
         plan, inherited = d5_plan(args.d5_plan, args.d2_plan)
     else:
@@ -733,7 +749,7 @@ def _d5_replay_inputs(args, workload):
         temperature_range = retry["pilot_target_median_c"]
     target = inherited["target"]
     require(
-        args.pair_id in (D6_RUNS if d6 is not None else target["fresh_engines"])
+        args.pair_id in (leaves if trace_plan is not None else target["fresh_engines"])
         and (args.d2_role == "pilot") == (args.pair_id == "thermal-pilot"),
         "D5 leaf identity differs from the frozen order",
     )
@@ -745,8 +761,8 @@ def _d5_replay_inputs(args, workload):
         and len(workload["requests"]) == target["count_per_engine"],
         "D5 input differs from the frozen original 8 rps table",
     )
-    profile = d5_profile(plan, "E1" if d6 is not None else args.pair_id)
-    return inherited["native_timing"], profile, temperature_range, d6
+    profile = d5_profile(plan, "E1" if trace_plan is not None else args.pair_id)
+    return inherited["native_timing"], profile, temperature_range, trace_plan
 
 
 def main():
@@ -769,6 +785,7 @@ def main():
         "d5-plan",
         "d5r-plan",
         "d6-plan",
+        "d7-plan",
     ):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
@@ -794,11 +811,13 @@ def main():
         parser.error("D5-R requires its inherited D5 plan")
     if args.d6_plan is not None and args.d5r_plan is None:
         parser.error("D6 requires its inherited D5-R plan")
+    if args.d7_plan is not None and args.d6_plan is None:
+        parser.error("D7 requires its inherited D6 plan")
     native_timing = None
     preheat_workload = None
     d5_expected_profile = None
     thermal_options = {}
-    d6_options = None
+    trace_plan = None
     if args.d2_role is None:
         if any(path is not None for path in d2_files):
             parser.error("D2 evidence paths require --d2-role")
@@ -812,13 +831,13 @@ def main():
         parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
     elif args.d5_plan is not None:
         try:
-            native_timing, d5_expected_profile, temperature_range, d6_options = _d5_replay_inputs(
+            native_timing, d5_expected_profile, temperature_range, trace_plan = _d5_replay_inputs(
                 args, workload
             )
             if temperature_range is not None:
                 thermal_options["pilot_temperature_range"] = temperature_range
-            if d6_options is not None:
-                thermal_options["d6_options"] = d6_options
+            if trace_plan is not None:
+                thermal_options["trace_plan"] = trace_plan
         except (KeyError, OSError, TypeError, ValueError) as error:
             parser.error(str(error))
     elif args.d4_plan is not None:
@@ -873,9 +892,11 @@ def main():
         client["native_metrics_schema_version"] = native_timing["schema_version"]
     try:
         source = _binding(args, config)
-        if d6_options is not None:
-            d6_sources(d6_options, source)
-            client["d6_capture"] = d6_options["capture"][D6_RUNS.index(args.pair_id)]
+        if trace_plan is not None:
+            d6_sources(trace_plan, source)
+            role = trace_plan["role"]
+            leaves = D7_RUNS if role == "D7" else D6_RUNS
+            client[f"{role.lower()}_capture"] = trace_plan["capture"][leaves.index(args.pair_id)]
         client["execution_commit"] = source["project_commit"]
         client["job_id"] = source["job_id"]
         _dump(args.output / "sources.json", source)

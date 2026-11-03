@@ -13,44 +13,47 @@ D6_REQUEST_LIMIT = 64
 ROW_KINDS = ("enqueues", "steps", "batches", "input_polls", "loops")
 
 
+def _bind_native_core(worker, diagnostic):
+    from vllm.v1.engine.core import EngineCore
+    from vllm.v1.executor.uniproc_executor import AsyncOutputFuture, UniProcExecutor
+    from vllm.v1.worker.gpu.async_utils import AsyncOutput
+    from vllm.v1.worker.gpu.model_runner import GPUModelRunner
+
+    from vllm_prefix_scheduler.scheduler import PrefixAsyncScheduler
+
+    # Resolve the exact owner from this one-time RPC stack. Startup objects
+    # may be GC-frozen. No heap search or patching other engines is needed.
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code is not EngineCore.collective_rpc.__code__:
+        frame = frame.f_back
+    core = None if frame is None else frame.f_locals["self"]
+    if (
+        core is None
+        or type(core.model_executor) is not UniProcExecutor
+        or core.model_executor.driver_worker.worker is not worker
+        or type(worker.model_runner) is not GPUModelRunner
+        or type(core.scheduler) is not PrefixAsyncScheduler
+        or core.step_fn.__func__ is not EngineCore.step_with_batch_queue
+        or core.batch_queue is None
+        or core.batch_queue.maxlen != 2
+        or core.batch_queue
+        or core.scheduler.has_requests()
+        or worker.model_runner.execute_model_state is not None
+        or not core.async_scheduling
+        or core.is_mm_encoder_only
+        or core.is_pooling_model
+        or core.check_for_draft_tokens
+    ):
+        raise RuntimeError(f"{diagnostic} requires the idle pinned UniProc async EngineCore")
+    return core, AsyncOutputFuture, AsyncOutput
+
+
 class D6WorkerExtension(M5WorkerExtension):
     def m5_d6_arm(self, start_ns, end_ns):
-        from vllm.v1.engine.core import EngineCore
-        from vllm.v1.executor.uniproc_executor import AsyncOutputFuture, UniProcExecutor
-        from vllm.v1.worker.gpu.async_utils import AsyncOutput
-        from vllm.v1.worker.gpu.model_runner import GPUModelRunner
-
-        from vllm_prefix_scheduler.scheduler import PrefixAsyncScheduler
-
         if hasattr(self, "_m5_d6"):
             raise RuntimeError("D6 worker already armed")
-        # Resolve the exact owner from this one-time RPC stack. Startup objects
-        # may be GC-frozen. No heap search or patching other engines is needed.
-        frame = sys._getframe(1)
-        while frame is not None and frame.f_code is not EngineCore.collective_rpc.__code__:
-            frame = frame.f_back
-        core = None if frame is None else frame.f_locals["self"]
-        if (
-            core is None
-            or type(core.model_executor) is not UniProcExecutor
-            or core.model_executor.driver_worker.worker is not self
-            or type(self.model_runner) is not GPUModelRunner
-            or type(core.scheduler) is not PrefixAsyncScheduler
-            or core.step_fn.__func__ is not EngineCore.step_with_batch_queue
-            or core.batch_queue is None
-            or core.batch_queue.maxlen != 2
-            or core.batch_queue
-            or core.scheduler.has_requests()
-            or self.model_runner.execute_model_state is not None
-            or not core.async_scheduling
-            or core.is_mm_encoder_only
-            or core.is_pooling_model
-            or core.check_for_draft_tokens
-        ):
-            raise RuntimeError("D6 requires the idle pinned UniProc async EngineCore")
-        self._m5_d6 = _Trace(
-            core, self.model_runner, AsyncOutputFuture, AsyncOutput, start_ns, end_ns
-        )
+        core, future_type, output_type = _bind_native_core(self, "D6")
+        self._m5_d6 = _Trace(core, self.model_runner, future_type, output_type, start_ns, end_ns)
         return {"armed_ns": self._m5_d6.armed_ns, "start_ns": start_ns, "end_ns": end_ns}
 
     def m5_d6_export(self):
@@ -58,13 +61,24 @@ class D6WorkerExtension(M5WorkerExtension):
 
 
 class _Trace:
-    def __init__(self, core, runner, future_type, output_type, start_ns, end_ns):
+    def __init__(
+        self,
+        core,
+        runner,
+        future_type,
+        output_type,
+        start_ns,
+        end_ns,
+        *,
+        window_ns=D6_WINDOW_NS,
+        arm_deadline_ns=None,
+    ):
         self.armed_ns = time.monotonic_ns()
         if (
             type(start_ns) is not int
             or type(end_ns) is not int
-            or not self.armed_ns < start_ns
-            or end_ns - start_ns != D6_WINDOW_NS
+            or not self.armed_ns < (start_ns if arm_deadline_ns is None else arm_deadline_ns)
+            or end_ns - start_ns != window_ns
         ):
             raise ValueError("D6 window differs from the frozen future interval")
         self.start_ns, self.end_ns = start_ns, end_ns
@@ -414,7 +428,7 @@ class _Trace:
         self.observe("consume", self.record_consume, record, result, value)
         return value
 
-    def record_consume(self, record, result, packets):
+    def record_consume(self, record, result, packets, *, allow_missing_runner=False):
         row = record["row"]
         if (
             self.current_step is None
@@ -422,7 +436,11 @@ class _Trace:
             or row["future_result_end_ns"] is None
             or record["result"] is not result
             or row["scheduled"]
-            and (row["materialize_end_ns"] is None or row["runner"] is None)
+            and (
+                row["materialize_end_ns"] is None
+                or not allow_missing_runner
+                and row.get("runner") is None
+            )
         ):
             raise RuntimeError("D6 native consumption does not bind its FIFO result")
         self.current_step["consumed_batch_id"] = row["batch_id"]

@@ -32,6 +32,8 @@ D5R_ROLE = "D5-R"
 D5R_PLAN_FILENAME = "m5-d5r.json"
 D6_ROLE = "D6"
 D6_PLAN_FILENAME = "m5-d6.json"
+D7_ROLE = "D7"
+D7_PLAN_FILENAME = "m5-d7.json"
 DIAGNOSTIC_ROLES = (
     D1_ROLE,
     D2_ROLE,
@@ -42,6 +44,7 @@ DIAGNOSTIC_ROLES = (
     D5_ROLE,
     D5R_ROLE,
     D6_ROLE,
+    D7_ROLE,
 )
 REVIEWED_DIAGNOSTIC_PLANS = {
     D2R_ROLE: (8, "d2r_plan_sha256", D2R_PLAN_FILENAME),
@@ -51,6 +54,7 @@ REVIEWED_DIAGNOSTIC_PLANS = {
     D5_ROLE: (12, "d5_plan_sha256", D5_PLAN_FILENAME),
     D5R_ROLE: (13, "d5r_plan_sha256", D5R_PLAN_FILENAME),
     D6_ROLE: (14, "d6_plan_sha256", D6_PLAN_FILENAME),
+    D7_ROLE: (15, "d7_plan_sha256", D7_PLAN_FILENAME),
 }
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
@@ -292,7 +296,8 @@ def qualification_batch(record, config):
     require(
         type(permitted) is list
         and all(
-            id_ok(role) and role not in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE) for role in permitted
+            id_ok(role) and role not in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE)
+            for role in permitted
         )
         and type(predecessor) is dict
         and set(predecessor)

@@ -32,6 +32,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D5_ROLE,
     D5R_ROLE,
     D6_ROLE,
+    D7_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -66,7 +67,16 @@ from vllm_prefix_scheduler.m5_d5r import (  # noqa: E402
     D5R_PROPOSAL_NAME,
     d5r_specs,
 )
-from vllm_prefix_scheduler.m5_d6 import D6_PREVIOUS_ANALYSIS, d6_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d6 import (  # noqa: E402
+    D6_PREVIOUS_ANALYSIS,
+    D6_PROPOSAL_NAME,
+    d6_specs,
+)
+from vllm_prefix_scheduler.m5_d7 import (  # noqa: E402
+    D7_LATE_TIMELINE,
+    D7_PREVIOUS_ANALYSIS,
+    d7_specs,
+)
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -303,8 +313,10 @@ def main():
         D3_ROLE: d3_specs,
     }
     d4 = args.role == D4_ROLE
-    d6 = args.role == D6_ROLE
-    d5r = d6 or args.role == D5R_ROLE
+    d7 = args.role == D7_ROLE
+    trace_diagnostic = args.role in (D6_ROLE, D7_ROLE)
+    trace_key = args.role.lower()
+    d5r = trace_diagnostic or args.role == D5R_ROLE
     d5 = d5r or args.role == D5_ROLE
     d2 = d4 or d5 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
@@ -333,7 +345,13 @@ def main():
             else:
                 dress_reports.append(report)
     if d5:
-        plan_key = "d6_plan_sha256" if d6 else "d5r_plan_sha256" if d5r else "d5_plan_sha256"
+        plan_key = (
+            f"{trace_key}_plan_sha256"
+            if trace_diagnostic
+            else "d5r_plan_sha256"
+            if d5r
+            else "d5_plan_sha256"
+        )
         require(
             auxiliary is not None and digest(auxiliary) == authorization[plan_key],
             f"{args.role} staged plan differs from authorization",
@@ -347,14 +365,10 @@ def main():
             inherited_d5 = staged / D5_PROPOSAL_NAME
             previous_d5 = staged / D5R_PREVIOUS_ANALYSIS
             retained_configs = [inherited_d5, inherited, previous_d4, previous_d5, original_c3]
-            if d6:
+            if trace_diagnostic:
                 inherited_d5r = staged / D5R_PROPOSAL_NAME
                 previous_d5r = staged / D6_PREVIOUS_ANALYSIS
-                specs = d6_specs(
-                    config,
-                    auxiliary,
-                    diagnostic_table,
-                    original_c3,
+                lineage = (
                     inherited_d5r,
                     inherited_d5,
                     inherited,
@@ -363,6 +377,23 @@ def main():
                     previous_d5r,
                 )
                 retained_configs += [inherited_d5r, previous_d5r]
+                if d7:
+                    inherited_d6 = staged / D6_PROPOSAL_NAME
+                    previous_d6 = staged / D7_PREVIOUS_ANALYSIS
+                    late_timeline = staged / D7_LATE_TIMELINE
+                    specs = d7_specs(
+                        config,
+                        auxiliary,
+                        diagnostic_table,
+                        original_c3,
+                        inherited_d6,
+                        *lineage,
+                        previous_d6,
+                        late_timeline,
+                    )
+                    retained_configs += [inherited_d6, previous_d6, late_timeline]
+                else:
+                    specs = d6_specs(config, auxiliary, diagnostic_table, original_c3, *lineage)
             else:
                 specs = d5r_specs(
                     config,
@@ -467,7 +498,7 @@ def main():
     )
     start = time.monotonic_ns()
     work_limit = config["gates"]["max_allocation_work_s"]
-    if d6:
+    if trace_diagnostic:
         work_limit = read_json(auxiliary)["budget"]["work_deadline_s"]
     deadline = start + work_limit * 10**9
 
@@ -534,7 +565,7 @@ def main():
         nonlocal active, owner_path
         leaf = args.output / spec["id"]
         leaf.mkdir()
-        stepped = d6 and spec["d6_capture"] == "step"
+        stepped = trace_diagnostic and spec[f"{trace_key}_capture"] == "step"
         if d4:
             table = leaf / "input.json"
             rate = spec["rate_rps"]
@@ -601,9 +632,11 @@ def main():
             if d5:
                 command += ["--d5-plan", str(inherited_d5 if d5r else auxiliary)]
             if d5r:
-                command += ["--d5r-plan", str(inherited_d5r if d6 else auxiliary)]
-            if d6:
-                command += ["--d6-plan", str(auxiliary)]
+                command += ["--d5r-plan", str(inherited_d5r if trace_diagnostic else auxiliary)]
+            if trace_diagnostic:
+                command += ["--d6-plan", str(inherited_d6 if d7 else auxiliary)]
+            if d7:
+                command += ["--d7-plan", str(auxiliary)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -632,7 +665,7 @@ def main():
         ]
         collect += ["--artifact", str(raw / "engine.json")]
         if stepped:
-            collect += ["--artifact", str(raw / "d6-step.json")]
+            collect += ["--artifact", str(raw / f"{trace_key}-step.json")]
         if d2:
             collect += ["--config", str(auxiliary), "--artifact", str(raw / "d2-thermal.json")]
             for retained_config in retained_configs:
@@ -703,14 +736,14 @@ def main():
             require(thermal_status in {expected, "invalid"}, "D2 thermal replay status differs")
             result["d2_thermal_status"] = thermal_status
             if stepped:
-                step_trace = raw / "d6-step.json"
+                step_trace = raw / f"{trace_key}-step.json"
                 step_status = read_json(step_trace)["status"]
                 require(
                     step_status in {"complete", "incomplete", "not-started"},
-                    "D6 step status differs",
+                    f"{args.role} step status differs",
                 )
-                result["d6_step_sha256"] = digest(step_trace)
-                result["d6_step_status"] = step_status
+                result[f"{trace_key}_step_sha256"] = digest(step_trace)
+                result[f"{trace_key}_step_status"] = step_status
             if pilot or thermal_status == "invalid":
                 shutil.copyfile(thermal, audit)
                 result["audit_sha256"] = digest(audit)
@@ -749,10 +782,11 @@ def main():
         atomic_write(
             args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
         )
-        if not d6:
+        if not trace_diagnostic:
             return True
         from m5_d3_audit import timing_leaf
         from m5_d6_audit import audit_step_trace
+        from m5_d7_audit import audit_d7_trace
 
         client = read_json(raw / "client.json")
         engine = read_json(raw / "engine.json")
@@ -767,20 +801,21 @@ def main():
                 client, engine, read_json(table), config["gates"], leaf_end_ns=leaf_end
             )["status"]
             == "complete",
-            "D6 native endpoint or cross-process clock evidence incomplete",
+            f"{args.role} native endpoint or cross-process clock evidence incomplete",
         )
         if not stepped:
             return True
-        if result["d6_step_status"] != "complete":
+        if result[f"{trace_key}_step_status"] != "complete":
             return False
+        audit_host_trace = audit_d7_trace if d7 else audit_step_trace
         require(
-            audit_step_trace(
-                read_json(raw / "d6-step.json"),
+            audit_host_trace(
+                read_json(raw / f"{trace_key}-step.json"),
                 client,
                 read_json(auxiliary)["trace"],
                 leaf_end_ns=leaf_end,
             )["verified"],
-            "D6 complete trace failed its independent node check",
+            f"{args.role} complete trace failed its independent node check",
         )
         return True
 
@@ -804,11 +839,11 @@ def main():
         if d5:
             count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
             complete = count == 4
-            if d6:
-                complete = count == 3 and all(
-                    row.get("d6_step_status") == "complete"
+            if trace_diagnostic:
+                complete = count == len(specs) - 1 and all(
+                    row.get(f"{trace_key}_step_status") == "complete"
                     for row in results
-                    if row["d6_capture"] == "step"
+                    if row[f"{trace_key}_capture"] == "step"
                 )
             atomic_write(
                 args.output / f"{args.role.lower()}-result.json",
@@ -834,7 +869,16 @@ def main():
                             "inherited_d5r_proposal_sha256": digest(inherited_d5r),
                             "retained_d5r_analysis_sha256": digest(previous_d5r),
                         }
-                        if d6
+                        if trace_diagnostic
+                        else {}
+                    ),
+                    **(
+                        {
+                            "inherited_d6_proposal_sha256": digest(inherited_d6),
+                            "retained_d6_analysis_sha256": digest(previous_d6),
+                            "late_timeline_sha256": digest(late_timeline),
+                        }
+                        if d7
                         else {}
                     ),
                 },

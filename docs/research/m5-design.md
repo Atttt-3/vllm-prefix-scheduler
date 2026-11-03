@@ -176,3 +176,21 @@ python scripts/m5_d6_signature.py --attempt runs/M5-paired-performance/attempts/
 python scripts/submit_m5.py --authorization PRIVATE_D6_AUTH --phase calibration --role D6 --attempt d6-01
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d6-01 --proposal configs/m5-d6.json --output NEW_PRIVATE_AUDIT
 ```
+
+## D7 晚段接纳诊断
+
+[D7 冻结方案](../../configs/m5-d7.json) 从 D6 交付 `f8c2049` 起步，绑定原 D6 方案、实际分析及七轮 420 条请求的封存晚段复算。D6 三轮首次显著接纳等待在 T0 后约 3.76 秒，持续待接纳从 4.77–4.84 秒开始。E3 的 6.0–7.0 秒晚段有两个连续慢窗，早于该时点的积压仍需原生批次证据。D7 固定观察 **[3.5, 7.5) 秒**。三阶段分别保留首次显著等待、持续积压、晚段出包变化的证据。
+
+热试跑后依次运行端点 E1、逐步 E2、逐步 E3、端点 E4。每轮新建引擎，沿用同一 8 请求/秒、60 条表，guarded、4 活跃槽、5 runner 槽、5,553 实际 KV 块和 2,048 token 批预算。继续使用 D5-R 的 64–66°C 试跑平台选择和原 110 秒准入。六对热可比性、E1/E4 和 E2/E3 同档，以及相邻 E1/E2 和 E4/E3 的 TTFT 与两项吞吐均独立复算。相邻两对均以端点轮为参考。原容限为 TTFT p95 的 5% 或 2 ms 中较大值、请求和 token 吞吐各 ±5%。
+
+在 T0 前空闲时 arm。窗前仅保存有界入队与真实原生输出序号前缀，详细事件从第一个合格的原生循环开始。入口记录运行、等待和 FIFO 快照。固定 EngineCore 的两深度 FIFO 在步入口最多一项，已有批次单列为跨入。使用其原生 future 及消费路径核对输出，跨入批次的派发、执行和 runner 输入均为缺证。相邻请求序号按实际原生输出递进，与客户端同 ID 的真实 token 顺序核对。窗内派发的在途批次跟踪到原生消费。原生时间与客户端时间只有通过时钟域核验才相减。排空后导出，仍使用有界记录，无设备计时归因。
+
+等待起点从真实入队至首次接纳区间复算，记录首个 ≥50 ms 的请求和首段连续 ≥500 ms 待接纳。慢窗保持相对于 T0 的 500 ms 对齐，每窗至少 10 个间隔和两个请求，连续两窗中位数 ≥30 ms。将积压形成和后续放大分别判定。同请求、批次构成、缓存及队列状态对齐后，主机阶段需要至少两个可比批次同向证据，且领先于其解释的等待变化。晚段定位要求端点也复现、逐步轮有可比快慢对照。只有观测到槽位持有延长、释放和后续接纳的原生链，才支持等待放大。证据不足记 `unresolved`。捕获缺失、热准入失败或作业内到期时保留原件和未执行轮次。
+
+预算为 **一次串行单 RTX 3090，最多 20 分钟，无重试**。按试跑 150 秒、四轮热准入 440 秒、五引擎非预热工作 325 秒、核验与清理 120 秒、额外导出余量 5 秒估算 **1,040 秒**。D6 实测单引擎非预热上限 60.990 秒，D7 按每引擎 65 秒包络。作业内硬上限 1,050 秒，仍需 D7 独立授权及提交前 watcher 就绪。原 C3 和资格前置流程继续适用。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D7_AUTH --phase calibration --role D7 --attempt d7-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d7-01 --proposal configs/m5-d7.json --output NEW_PRIVATE_D7_AUDIT
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
