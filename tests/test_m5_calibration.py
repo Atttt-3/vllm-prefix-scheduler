@@ -115,6 +115,7 @@ def evidence_index(root, plan):
                         for key in ("schedule", "window", "score", "sort_exclusive", "queue_commit")
                     },
                     "max_outstanding": 1,
+                    "submit_lag_ns": {"n": spec["count"], "p99": 1000, "max": 1000},
                 },
             },
         )
@@ -157,11 +158,15 @@ def test_native_calibration_selects_lowest_eligible_rate(tmp_path):
     data = read(missed_deadline)
     data["metrics"]["strata"]["all"]["completion_rate"] = 0.98
     write(missed_deadline, data)
+    missed_submit = tmp_path / "burst-3rps/audit.json"
+    data = read(missed_submit)
+    data["metrics"]["submit_lag_ns"]["max"] = 25_000_001
+    write(missed_submit, data)
 
     output = tmp_path / "selection.json"
     result = cli("evaluate", "C2", output, "--index", index)
     assert result.returncode == 0, result.stderr
-    assert read(output)["selected_rates"] == {"burst": 3, "mixed": 5}
+    assert read(output)["selected_rates"] == {"burst": 4, "mixed": 5}
     assert len(read(output)["pilots"]) == 10
 
 

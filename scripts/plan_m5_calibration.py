@@ -275,7 +275,17 @@ def native_rate_selection(specs, metrics, gates):
         values = metrics[spec["id"]]
         completion = timely_completion(values)
         competition = values["pressure"]["competing_windows"]
-        qualifies = completion >= gates["min_calibration_completion"] and competition > 0
+        lag = values["submit_lag_ns"]
+        submit_valid = (
+            lag["n"] == spec["count"]
+            and number(lag["p99"])
+            and lag["p99"] <= gates["submit_p99_ns"]
+            and number(lag["max"])
+            and lag["max"] <= gates["submit_max_ns"]
+        )
+        qualifies = (
+            submit_valid and completion >= gates["min_calibration_completion"] and competition > 0
+        )
         if qualifies:
             selected.setdefault(spec["scenario"], spec["rate_rps"])
         pilots.append(
@@ -284,6 +294,7 @@ def native_rate_selection(specs, metrics, gates):
                 "rate_rps": spec["rate_rps"],
                 "timely_completion_lower_bound": completion,
                 "competing_windows": competition,
+                "submit_lag_valid": submit_valid,
                 "qualified": qualifies,
             }
         )

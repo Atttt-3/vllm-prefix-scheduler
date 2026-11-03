@@ -222,7 +222,7 @@ def workload_gate(inputs, config, pair, phase):
     return expected
 
 
-def client_requests(client, inputs, expected, gates, phase):
+def client_requests(client, inputs, expected, gates, phase, *, rate_pilot=False):
     phases = require_dict(client.get("phases"), "client phases")
     times = [require_ns(phases.get(k), k) for k in PHASE_KEYS]
     require(times == sorted(times), "client phases out of order")
@@ -329,7 +329,7 @@ def client_requests(client, inputs, expected, gates, phase):
                 )
         by_id[request_id] = row
     submit_lag = distribution(lag)
-    if phase != "diagnostic":
+    if phase != "diagnostic" and not rate_pilot:
         require(
             lag
             and submit_lag["p99"] <= gates["submit_p99_ns"]
@@ -911,7 +911,21 @@ def audit_run(config_path, inputs_path, directory, *, pair_id=None, mode=None, p
     )
     require(engine.get("errors") == [], "engine observer errors or errors field missing")
     clock_gate(client, engine, gates)
-    requests, submit_lag = client_requests(client, inputs, plan, gates, phase)
+    rate_pilot = (
+        phase == "calibration"
+        and mode == "native"
+        and tier == "light"
+        and inputs["scenario"] in ("burst", "mixed")
+        and pair_id
+        in {
+            f"{inputs['scenario']}-{rate}rps"
+            for rate in config["calibration"]["candidate_rates"]
+            if inputs["rate_rps"] == rate
+        }
+    )
+    requests, submit_lag = client_requests(
+        client, inputs, plan, gates, phase, rate_pilot=rate_pilot
+    )
     warmup = {
         row["request_id"]: row for row in require_list(inputs.get("warmup"), "warmup workload")
     }
