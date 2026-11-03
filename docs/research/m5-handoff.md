@@ -1,6 +1,6 @@
 # M5 部分校准交接
 
-任务 ID 为 `M5-paired-performance`。已获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟，合计 120 申请分钟。原六次额度用完后，D2 获批新增一次单卡 20 分钟。累计使用 7 次、140 申请分钟，Slurm 实际运行合计 46 分 36 秒。七次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
+任务 ID 为 `M5-paired-performance`。原校准获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟。原六次额度用完后，D2 与 D2-R 各获批新增一次单卡 20 分钟。累计使用 8 次、160 申请分钟，Slurm 实际运行合计 51 分 25 秒。八次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
 
 | 记录 | 状态 |
 | --- | --- |
@@ -9,6 +9,7 @@
 | C1–C3 实际执行与独立分析 | `cb82627ef4b2f8d0a9f167b1ba5510781f22f29c` |
 | D1 实际执行与独立分析 | `9b8a2e1ee84337e5998dbcfd2547735eab9cde58` |
 | D2 实际执行与独立分析 | `3fcb3a53192ddf9e5d0d59003c69f027d73b28da` |
+| D2-R 实际执行与独立分析 | `e4cfe667f937d09652ea9f06ec06e7d66a69c3e9` |
 | 草稿交付 | 本页所在提交，使用草稿 PR 的完整 head SHA |
 | 命令 | D2 执行候选的完整 `make check` 为 698 通过、3 项固定 Linux 原生 opt-in 跳过 |
 | 证据 | C1–C3 的 27 个真实运行叶及 D1 的 8 个叶均已独立核对原始 collector、源码和复算结果。D2 的热试跑和三个实际启动的叶也已复核 |
@@ -22,7 +23,7 @@
 | C | 16 组、64 模式轮次、32,000 请求的候选矩阵与配对审查器 | 完整同节点原始配对 |
 | D | 真实 runner 区间、受控 prefill 及 C3 阶段计时的独立复算 | 合格轻量采集与完整正式逐轮原件 |
 | E | 校准配对结果、失败分母和保留的扰动反例 | 正式性能、公平性、波动和成本结论 |
-| F | 本地子进程控制和全部七次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
+| F | 本地子进程控制和全部八次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
 
 命令、角色预算、测量定义与重放步骤见 [M5 设计](m5-design.md)。生产调度代码由 M4 继承。原仓库用户修改的 `docs/workflows.md` 保护 SHA-256 为 `c3dca495872357a584ecc2464dc92dafa5e4467d16237f4c11dfdf9ab096bb82`。M1–M4 工作树及历史审查保留，PR #4–#8 与 M5 草稿保持未合并。
 
@@ -79,4 +80,25 @@ python scripts/check_run_evidence.py runs/M5-paired-performance/offline-repair-r
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
 
-本次新增 GPU 作业为 0，累计资源账本仍为 7 次、140 申请分钟。草稿 PR #9 保持待总站验收。D2-R 仍按前述热状态门槛另行审批，诊断完成前资格复验保持受阻。
+离线修订新增 GPU 作业为 0。其验收时累计资源账本为 7 次、140 申请分钟。
+
+## D2-R 热准入未通过
+
+D2-R 单独授权的新增分配已使用。作业 `140048` 为单 RTX 3090、申请 20 分钟，Slurm 终态 `COMPLETED/0:0`，实际运行 289 秒。提交前 watcher ready、全队列查询、独立终态及 watcher 退出均有记录。GPU 边界占用 1→1 MiB，进程、采样器和引擎 IPC 已清理。固定执行提交的本地 `UV_OFFLINE=1 make check` 为 773 项通过、3 项固定 Linux 原生 opt-in 跳过。
+
+热试跑在 80.139 秒冻结目标 64°C、SM 1875 MHz、显存 9501 MHz。E1 在 95 秒内完成 10 个完整预热波次。至最后一次排空和 APC 重置，可用的 61 个采样窗口中，最小温差为 3°C，高于 2°C 上限。另有两段温差 2°C 且满足其余热采样条件的窗口，结束于约 93.957、94.958 秒，均出现在尚未完成排空及重置的第 11 波。按冻结规则未纳入准入。实际清理结束晚于固定截止约 2.608 ms。E1 未进入计时，E2–E4 未启动。
+
+| 配对 | 实测请求数 | 测量期热可比性 | TTFT p95 与吞吐 |
+| --- | --- | --- | --- |
+| E1/E2 | 0 / 0 | 缺数据 | 无实测分母 |
+| E3/E4 | 0 / 0 | 缺数据 | 无实测分母 |
+| E1/E4 | 0 / 0 | 缺数据 | 无实测分母 |
+
+独立脚本从逐条客户端与设备记录复算，与冻结审查器的配对缺项和总体判定一致。诊断状态为 `diagnostic-incomplete`，测量期间热状态控制和 E/E 稳定性均为 `unverified`。原 C3 保持 `blocked`，原热门槛、TTFT p95 的 `max(2 ms, 参考轮 p95 × 5%)` 容限和请求及 token 吞吐的 ±5% 容限保留。资格复验未启动，正式矩阵为 0/64 轮。
+
+私有原件索引为 `runs/M5-paired-performance/attempts/d2-r-01/`。运行根目录中的 `d2-r-review/` 保存预检、释放账本及独立复算。`analysis.json` SHA-256 为 `67ef91b0052f59289ec648f84ed88ce161046e737cc54fdf2668ff51062beb72`，`raw-independent-compared.json` 为 `b44da57b53e9a860ae16e1f6ea5f314ed731670fa5941b90603f541dba584201`，`e1-thermal-windows.json` 为 `f1abcb98b588ef3e37c8286546b9e807765d8d79db0d9b00c90bc0657530d930`。在执行 SHA 上复放时使用新的输出路径。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r-01 --proposal configs/m5-d2r.json --output runs/M5-paired-performance/d2-r-review/replayed.json
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
