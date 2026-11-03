@@ -5,7 +5,18 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from .m5_campaign import JOB_PREFIX, TASK, digest, exact_int, id_ok, read_json, require
+from .m5_campaign import (
+    D2_ROLE,
+    D2R_ROLE,
+    JOB_PREFIX,
+    TASK,
+    digest,
+    exact_int,
+    id_ok,
+    is_hash,
+    read_json,
+    require,
+)
 
 TERMINAL = {
     "COMPLETED",
@@ -429,6 +440,16 @@ def audit_attempt(directory, *, require_completed=False):
         == (record["auxiliary_sha256"] if record["phase"] == "formal" else None),
         "allocation authorization or phase budget differs",
     )
+    if record["role"] == D2R_ROLE:
+        require(
+            strict
+            and record["phase"] == "calibration"
+            and authorization["roles"] == [D2R_ROLE]
+            and authorization["max_attempts"] == 8
+            and is_hash(authorization["d2r_plan_sha256"])
+            and authorization["d2r_plan_sha256"] == record["auxiliary_sha256"],
+            "D2-R resource binding differs from its one-slot reviewed authorization",
+        )
     started = monotonic(binding["started_monotonic_ns"])
     ended = monotonic(allocation["ended_monotonic_ns"])
     require(
@@ -598,8 +619,16 @@ def audit_history(root):
         "M5 allocations overlap",
     )
     used = {}
-    for row in audits:
+    for index, row in enumerate(audits):
         phase = row["phase"]
         used[phase] = used.get(phase, 0) + 1
         require(used[phase] <= row["max_attempts"], "M5 phase allocation budget exceeded")
+        if row["role"] == D2R_ROLE:
+            require(
+                index == 7
+                and used[phase] == 8
+                and audits[index - 1]["role"] == D2_ROLE
+                and audits[index - 1]["complete"],
+                "D2-R resource history differs from the approved eighth allocation",
+            )
     return audits

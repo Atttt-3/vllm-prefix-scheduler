@@ -1,5 +1,8 @@
+import asyncio
+import importlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -104,3 +107,75 @@ def test_pre_t0_uses_actual_measure_start(thermal, limits):
     assert not thermal.pre_t0_admitted(sample(10, temperature_c=52.1), 11 * SECOND, target, gate)
     assert not thermal.pre_t0_admitted(sample(10), 9 * SECOND, target, gate)
     assert not thermal.pre_t0_admitted(None, 11 * SECOND, target, gate)
+
+
+def test_d2r_producer_does_not_start_a_wave_whose_arrival_is_after_cutoff(thermal, monkeypatch):
+    replay = importlib.import_module("replay_m5")
+    cutoff = 96 * SECOND
+    calls = iter([SECOND, SECOND, cutoff - 1, cutoff - 1, cutoff + 100])
+    monkeypatch.setattr(replay, "time", SimpleNamespace(monotonic_ns=lambda: next(calls)))
+    journal = {"schema_version": 2, "waves": []}
+    asyncio.run(
+        replay._d2_condition(
+            SimpleNamespace(d2_role="measure"),
+            None,
+            None,
+            None,
+            None,
+            journal,
+            {"per_measured_engine_cap_s": 95},
+            30 * SECOND,
+        )
+    )
+    assert not journal["waves"]
+    assert journal["conditioning_cutoff_ns"] == cutoff
+    assert journal["conditioning_end_ns"] == cutoff + 100
+
+
+def test_d2r_producer_cannot_accept_a_plateau_computed_after_cutoff(thermal, monkeypatch):
+    replay = importlib.import_module("replay_m5")
+    cutoff = 96 * SECOND
+    clock = SimpleNamespace(now=SECOND)
+    monkeypatch.setattr(replay, "time", SimpleNamespace(monotonic_ns=lambda: clock.now))
+
+    async def wave(llm, plans, rows, params, cutoff_ns, deadline_ns):
+        assert cutoff_ns == cutoff
+        rows[0].update(status="completed", token_ids=[1])
+        clock.now = cutoff - 1
+
+    async def drain(label):
+        return {"at_ns": clock.now}
+
+    async def reset_prefix_cache(**kwargs):
+        return True
+
+    def plateau(*args):
+        clock.now = cutoff + 1
+        return {"gpu_uuid": "GPU-d2"}
+
+    monkeypatch.setattr(replay, "_d2_replay_wave", wave)
+    monkeypatch.setattr(thermal, "read_samples", lambda *args: [sample(95)])
+    monkeypatch.setattr(thermal, "first_plateau", plateau)
+    journal = {
+        "schema_version": 2,
+        "waves": [],
+        "target": None,
+        "target_gpu_uuid": None,
+        "plateau": None,
+    }
+    asyncio.run(
+        replay._d2_condition(
+            SimpleNamespace(d2_role="measure", d2_samples=None),
+            {"requests": [{"request_id": "r0", "offset_ns": 0}], "sampling": {"max_tokens": 1}},
+            SimpleNamespace(reset_prefix_cache=reset_prefix_cache),
+            None,
+            drain,
+            journal,
+            {"per_measured_engine_cap_s": 95},
+            30 * SECOND,
+        )
+    )
+    assert journal["plateau"] is None
+    assert journal["conditioning_cutoff_ns"] == cutoff
+    assert journal["conditioning_end_ns"] == cutoff + 1
+    assert journal["waves"][0]["plateau_decision_ns"] == cutoff + 1

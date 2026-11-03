@@ -20,9 +20,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     CALIBRATION,
     D1_ROLE,
+    D2_ROLE,
+    D2R_PLAN_FILENAME,
+    D2R_PREVIOUS_ANALYSIS,
+    D2R_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     TASK,
+    bind_d2r_inputs,
     check_authorization,
     digest,
     id_ok,
@@ -30,7 +35,12 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     require,
 )
 from vllm_prefix_scheduler.m5_d1 import d1_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_d2 import D2_D1_REANALYSIS_SHA, d2_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
+    D2_D1_REANALYSIS_SHA,
+    D2R_PROPOSAL_NAME,
+    d2_specs,
+    d2r_specs,
+)
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
     audit_attempt,
@@ -310,9 +320,10 @@ def submit(args):
         completed = snapshot_previous(HISTORY, args.role, args.phase, auth, commit)
         diagnostic = args.role in DIAGNOSTIC_ROLES
         stage_index = 0
+        retained_analysis = None
         if diagnostic:
             require(
-                len(history) == (5 if args.role == D1_ROLE else 6)
+                len(history) == {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7}[args.role]
                 and all(row["phase"] == "calibration" for row in history),
                 "diagnostic history is outside its single approved allocation",
             )
@@ -322,7 +333,7 @@ def submit(args):
             if args.role == D1_ROLE:
                 proposal = HISTORY.parent / "c3-retest-review" / "proposed-matrix.json"
                 d1_specs(read_json(CONFIG), proposal, input_table, old_result)
-            else:
+            elif args.role == D2_ROLE:
                 require(
                     history[-1]["role"] == D1_ROLE and history[-1]["complete"],
                     "D2 requires the completed D1 diagnostic",
@@ -334,6 +345,16 @@ def submit(args):
                     "D2 D1 reanalysis evidence differs",
                 )
                 d2_specs(read_json(CONFIG), proposal, input_table, old_result)
+            else:
+                require(
+                    history[-1]["role"] == D2_ROLE
+                    and history[-1] == audit_attempt(HISTORY / "d2-01", require_completed=True),
+                    "D2-R requires the retained D2 allocation and release",
+                )
+                proposal = CONFIG.with_name(D2R_PLAN_FILENAME)
+                retained_analysis = HISTORY.parent / "d2-independent-review" / "analysis.json"
+                bind_d2r_inputs(auth, proposal, retained_analysis)
+                d2r_specs(read_json(CONFIG), proposal, input_table, old_result)
         else:
             stage_index = (
                 CALIBRATION.index(args.role) if args.phase == "calibration" else len(CALIBRATION)
@@ -364,12 +385,19 @@ def submit(args):
         aux = "-"
         auxiliary_hash = None
         if diagnostic:
-            aux = remote_auth.parent / proposal.name
+            name = D2R_PROPOSAL_NAME if retained_analysis is not None else proposal.name
+            aux = remote_auth.parent / name
             upload(ssh, aux, proposal.read_bytes().decode("utf-8"))
             upload(ssh, aux.parent / "input.json", input_table.read_bytes().decode("utf-8"))
             upload(
                 ssh, aux.parent / "original-c3-result.json", old_result.read_bytes().decode("utf-8")
             )
+            if retained_analysis is not None:
+                upload(
+                    ssh,
+                    aux.parent / D2R_PREVIOUS_ANALYSIS,
+                    retained_analysis.read_bytes().decode("utf-8"),
+                )
             auxiliary_hash = digest(proposal)
         elif args.phase == "formal":
             c6, previous = completed[("calibration", "C6")]

@@ -11,6 +11,8 @@ from pathlib import Path
 
 from m3_sources import collect_sources, sha256
 
+from vllm_prefix_scheduler.m5_campaign import D2R_ROLE
+from vllm_prefix_scheduler.m5_d2 import d2r_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -186,15 +188,21 @@ async def _d2_replay_wave(llm, plans, rows, params, cutoff_ns, deadline_ns):
 async def _d2_condition(args, workload, llm, params, drain, thermal, conditioning, deadline_ns):
     from m5_d2_thermal import NS, first_plateau, read_samples, target_from_plateau
 
+    prospective = thermal["schema_version"] == 2
     started_ns = time.monotonic_ns()
     thermal["conditioning_start_ns"] = started_ns
     cap_s = conditioning["pilot_cap_s" if args.d2_role == "pilot" else "per_measured_engine_cap_s"]
     cutoff_ns = started_ns + cap_s * NS
+    if prospective:
+        thermal["conditioning_cutoff_ns"] = cutoff_ns
+    timeout_s = (cutoff_ns - time.monotonic_ns()) / NS if prospective else cap_s
     try:
-        async with asyncio.timeout(cap_s):
+        async with asyncio.timeout(max(0, timeout_s)):
             while time.monotonic_ns() < cutoff_ns:
                 wave = len(thermal["waves"]) + 1
                 start_ns = time.monotonic_ns() + 20_000_000
+                if prospective and start_ns >= cutoff_ns:
+                    break
                 plans = [
                     {**plan, "request_id": f"d2-preheat-{wave}-{plan['request_id']}"}
                     for plan in workload["requests"]
@@ -208,6 +216,8 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
                     "reset_after_ns": None,
                     "sample_observed_through_ns": None,
                 }
+                if prospective:
+                    record["plateau_decision_ns"] = None
                 thermal["waves"].append(record)
                 await _d2_replay_wave(llm, plans, rows, params, cutoff_ns, deadline_ns)
                 if not all(
@@ -238,6 +248,10 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
                     thermal["reason"] = "conditioning GPU differs from pilot"
                     return
                 plateau = first_plateau(telemetry, started_ns, conditioning, thermal["target"])
+                if prospective:
+                    record["plateau_decision_ns"] = time.monotonic_ns()
+                    if record["plateau_decision_ns"] > cutoff_ns:
+                        break
                 if plateau is not None:
                     thermal["plateau"] = plateau
                     thermal["reason"] = None
@@ -303,7 +317,9 @@ async def _run(args, config, workload, client):
     if args.d2_role is not None:
         from m5_d2_thermal import target_from_plateau
 
-        conditioning = json.loads(args.d2_plan.read_text())["conditioning"]
+        plan = json.loads(args.d2_plan.read_text())
+        prospective = plan["role"] == D2R_ROLE
+        conditioning = plan["conditioning"]
         plan_sha = sha256(args.d2_plan)
         target, pilot_gpu = None, None
         if args.d2_role == "measure":
@@ -311,6 +327,7 @@ async def _run(args, config, workload, client):
             if (
                 pilot["role"] != "pilot"
                 or pilot["status"] != "target-frozen"
+                or (prospective and pilot["schema_version"] != 2)
                 or pilot["plan_sha256"] != plan_sha
                 or pilot["target"] != target_from_plateau(pilot["plateau"])
             ):
@@ -318,7 +335,7 @@ async def _run(args, config, workload, client):
             target = pilot["target"]
             pilot_gpu = pilot["plateau"]["gpu_uuid"]
         d2_thermal = {
-            "schema_version": 1,
+            "schema_version": 2 if prospective else 1,
             "role": args.d2_role,
             "status": "invalid",
             "reason": "D2 conditioning did not finish",
@@ -332,6 +349,8 @@ async def _run(args, config, workload, client):
             "preheat_boundaries": [],
             "pre_t0": None,
         }
+        if prospective:
+            d2_thermal["conditioning_cutoff_ns"] = None
 
     async def rpc(name, **kwargs):
         return _single_worker(await llm.collective_rpc(name, timeout=15, kwargs=kwargs))
@@ -540,7 +559,10 @@ def main():
     ):
         parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
     else:
-        planned = json.loads(args.d2_plan.read_text())["target"]
+        plan = json.loads(args.d2_plan.read_text())
+        if plan["role"] == D2R_ROLE:
+            d2r_plan(plan)
+        planned = plan["target"]
         expected_id = (
             args.pair_id == "thermal-pilot"
             if args.d2_role == "pilot"

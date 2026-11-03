@@ -12,13 +12,19 @@ from statistics import median
 from check_m5_d1 import compare_pair, matched_requests
 from m5_seal import ROOT, git_identity, sealed_leaf, verify_analysis
 
-from vllm_prefix_scheduler.m5_campaign import digest, read_json, require
+from vllm_prefix_scheduler.m5_campaign import D2_ROLE, D2R_ROLE, digest, read_json, require
 from vllm_prefix_scheduler.m5_contract import audit_run
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA
+from vllm_prefix_scheduler.m5_d2 import (
+    D2_ANALYSIS_SHA,
+    D2_PROPOSAL_SHA,
+    D2R_PROPOSAL_NAME,
+    d2r_plan,
+)
 from vllm_prefix_scheduler.m5_resources import audit_history, device
 
-ROLE = "D2-E-E"
-PROPOSAL_SHA = "1d23948556bc102b1151e3bb4215ca2e161ce17fa786b5752ff8fe42f7eed96c"
+ROLE = D2_ROLE
+PROPOSAL_SHA = D2_PROPOSAL_SHA
 RUNS = ("thermal-pilot", "E1", "E2", "E3", "E4")
 PAIRS = (("E1", "E2"), ("E3", "E4"), ("E1", "E4"))
 SECOND = 1_000_000_000
@@ -200,21 +206,33 @@ def device_samples(path, gpu):
     return samples
 
 
-def bind_thermal_artifact(leaf, row):
+def bind_thermal_artifact(leaf, row, proposal_sha=PROPOSAL_SHA, *, prospective=False):
     path = leaf / "raw/d2-thermal.json"
     want = digest(path)
     require(want == row["d2_thermal_sha256"], "D2 thermal artifact differs from index")
     entries = read_json(leaf / "collector/manifest.json")["files"]
+    proposal_name = D2R_PROPOSAL_NAME if prospective else "proposed-d2.json"
     require(
         sum(
             item["path"].startswith("configs/")
-            and item["source"].endswith("/proposed-d2.json")
-            and item["sha256"] == PROPOSAL_SHA
+            and item["source"].endswith(f"/{proposal_name}")
+            and item["sha256"] == proposal_sha
             for item in entries
         )
         == 1,
         "D2 reviewed proposal is not in the collector",
     )
+    if prospective:
+        require(
+            sum(
+                item["path"].startswith("configs/")
+                and item["source"].endswith("/previous-d2-analysis.json")
+                and item["sha256"] == D2_ANALYSIS_SHA
+                for item in entries
+            )
+            == 1,
+            "D2-R retained D2 analysis is not in the collector",
+        )
     require(
         sum(
             item["path"].startswith("artifacts/")
@@ -269,6 +287,7 @@ def completed_wave(wave, number, workload, raw_boundaries, earliest):
 def prelude_summary(raw, workload, samples, limits, expected_target):
     start, end = raw["conditioning_start_ns"], raw["conditioning_end_ns"]
     role = raw["role"]
+    prospective = raw.get("schema_version", 1) == 2
     cap = limits["pilot_cap_s" if role == "pilot" else "per_measured_engine_cap_s"] * SECOND
     issues = []
     selected = None
@@ -276,7 +295,17 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
     previous_observed = 0
     complete_waves = 0
     start_ok = type(start) is int and start > 0
-    if not start_ok or type(end) is not int or not 0 < end - start <= cap:
+    cutoff = start + cap if start_ok else None
+    clock_ok = start_ok and type(end) is int and end > start
+    if prospective:
+        if (
+            type(raw.get("conditioning_cutoff_ns")) is not int
+            or raw["conditioning_cutoff_ns"] != cutoff
+        ):
+            issues.append("conditioning_fixed_cutoff_differs")
+    elif clock_ok:
+        clock_ok = end <= cutoff
+    if not clock_ok:
         issues.append("conditioning_clock_or_cap_invalid")
     if start_ok:
         previous = start
@@ -285,13 +314,26 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
                 issues.append("preheat_wave_incomplete")
                 break
             previous = wave["reset_after_ns"]
-            if previous > start + cap or type(end) is not int or previous > end:
+            if (
+                previous > cutoff
+                or type(end) is not int
+                or previous > end
+                or (prospective and wave["started_ns"] >= cutoff)
+            ):
                 issues.append("preheat_wave_after_conditioning_deadline")
                 break
             complete_waves += 1
             if selected is None:
+                decision = wave.get("plateau_decision_ns") if prospective else previous
+                if prospective and (
+                    type(decision) is not int or not previous <= decision <= min(cutoff, end)
+                ):
+                    issues.append("preheat_plateau_decision_outside_conditioning_deadline")
+                    break
                 observed = wave["sample_observed_through_ns"]
                 if observed is None:
+                    if prospective:
+                        previous = decision
                     continue
                 if (
                     type(observed) is not int
@@ -303,7 +345,9 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
                 previous_observed = observed
                 selected = thermal_window(samples, start, observed, limits, expected_target)
                 if selected is not None:
-                    selected_after = previous
+                    selected_after = decision
+                if prospective:
+                    previous = decision
             else:
                 issues.append("continued_after_first_qualifying_wave")
     if selected is None:
@@ -312,7 +356,7 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
         issues.append("reported_plateau_differs_from_recomputation")
     if selected is not None and not selected_after <= end:
         issues.append("conditioning_did_not_end_after_first_qualifying_wave")
-    return {
+    report = {
         "verified": not issues,
         "issues": issues,
         "producer_status": raw["status"],
@@ -322,6 +366,15 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
         "selected_plateau": selected,
         "conditioned_after_ns": selected_after,
     }
+    if prospective:
+        report.update(
+            conditioning_cutoff_ns=raw.get("conditioning_cutoff_ns"),
+            conditioning_seconds_within_cap=(min(end, cutoff) - start) / SECOND
+            if clock_ok
+            else None,
+            cleanup_after_cutoff_seconds=max(0, end - cutoff) / SECOND if clock_ok else None,
+        )
+    return report
 
 
 def pre_t0_ok(raw, samples, phases, target, limits):
@@ -357,8 +410,17 @@ def thermal_target(plateau):
 
 
 def review(attempt, proposal_path):
-    require(digest(proposal_path) == PROPOSAL_SHA, "D2 plan differs from the authorized proposal")
     plan = read_json(proposal_path)
+    role = plan["role"]
+    prospective = role == D2R_ROLE
+    proposal_sha = digest(proposal_path)
+    if prospective:
+        d2r_plan(plan)
+    else:
+        require(
+            role == ROLE and proposal_sha == PROPOSAL_SHA,
+            "D2 plan differs from the authorized proposal",
+        )
     limits = plan["conditioning"]
     expected = plan["target"]
     require(
@@ -373,21 +435,31 @@ def review(attempt, proposal_path):
         digest(c3) == C3_BLOCKED_SHA and read_json(c3)["status"] == "blocked",
         "D2 original C3 blocked outcome differs",
     )
-    history = audit_history(attempt.parent)[:7]
+    count = 8 if prospective else 7
+    history = audit_history(attempt.parent)[:count]
     job = read_json(attempt / "submission.json")["stdout"].strip().split(";")[0]
     auth = read_json(attempt / "authorization.json")
     require(
-        len(history) == 7
-        and sum(row["requested_minutes"] for row in history) == 140
-        and sum(row["role"] == ROLE for row in history) == 1
-        and history[-1]["role"] == ROLE
+        len(history) == count
+        and sum(row["requested_minutes"] for row in history) == 20 * count
+        and sum(row["role"] == role for row in history) == 1
+        and history[-1]["role"] == role
         and history[-1]["job_id"] == job
         and history[-1]["phase"] == "calibration"
         and history[-1]["requested_minutes"] == 20
-        and history[-1]["max_attempts"] == 7
-        and auth["roles"] == [ROLE],
+        and history[-1]["max_attempts"] == count
+        and auth["roles"] == [role],
         "D2 resource receipt or one-allocation authorization differs",
     )
+    if prospective:
+        prior = attempt.parent.parent / "d2-independent-review/analysis.json"
+        require(
+            auth["d2r_plan_sha256"] == proposal_sha
+            and history[-2]["role"] == ROLE
+            and digest(prior) == D2_ANALYSIS_SHA
+            and read_json(prior)["status"] == "diagnostic-incomplete",
+            "D2-R authorization or previous D2 evidence differs",
+        )
     resource = history[-1]
     planned = read_json(attempt / "planned.json")
     config_path = ROOT / "configs/m5-performance.json"
@@ -395,7 +467,7 @@ def review(attempt, proposal_path):
     gates = config["gates"]
     require(
         planned["config_sha256"] == digest(config_path)
-        and planned["auxiliary_sha256"] == PROPOSAL_SHA
+        and planned["auxiliary_sha256"] == proposal_sha
         and (
             gates["overhead_ttft_ns"],
             gates["overhead_ttft_rel"],
@@ -412,13 +484,23 @@ def review(attempt, proposal_path):
     index_path = node / "index.json"
     if index_path.exists():
         index = read_json(index_path)
-        require(index["stage"] == ROLE and index["schema_version"] == 1, "D2 index scope differs")
+        require(index["stage"] == role and index["schema_version"] == 1, "D2 index scope differs")
         rows = index["runs"]
     else:
         rows = []
     require(
         tuple(row["id"] for row in rows) == RUNS[: len(rows)], "D2 executed engine order differs"
     )
+    if prospective:
+        require(
+            all(
+                row.get("returncode") == 0
+                and row.get("audit_sha256")
+                and row.get("d2_thermal_status") == ("target-frozen" if i == 0 else "admitted")
+                for i, row in enumerate(rows[:-1])
+            ),
+            "D2-R continued after an invalid or failed engine",
+        )
     samples_path = node / "d2-device.jsonl"
     samples = []
     if samples_path.is_file():
@@ -470,16 +552,24 @@ def review(attempt, proposal_path):
             git_files,
             commit,
         )
-        thermal = bind_thermal_artifact(leaf, row)
+        thermal = bind_thermal_artifact(leaf, row, proposal_sha, prospective=prospective)
         require(
-            thermal["schema_version"] == 1
-            and thermal["plan_sha256"] == PROPOSAL_SHA
+            thermal["schema_version"] == (2 if prospective else 1)
+            and thermal["plan_sha256"] == proposal_sha
             and thermal["role"] == ("pilot" if pilot else "measure")
             and thermal["status"] == row["d2_thermal_status"]
             and thermal["status"]
             in ({"target-frozen", "invalid"} if pilot else {"admitted", "invalid"}),
             f"D2 thermal artifact scope differs for {identity}",
         )
+        if prospective and thermal["conditioning_start_ns"] is not None:
+            require(
+                row["started_monotonic_ns"]
+                <= thermal["conditioning_start_ns"]
+                <= thermal["conditioning_end_ns"]
+                <= row["ended_monotonic_ns"],
+                f"D2-R conditioning and cleanup lie outside the owned engine for {identity}",
+            )
         client, engine = (read_json(leaf / "raw" / f"{name}.json") for name in ("client", "engine"))
         phases = client["phases"]
         if pilot or thermal["status"] == "invalid":
@@ -590,12 +680,18 @@ def review(attempt, proposal_path):
         node_result = read_json(node / "d2-result.json")
         require(
             node_result["status"] in {"diagnostic-complete", "diagnostic-incomplete"}
-            and node_result["proposal_sha256"] == PROPOSAL_SHA
+            and node_result["proposal_sha256"] == proposal_sha
             and node_result["input_sha256"] == D1_INPUT_SHA
             and node_result["retained_c3_sha256"] == C3_BLOCKED_SHA
             and node_result["audited_runs"] == sum("metrics" in run for run in runs.values()),
             "D2 node result differs from independent evidence",
         )
+        if prospective:
+            require(
+                node_result["role"] == D2R_ROLE
+                and node_result["retained_d2_analysis_sha256"] == D2_ANALYSIS_SHA,
+                "D2-R node result does not bind the retained D2 analysis",
+            )
     elif resource["complete"]:
         raise ValueError("Completed D2 lacks the node result")
 
@@ -638,7 +734,8 @@ def review(attempt, proposal_path):
         if resource["complete"] and len(outcomes) == len(PAIRS)
         else "diagnostic-incomplete",
         "retained_original_C3": {"status": "blocked", "stage_result_sha256": C3_BLOCKED_SHA},
-        "proposal_sha256": PROPOSAL_SHA,
+        "proposal_sha256": proposal_sha,
+        **({"role": role, "retained_original_D2": plan["retained_D2"]} if prospective else {}),
         "input_sha256": D1_INPUT_SHA,
         "execution_commit": commit,
         "analysis_commit": commit,

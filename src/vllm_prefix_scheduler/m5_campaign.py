@@ -11,7 +11,10 @@ MODES = ("native", "off", "prefix", "guarded")
 CALIBRATION = tuple(f"C{i}" for i in range(1, 7))
 D1_ROLE = "C3-D1"
 D2_ROLE = "D2-E-E"
-DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE)
+D2R_ROLE = "D2-R"
+D2R_PLAN_FILENAME = "m5-d2r.json"
+D2R_PREVIOUS_ANALYSIS = "previous-d2-analysis.json"
+DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE)
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
 
@@ -156,6 +159,20 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
             roles == [D2_ROLE] and record["max_attempts"] == 7,
             "D2 is limited to one new diagnostic allocation",
         )
+    if D2R_ROLE in roles:
+        require(
+            roles == [D2R_ROLE] and record["max_attempts"] == 8,
+            "D2-R is limited to one new diagnostic allocation",
+        )
+        require(
+            is_hash(record.get("d2r_plan_sha256"))
+            and record["d2r_plan_sha256"] == digest(Path(config_path).with_name(D2R_PLAN_FILENAME)),
+            "D2-R authorization is detached from the reviewed plan",
+        )
+    else:
+        require(
+            "d2r_plan_sha256" not in record, "D2-R plan hash outside its exclusive authorization"
+        )
     if phase == "formal":
         require(freeze_path is not None, "formal authorization requires the frozen tables")
         require(record["freeze_sha256"] == digest(freeze_path), "authorization freeze hash differs")
@@ -163,6 +180,22 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
     else:
         require(freeze_path is None and record["freeze_sha256"] is None, "phase freeze mismatch")
     return roles
+
+
+def bind_d2r_inputs(record, plan, previous):
+    require(
+        record["roles"] == [D2R_ROLE] and digest(plan) == record["d2r_plan_sha256"],
+        "D2-R staged plan differs from authorization",
+    )
+    expected = read_json(plan)["retained_D2"]
+    require(digest(previous) == expected["analysis_sha256"], "D2-R retained D2 analysis differs")
+    predecessor = read_json(previous)
+    require(
+        expected["status"] == predecessor["status"] == "diagnostic-incomplete"
+        and expected["proposal_sha256"] == predecessor["proposal_sha256"],
+        "D2-R predecessor is not the retained incomplete D2",
+    )
+    return expected["analysis_sha256"]
 
 
 def formal_specs(config, freeze, role):

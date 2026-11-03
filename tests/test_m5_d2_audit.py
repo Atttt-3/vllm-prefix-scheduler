@@ -1,9 +1,12 @@
 """Exercise D2's independent thermal and performance evidence boundaries."""
 
 import importlib
+import json
 from pathlib import Path
 
 import pytest
+
+from vllm_prefix_scheduler.m5_d2 import d2r_plan
 
 ROOT = Path(__file__).resolve().parents[1]
 NS = 1_000_000_000
@@ -111,3 +114,87 @@ def test_window_comparison_checks_boundaries_and_uses_active_clocks(d2):
     assert d2.compare_thermal(first, exact, LIMITS)["comparable"]
     assert not d2.compare_thermal(first, outside, LIMITS)["comparable"]
     assert not d2.compare_thermal(first, missing_start, LIMITS)["comparable"]
+
+
+def test_d2r_plan_retains_original_thermal_and_performance_thresholds():
+    plan = json.loads((ROOT / "configs/m5-d2r.json").read_text())
+    assert d2r_plan(plan) is plan
+    plan["stability_gate"]["ttft_p95_relative_margin"] = 0.06
+    with pytest.raises(
+        ValueError, match="original input, thermal checks, stability gate or budget"
+    ):
+        d2r_plan(plan)
+
+
+def d2r_prelude(d2):
+    limits = {**LIMITS, "per_measured_engine_cap_s": 95}
+    target = {"temperature_c": 50, "sm_clock_mhz": 1000, "memory_clock_mhz": 5000}
+    samples = [sample(i, temp=54 if i < 75 else 50) for i in range(1, 97)]
+    workload = {"requests": [{"request_id": "r0", "offset_ns": 0}], "sampling": {"max_tokens": 1}}
+    raw = {
+        "schema_version": 2,
+        "role": "measure",
+        "status": "admitted",
+        "reason": None,
+        "conditioning_start_ns": NS,
+        "conditioning_cutoff_ns": 96 * NS,
+        "conditioning_end_ns": 96 * NS + 100,
+        "plateau": d2.thermal_window(samples, NS, 95 * NS, limits, target),
+        "preheat_boundaries": [
+            {
+                "label": "d2-preheat-1",
+                "at_ns": 94 * NS,
+                "runner_request_ids": [],
+                "runner_pending": False,
+            }
+        ],
+        "waves": [
+            {
+                "wave": 1,
+                "started_ns": 75 * NS,
+                "requests": [
+                    {
+                        "request_id": "d2-preheat-1-r0",
+                        "planned_ns": 75 * NS,
+                        "submit_ns": 75 * NS,
+                        "first_token_ns": 77 * NS,
+                        "end_ns": 78 * NS,
+                        "status": "completed",
+                        "token_ids": [1],
+                    }
+                ],
+                "drained_at_ns": 94 * NS,
+                "reset_after_ns": 95 * NS,
+                "sample_observed_through_ns": 95 * NS,
+                "plateau_decision_ns": 96 * NS - 1,
+            }
+        ],
+    }
+    return raw, workload, samples, limits, target
+
+
+def test_d2r_separates_pre_deadline_decision_from_actual_unwind(d2):
+    raw, workload, samples, limits, target = d2r_prelude(d2)
+    report = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert report["verified"], report["issues"]
+    assert report["conditioned_after_ns"] == 96 * NS - 1
+    assert report["conditioning_seconds_within_cap"] == 95
+    assert report["cleanup_after_cutoff_seconds"] == 100 / NS
+    assert report["selected_plateau"]["end_ns"] == 95 * NS
+
+    legacy = {**raw, "schema_version": 1}
+    report = d2.prelude_summary(legacy, workload, samples, LIMITS, target)
+    assert not report["verified"]
+    assert "conditioning_clock_or_cap_invalid" in report["issues"]
+    assert "cleanup_after_cutoff_seconds" not in report
+
+
+def test_d2r_rejects_late_decision_and_extended_reported_cutoff(d2):
+    raw, workload, samples, limits, target = d2r_prelude(d2)
+    raw["conditioning_cutoff_ns"] += 1
+    raw["waves"][0]["plateau_decision_ns"] = 96 * NS + 1
+    report = d2.prelude_summary(raw, workload, samples, limits, target)
+    assert not report["verified"]
+    assert "conditioning_fixed_cutoff_differs" in report["issues"]
+    assert "preheat_plateau_decision_outside_conditioning_deadline" in report["issues"]
+    assert report["selected_plateau"] is None
