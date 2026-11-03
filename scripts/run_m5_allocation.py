@@ -20,6 +20,7 @@ from run_m3_suite import owned_processes
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
+    D1_ROLE,
     TASK,
     check_authorization,
     digest,
@@ -28,6 +29,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     read_json,
     require,
 )
+from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -53,6 +55,25 @@ def snapshot():
         except (OSError, subprocess.TimeoutExpired) as error:
             result[key] = dict(returncode=None, stdout="", stderr=str(error))
     return result
+
+
+def d1_device_boundary():
+    query = subprocess.run(
+        [
+            "nvidia-smi",
+            "--query-gpu=uuid,clocks.sm,clocks.mem,temperature.gpu,power.draw",
+            "--format=csv,noheader,nounits",
+        ],
+        text=True,
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+    return {
+        "monotonic_ns": time.monotonic_ns(),
+        "cpu_affinity": sorted(os.sched_getaffinity(0)),
+        "gpu": {"returncode": query.returncode, "stdout": query.stdout, "stderr": query.stderr},
+    }
 
 
 def owner_group(path, job, collector_pid):
@@ -136,7 +157,9 @@ def main():
     p.add_argument("output", type=Path)
     p.add_argument("model", type=Path)
     p.add_argument("cache", type=Path)
-    p.add_argument("auxiliary", help="calibration rates or formal freeze, '-' if unused")
+    p.add_argument(
+        "auxiliary", help="calibration dependencies, D1 proposal, or formal freeze; '-' if unused"
+    )
     args = p.parse_args()
     job = os.environ.get("SLURM_JOB_ID", "")
     require(
@@ -159,9 +182,10 @@ def main():
     )
     require(args.role in roles, "M5 role outside approved budget")
     freeze = read_json(freeze_path) if freeze_path else None
+    diagnostic = args.role == D1_ROLE
     rates = None
     dress_reports = []
-    if auxiliary and freeze is None:
+    if auxiliary and freeze is None and not diagnostic:
         dependencies = read_json(auxiliary)
         require(
             dependencies["config_sha256"] == digest(args.config),
@@ -181,7 +205,11 @@ def main():
                 rates = report["selected_rates"]
             else:
                 dress_reports.append(report)
-    if freeze:
+    if diagnostic:
+        require(auxiliary is not None, "D1 requires its reviewed plan and archived input")
+        d1_table = auxiliary.parent / "input.json"
+        specs = d1_specs(config, auxiliary, d1_table, auxiliary.parent / "original-c3-result.json")
+    elif freeze:
         specs = formal_specs(config, freeze, args.role)
     else:
         from plan_m5_calibration import plan_stage
@@ -253,7 +281,12 @@ def main():
         nonlocal active, owner_path
         leaf = args.output / spec["id"]
         leaf.mkdir()
-        if freeze:
+        if diagnostic:
+            table = leaf / "input.json"
+            shutil.copyfile(d1_table, table)
+            require(digest(table) == D1_INPUT_SHA, "D1 input copy differs")
+            atomic_write(leaf / "diagnostic-device-before.json", d1_device_boundary())
+        elif freeze:
             table = freeze_path.parent / "tables" / f"{args.role}.json"
             require(digest(table) == freeze["tables"][args.role], "formal input hash differs")
         else:
@@ -329,6 +362,10 @@ def main():
             "returncode": None,
             "remaining_processes": None,
         }
+        if diagnostic:
+            result["diagnostic_device_before_sha256"] = digest(
+                leaf / "diagnostic-device-before.json"
+            )
         results.append(result)
         with (leaf / "launcher.log").open("xb") as log:
             active = subprocess.Popen(
@@ -391,6 +428,10 @@ def main():
         ]
         auxiliary_command(check, remaining())
         result["audit_sha256"] = digest(audit)
+        if diagnostic:
+            after_path = leaf / "diagnostic-device-after.json"
+            atomic_write(after_path, d1_device_boundary())
+            result["diagnostic_device_after_sha256"] = digest(after_path)
         atomic_write(
             args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
         )
@@ -405,7 +446,18 @@ def main():
         atomic_write(sources, {**source_record, "job_id": job, "task_id": TASK})
         for spec in specs:
             run_spec(spec)
-        if args.phase == "calibration":
+        if diagnostic:
+            atomic_write(
+                args.output / "d1-result.json",
+                {
+                    "status": "diagnostic-complete",
+                    "proposal_sha256": digest(auxiliary),
+                    "input_sha256": D1_INPUT_SHA,
+                    "audited_runs": len(results),
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+            )
+        elif args.phase == "calibration":
             from plan_m5_calibration import evaluate_stage, serial_interval_from_pilot
 
             if args.role == "C6":

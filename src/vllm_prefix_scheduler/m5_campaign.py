@@ -9,6 +9,7 @@ TASK = "M5-paired-performance"
 BASELINE = "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b"
 MODES = ("native", "off", "prefix", "guarded")
 CALIBRATION = tuple(f"C{i}" for i in range(1, 7))
+D1_ROLE = "C3-D1"
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
 
@@ -129,7 +130,7 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         "record the explicit user's budget approval reference",
     )
     roles = record["roles"]
-    permitted = CALIBRATION if phase == "calibration" else matrix
+    permitted = (*CALIBRATION, D1_ROLE) if phase == "calibration" else matrix
     require(
         type(roles) is list and roles and all(role in permitted for role in roles),
         "authorization roles outside this phase",
@@ -143,6 +144,11 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         and record["gpus_per_attempt"] == 1,
         "authorization attempt/minute/device limit differs",
     )
+    if D1_ROLE in roles:
+        require(
+            roles == [D1_ROLE] and record["max_attempts"] == 6,
+            "D1 is limited to the last original calibration allocation",
+        )
     if phase == "formal":
         require(freeze_path is not None, "formal authorization requires the frozen tables")
         require(record["freeze_sha256"] == digest(freeze_path), "authorization freeze hash differs")

@@ -9,6 +9,7 @@ from plan_m5_calibration import evaluate_stage
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     CALIBRATION,
+    D1_ROLE,
     TASK,
     check_freeze,
     config_matrix,
@@ -36,7 +37,11 @@ def freeze_campaign(config_path, history, commit, output):
         if not directory.is_dir():
             continue
         planned = read_json(directory / "planned.json")
-        if planned["phase"] != "calibration" or planned["execution_commit"] != commit:
+        if (
+            planned["phase"] != "calibration"
+            or planned["execution_commit"] != commit
+            or planned["role"] == D1_ROLE
+        ):
             continue
         resource = audit_attempt(directory)
         if resource["complete"]:

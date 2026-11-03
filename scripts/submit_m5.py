@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     CALIBRATION,
+    D1_ROLE,
     JOB_PREFIX,
     TASK,
     check_authorization,
@@ -26,6 +27,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     read_json,
     require,
 )
+from vllm_prefix_scheduler.m5_d1 import d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import audit_attempt, audit_history  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -127,16 +129,29 @@ def submit(args):
     HISTORY.mkdir(parents=True, exist_ok=True)
     with (HISTORY.parent / "controller.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        audit_history(HISTORY)
+        history = audit_history(HISTORY)
         completed = snapshot_previous(HISTORY, args.role, args.phase, auth, commit)
-        stage_index = (
-            CALIBRATION.index(args.role) if args.phase == "calibration" else len(CALIBRATION)
-        )
-        for stage in CALIBRATION[:stage_index]:
+        diagnostic = args.role == D1_ROLE
+        stage_index = 0
+        if diagnostic:
             require(
-                ("calibration", stage) in completed,
-                f"required qualified calibration stage {stage} missing",
+                len(history) == 5 and all(row["phase"] == "calibration" for row in history),
+                "D1 requires exactly one remaining original calibration allocation",
             )
+            old_c3 = HISTORY / "c3-01" / "node"
+            proposal = HISTORY.parent / "c3-retest-review" / "proposed-matrix.json"
+            input_table = old_c3 / "mixed-2-endpoint" / "input.json"
+            old_result = old_c3 / "calibration-result.json"
+            d1_specs(read_json(CONFIG), proposal, input_table, old_result)
+        else:
+            stage_index = (
+                CALIBRATION.index(args.role) if args.phase == "calibration" else len(CALIBRATION)
+            )
+            for stage in CALIBRATION[:stage_index]:
+                require(
+                    ("calibration", stage) in completed,
+                    f"required qualified calibration stage {stage} missing",
+                )
 
         alias, paths, partition = connection()
         ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias]
@@ -165,7 +180,15 @@ def submit(args):
         upload(ssh, remote_auth, args.authorization.read_text())
         aux = "-"
         auxiliary_hash = None
-        if args.phase == "formal":
+        if diagnostic:
+            aux = remote_auth.parent / "proposed-matrix.json"
+            upload(ssh, aux, proposal.read_bytes().decode("utf-8"))
+            upload(ssh, aux.parent / "input.json", input_table.read_bytes().decode("utf-8"))
+            upload(
+                ssh, aux.parent / "original-c3-result.json", old_result.read_bytes().decode("utf-8")
+            )
+            auxiliary_hash = digest(proposal)
+        elif args.phase == "formal":
             c6, previous = completed[("calibration", "C6")]
             freeze = read_json(args.freeze)
             for stage in CALIBRATION:
