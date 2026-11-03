@@ -426,3 +426,22 @@ python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d8-0
 python runs/M5-paired-performance/d8-review/independent-replay.py runs/M5-paired-performance/attempts/d8-01
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D9 原四槽双窗离线预检
+
+D9 从 D8 交付 `63c84db905797974c830213316c28290839f25f5` 起步。执行与独立审查冻结为 `d0a1516450968f127baa6b45dceb2b974b615f04`，集群专用检出保持在该提交。方案 SHA-256 为 `a818e854eda068247dd2f75f36831cee5f42b6a31af4f6d689c10c6db4f899a6`，沿用 D8 输入 `e52cd3e00563b3e7827b089faa3e4a8aaffafa8a873867b2dfde8c6b5ea713ab`。热试跑后按端点、双窗、双窗、端点，各轮使用新引擎、原生四槽、8 请求/秒及同一组 60 请求。详细观察固定在 T0 后 **[0, 3) 和 [6, 8.5) 秒**。配对沿用原热门槛、TTFT p95 和两项吞吐容限。采集等价性、早段起因和晚段放大分别判定。 [冻结设计与复放入口](m5-design.md#d9-原四槽双窗诊断)
+
+冻结提交的完整 `UV_OFFLINE=1 make check` 为 **1,047 项通过、3 项固定 Linux opt-in 跳过**，命令、配置完整性及本地验收均通过。真实审查子进程使用封存 D8 输入和合成原生轨迹，接受 60 请求、960 token 正控，拒绝 11 项语义负控。实际暂存子进程接受五个原始运行规格，拒绝七个上传材料篡改。D3、D6、D7、D8 报告在各自冻结执行提交逐字节复算一致，15 轮 900 条请求的交叉复算及累计 **16 次、320 申请分钟、7,789 秒**账本也逐字节一致。原 D6 提交拒绝独立归档。
+
+首版 `905538f` 的集群 CPU 长测和单组探针超时，均未形成预算测量。长测超时后的归属进程已核对并清理。最终版把有界 D9 轨迹改为排空后一次编码与写入，保留原有 JSON 字节和独立审查口径。集群 CPU 在同一存储核验七项上传材料、五个运行规格、Python 3.12.16 及 47 个已安装 vLLM 源码哈希。两种合成批宽各四组 ABBA 保持原生调用顺序与 960 个输出 token 一致。将最慢的两轮采集增量 **1.744344570 秒**与提前量和静默等待上界 **3.250000000 秒**相加，得到 **4.994344570 秒**，低于 5 秒门槛约 **5.655 毫秒**。这是集群 CPU、固定源码和存储的夹具结果。实际推理、跨进程 RPC 等待与采集等价性仍须在 D9 实测核对。
+
+| 私有证据 | SHA-256 |
+| --- | --- |
+| 完整检查 manifest | `e901ee3b21297a9ae466e8fbaf53ea3c2cd81f0d6312d814a017d71afc815b23` |
+| 真实审查子进程 | `a10d3b7ab7fd5e1de971838b595aaa8f51ffbe3b7ba25eb6d0383afaa2613b5e` |
+| 暂存子进程 | `2d14292e57658375c24d498f1ef22f334156f3fe93fc7a9eb47e6cebd0919249` |
+| 封存原件复算 | `5c0f9c4de0789897aba62b7e74b18a66f6805c3dea8f12e80d64dbda8e18ad45` |
+| 集群 CPU 预检 | `5a8c40c5605dba2d89c35c7e86a9d5115ee9218e1ebf2c847be1e25528485ec0` |
+| 集群 CPU ABBA 原始测量 | `41f97cac481b2266616c5e5905b23e6847af306ee9e13c11b993be6446b5ff66` |
+
+证据保存在 `runs/M5-paired-performance/d9-review/`，包含两次 CPU 超时记录。D9 待授权预算为 **一次串行单 RTX 3090、最多 20 分钟、无重试**，作业内估算 **1,040 秒**，硬上限 **1,050 秒**。未来提交使用干净的执行 SHA 检出、私有 CPU 预检和独立 watcher。当前新增 GPU 分配 **0**。原 C3 保持 `blocked`，资格复验未启动，正式矩阵仍为 **0/64**。
