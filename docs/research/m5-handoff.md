@@ -267,3 +267,19 @@ D5-R 执行候选 SHA 为 `42b83882a4a2045d3671c845479f08ef67ac76fd`，方案 SH
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d5-r-01 --proposal configs/m5-d5r.json --output runs/M5-paired-performance/d5-r-review/replayed.json
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D6 四槽最早出包慢段离线预检
+
+从 D5-R 交付 `5ae348c81540097dd94f34f18e1882c1c674e306` 起步。D6 冻结执行和独立审查为 `3f7b94edca6b602cd4f68444c4850899aa60d061`。方案 SHA-256 为 `0cce4570b6354e90d9d73a6cdc1771e98c51ea89f4ba16cf52bf71dd920b3275`，沿用输入 SHA-256 `e52cd3e00563b3e7827b089faa3e4a8aaffafa8a873867b2dfde8c6b5ea713ab`。D5-R 原执行 `42b83882a4a2045d3671c845479f08ef67ac76fd` 的分析和 13 次分配账本逐字节复算一致，累计 260 申请分钟、5,941 秒实跑。
+
+D5-R 四轮各 60 条。封存 E1 在 1.5–2.0、2.0–2.5 秒的客户端相邻真实 token 间隔中位数分别为 35.042 和 35.075 ms，E4 为 22.202 和 22.275 ms。筛查首次在 2.5 秒触发。请求 `000010` 在 E1/E4 的原生入队至首次接纳为 0.020/0.022 ms，原生首至末 token 为 584.691/392.398 ms。随后 `000012` 的原生接纳前等待为 92.341/0.020 ms。E1/E4 的 TTFT p95 为 1,526.688/677.311 ms，分别对应 `000054` 和 `000058`。按 E1 p95 的同请求对照，E4 TTFT 减少 880.284 ms，接纳前等待减少 946.445 ms。封存端点给出慢出包先于后续接纳等待的时间顺序，逐步边界仍待 D6 实测。
+
+D6 对原生 UniProc 新批提交、旧批 FIFO 消费、结果物化和输出包分别计时，运行窗口为 T0 后 0–3 秒，保留窗内发出的跨界批次。独立审查核验真实 token 与批次、代际和时钟域，向候选前一个 500 ms 窗回查。相同构成和缓存状态下，至少两个不同批次的同向主机阶段证据才支持定位。满槽放大用原生槽位变化、同 ID 持有时间区间和释放后接纳串联。主机边界缺少独立设备时间时只报告主机阶段。实际分支未取证的准入停止原因记 `unknown`。
+
+本地 CPU 夹具用固定源码的 EngineCore 循环、UniProc future 和模拟 runner，16 组交替重复，每组 600 批。配对中位开销为每步 +49.608 µs（每批 +49.691 µs），最大批次上限夹具导出约 4.0 MB。该结果用于预算核算。端点 E1 只能筛查实际采集扰动迹象，采集等价性仍走资格流程。
+
+完整 `UV_OFFLINE=1 make check` 为 971 项通过、3 项固定 Linux opt-in 跳过，预检清单 SHA-256 为 `dbcaf4f92da42177d215bc02d56e07095070cb53f3923d90dc4becb7bd6bda31`。专项测试 47 项通过，包含真实审查子进程的跨窗空通知、FIFO、漏批、缺包、错槽、错时钟域、提前导出及溢出。封存材料启动子进程接受原件并拒绝四种篡改。集群 CPU 已用 Python 3.12.16 核验实际上传的九项材料、四个叶规格及 47 个安装源码哈希，冻结 checkout 干净。
+
+**待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 预计作业内 860 秒，硬上限 900 秒。热试跑后按端点、逐步、逐步执行，三轮每轮 60 条。热准入、截止时间或必要采集证据失败时停止并保留已产生原件。慢段未复现时输出 `unresolved`。授权文件、集群与本地干净检出均绑定 D6 执行 SHA。独立 watcher 在提交前就绪。本轮新增 GPU 分配为 0，C3 保持 `blocked`，原门槛与同条件前置流程继续适用，正式矩阵仍为 0/64。
+
+私有记录位于 `runs/M5-paired-performance/d6-review/`。封存请求复算为 `archived-d5r-signature-with-chronology.json`（`a259adcc52e49b701618d30ef1f8d6be63e8f0d0b5cd0a3f985aa92658ee0e7d`），执行 SHA 复放和资源核验在 `archived-d5r-frozen-replay-verified/`。采集成本、上传核验和完整检查分别在 `observer-host-benchmark.json`、`login-stage-preflight.json` 和 `preflight/`。 [冻结规则与复放命令](m5-design.md#d6-最早出包慢段诊断)
