@@ -165,6 +165,97 @@ def _drained(row):
     )
 
 
+async def _d2_replay_wave(llm, plans, rows, params, cutoff_ns, deadline_ns):
+    tasks = []
+
+    def launch(plan, row):
+        deadline = min(cutoff_ns, row["planned_ns"] + deadline_ns)
+        tasks.append(asyncio.create_task(_consume(llm, plan, row, params, deadline)))
+
+    try:
+        await _open_loop(plans, rows, launch)
+        await asyncio.gather(*tasks)
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _d2_condition(args, workload, llm, params, drain, thermal, conditioning, deadline_ns):
+    from m5_d2_thermal import NS, first_plateau, read_samples, target_from_plateau
+
+    started_ns = time.monotonic_ns()
+    thermal["conditioning_start_ns"] = started_ns
+    cap_s = conditioning["pilot_cap_s" if args.d2_role == "pilot" else "per_measured_engine_cap_s"]
+    cutoff_ns = started_ns + cap_s * NS
+    try:
+        async with asyncio.timeout(cap_s):
+            while time.monotonic_ns() < cutoff_ns:
+                wave = len(thermal["waves"]) + 1
+                start_ns = time.monotonic_ns() + 20_000_000
+                plans = [
+                    {**plan, "request_id": f"d2-preheat-{wave}-{plan['request_id']}"}
+                    for plan in workload["requests"]
+                ]
+                rows = [_entry(plan, start_ns + plan["offset_ns"]) for plan in plans]
+                record = {
+                    "wave": wave,
+                    "started_ns": start_ns,
+                    "requests": rows,
+                    "drained_at_ns": None,
+                    "reset_after_ns": None,
+                    "sample_observed_through_ns": None,
+                }
+                thermal["waves"].append(record)
+                await _d2_replay_wave(llm, plans, rows, params, cutoff_ns, deadline_ns)
+                if not all(
+                    row["status"] == "completed"
+                    and len(row["token_ids"]) == workload["sampling"]["max_tokens"]
+                    for row in rows
+                ):
+                    thermal["reason"] = "preheat wave did not complete"
+                    return
+                drained = await drain(f"d2-preheat-{wave}")
+                record["drained_at_ns"] = drained["at_ns"]
+                if not await llm.reset_prefix_cache(
+                    reset_running_requests=False, reset_connector=False
+                ):
+                    thermal["reason"] = "preheat APC reset failed"
+                    return
+                record["reset_after_ns"] = time.monotonic_ns()
+                if record["reset_after_ns"] > cutoff_ns:
+                    break
+                telemetry = read_samples(args.d2_samples, record["reset_after_ns"])
+                if telemetry:
+                    record["sample_observed_through_ns"] = telemetry[-1]["monotonic_ns"]
+                if (
+                    thermal["target_gpu_uuid"] is not None
+                    and telemetry
+                    and telemetry[-1]["gpu_uuid"] != thermal["target_gpu_uuid"]
+                ):
+                    thermal["reason"] = "conditioning GPU differs from pilot"
+                    return
+                plateau = first_plateau(telemetry, started_ns, conditioning, thermal["target"])
+                if plateau is not None:
+                    thermal["plateau"] = plateau
+                    thermal["reason"] = None
+                    if args.d2_role == "pilot":
+                        thermal["target"] = target_from_plateau(plateau)
+                        thermal["target_gpu_uuid"] = plateau["gpu_uuid"]
+                        thermal["status"] = "target-frozen"
+                    return
+    except TimeoutError:
+        pass
+    except (OSError, KeyError, TypeError, ValueError) as error:
+        thermal["reason"] = f"conditioning telemetry invalid: {type(error).__name__}"
+        return
+    finally:
+        thermal["conditioning_end_ns"] = time.monotonic_ns()
+    thermal["reason"] = "conditioning deadline without an admissible plateau"
+
+
 async def _run(args, config, workload, client):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
@@ -208,6 +299,39 @@ async def _run(args, config, workload, client):
     phases = client["phases"]
     deadline_ns = client["deadline_ns"]
     client["clock"] = clock_identity()
+    d2_thermal = None
+    if args.d2_role is not None:
+        from m5_d2_thermal import target_from_plateau
+
+        conditioning = json.loads(args.d2_plan.read_text())["conditioning"]
+        plan_sha = sha256(args.d2_plan)
+        target, pilot_gpu = None, None
+        if args.d2_role == "measure":
+            pilot = json.loads(args.d2_target.read_text())
+            if (
+                pilot["role"] != "pilot"
+                or pilot["status"] != "target-frozen"
+                or pilot["plan_sha256"] != plan_sha
+                or pilot["target"] != target_from_plateau(pilot["plateau"])
+            ):
+                raise RuntimeError("D2 pilot target does not bind this plan")
+            target = pilot["target"]
+            pilot_gpu = pilot["plateau"]["gpu_uuid"]
+        d2_thermal = {
+            "schema_version": 1,
+            "role": args.d2_role,
+            "status": "invalid",
+            "reason": "D2 conditioning did not finish",
+            "plan_sha256": plan_sha,
+            "conditioning_start_ns": None,
+            "conditioning_end_ns": None,
+            "target": target,
+            "target_gpu_uuid": pilot_gpu,
+            "plateau": None,
+            "waves": [],
+            "preheat_boundaries": [],
+            "pre_t0": None,
+        }
 
     async def rpc(name, **kwargs):
         return _single_worker(await llm.collective_rpc(name, timeout=15, kwargs=kwargs))
@@ -260,6 +384,13 @@ async def _run(args, config, workload, client):
         ):
             raise RuntimeError("M5 mechanism override not reflected in actual block count")
 
+        if d2_thermal is not None:
+            await _d2_condition(
+                args, workload, llm, params, drain, d2_thermal, conditioning, deadline_ns
+            )
+            if args.d2_role == "pilot" or d2_thermal["plateau"] is None:
+                return
+
         phases["warmup_start_ns"] = time.monotonic_ns()
         primer = {**workload["requests"][0], "request_id": "runtime-primer"}
         row = _entry(primer, time.monotonic_ns())
@@ -284,7 +415,41 @@ async def _run(args, config, workload, client):
 
         if args.mechanism is not None:
             await llm.pause_generation(mode="keep", clear_cache=False)
-        phases["measure_start_ns"] = time.monotonic_ns() + 20_000_000
+        if d2_thermal is None:
+            phases["measure_start_ns"] = time.monotonic_ns() + 20_000_000
+        else:
+            from m5_d2_thermal import pre_t0_admitted, read_samples
+
+            decision_ns = time.monotonic_ns()
+            try:
+                samples = read_samples(args.d2_samples, decision_ns)
+            except (OSError, KeyError, TypeError, ValueError) as error:
+                d2_thermal["reason"] = f"pre-t0 telemetry invalid: {type(error).__name__}"
+                return
+            sample = samples[-1] if samples else None
+            measure_start_ns = time.monotonic_ns() + 20_000_000
+            d2_thermal["pre_t0"] = {
+                "decision_ns": decision_ns,
+                "measure_start_ns": measure_start_ns,
+                "sample": sample,
+            }
+            if (
+                sample is None
+                or sample["gpu_uuid"] != d2_thermal["target_gpu_uuid"]
+                or not pre_t0_admitted(
+                    sample,
+                    measure_start_ns,
+                    d2_thermal["target"],
+                    conditioning["per_measured_engine"],
+                )
+            ):
+                d2_thermal["reason"] = (
+                    "pre-t0 temperature, freshness or GPU identity outside limits"
+                )
+                return
+            d2_thermal["status"] = "admitted"
+            d2_thermal["reason"] = None
+            phases["measure_start_ns"] = measure_start_ns
         client["requests"] = [
             _entry(plan, phases["measure_start_ns"] + plan["offset_ns"])
             for plan in workload["requests"]
@@ -314,11 +479,25 @@ async def _run(args, config, workload, client):
                 await asyncio.gather(*tasks, return_exceptions=True)
             try:
                 engine = await rpc("m5_export")
+                if d2_thermal is not None:
+                    retained = []
+                    for boundary in engine["boundaries"]:
+                        if boundary["label"].startswith("d2-preheat-"):
+                            d2_thermal["preheat_boundaries"].append(boundary)
+                        else:
+                            retained.append(boundary)
+                    engine["boundaries"] = retained
                 _dump(args.output / "engine.json", engine)
                 if engine["errors"]:
                     raise RuntimeError("M5 failed to collect trustworthy native evidence")
             finally:
-                llm.shutdown()
+                try:
+                    llm.shutdown()
+                finally:
+                    if d2_thermal is not None:
+                        _dump(args.output / "d2-thermal.json", d2_thermal)
+        elif d2_thermal is not None:
+            _dump(args.output / "d2-thermal.json", d2_thermal)
 
 
 def main():
@@ -331,6 +510,9 @@ def main():
     parser.add_argument("--phase", choices=("formal", "calibration", "diagnostic"), required=True)
     parser.add_argument("--pair-id", required=True)
     parser.add_argument("--mechanism", choices=("pressure", "ample"))
+    parser.add_argument("--d2-role", choices=("pilot", "measure"))
+    for field in ("d2-plan", "d2-samples", "d2-target"):
+        parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     workload = json.loads(args.input.read_text())
@@ -343,6 +525,33 @@ def main():
         or (args.phase == "formal" and args.tier != "light")
     ):
         parser.error("M5 input, phase and mode do not match the frozen design")
+    d2_files = (args.d2_plan, args.d2_samples, args.d2_target)
+    if args.d2_role is None:
+        if any(path is not None for path in d2_files):
+            parser.error("D2 evidence paths require --d2-role")
+    elif (
+        args.d2_plan is None
+        or args.d2_samples is None
+        or (args.d2_target is not None) != (args.d2_role == "measure")
+        or (args.phase, args.mode, args.tier, args.mechanism)
+        != ("calibration", "guarded", "endpoint", None)
+    ):
+        parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
+    else:
+        planned = json.loads(args.d2_plan.read_text())["target"]
+        expected_id = (
+            args.pair_id == "thermal-pilot"
+            if args.d2_role == "pilot"
+            else args.pair_id in planned["fresh_engines"][1:]
+        )
+        if (
+            not expected_id
+            or sha256(args.input) != planned["input_sha256"]
+            or workload["seed"] != planned["seed"]
+            or len(workload["requests"]) != planned["count_per_engine"]
+            or workload["rate_rps"] != planned["arrival_rate_rps"]
+        ):
+            parser.error("D2 input or run ID differs from the reviewed plan")
     os.environ.update(config["environment"])
     os.environ["M5_WINDOW"] = str(config["window"])
     args.output.mkdir(parents=True, exist_ok=False)
@@ -359,7 +568,9 @@ def main():
         "config_sha256": sha256(args.config),
         "deadline_ns": config["gates"]["deadline_ns"],
         "phases": {},
-        "requests": [_entry(plan, None) for plan in workload["requests"]],
+        "requests": (
+            [_entry(plan, None) for plan in workload["requests"]] if args.d2_role is None else []
+        ),
         "warmup": [],
     }
     try:

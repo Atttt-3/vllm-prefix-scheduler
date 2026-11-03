@@ -10,6 +10,8 @@ BASELINE = "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b"
 MODES = ("native", "off", "prefix", "guarded")
 CALIBRATION = tuple(f"C{i}" for i in range(1, 7))
 D1_ROLE = "C3-D1"
+D2_ROLE = "D2-E-E"
+DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE)
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
 
@@ -130,7 +132,7 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         "record the explicit user's budget approval reference",
     )
     roles = record["roles"]
-    permitted = (*CALIBRATION, D1_ROLE) if phase == "calibration" else matrix
+    permitted = (*CALIBRATION, *DIAGNOSTIC_ROLES) if phase == "calibration" else matrix
     require(
         type(roles) is list and roles and all(role in permitted for role in roles),
         "authorization roles outside this phase",
@@ -148,6 +150,11 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         require(
             roles == [D1_ROLE] and record["max_attempts"] == 6,
             "D1 is limited to the last original calibration allocation",
+        )
+    if D2_ROLE in roles:
+        require(
+            roles == [D2_ROLE] and record["max_attempts"] == 7,
+            "D2 is limited to one new diagnostic allocation",
         )
     if phase == "formal":
         require(freeze_path is not None, "formal authorization requires the frozen tables")

@@ -12,7 +12,7 @@ from m5_seal import git_identity, sealed_leaf, verify_analysis
 from vllm_prefix_scheduler.m5_campaign import (
     BASELINE,
     CALIBRATION,
-    D1_ROLE,
+    DIAGNOSTIC_ROLES,
     MODES,
     TASK,
     check_authorization,
@@ -110,7 +110,7 @@ def collect(config_path, freeze_path, history, analysis_commit, output):
             "completed role is outside its authorized scope",
         )
         if phase == "calibration":
-            if role == D1_ROLE:
+            if role in DIAGNOSTIC_ROLES:
                 continue
             require(role not in stages, "duplicate qualified calibration stage")
             report = path / "node/calibration-result.json"

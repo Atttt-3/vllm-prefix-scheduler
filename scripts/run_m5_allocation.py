@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from m3_sources import collect_sources
@@ -20,7 +21,8 @@ from run_m3_suite import owned_processes
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
-    D1_ROLE,
+    D2_ROLE,
+    DIAGNOSTIC_ROLES,
     TASK,
     check_authorization,
     digest,
@@ -30,30 +32,72 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     require,
 )
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d2 import d2_specs  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def snapshot():
+def query_gpu(option):
+    try:
+        proc = subprocess.run(
+            ["nvidia-smi", option, "--format=csv,noheader,nounits"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {"returncode": None, "stdout": "", "stderr": str(error)}
+    return {"returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
+
+
+def snapshot(d2=False):
     result = {"monotonic_ns": time.monotonic_ns()}
-    queries = {
-        "devices": [
-            "--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu",
-            "--format=csv,noheader,nounits",
-        ],
-        "applications": [
-            "--query-compute-apps=gpu_uuid,pid,used_memory",
-            "--format=csv,noheader,nounits",
-        ],
-    }
-    for key, options in queries.items():
+    base = "--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu"
+    thermal_query = None
+    if d2:
+        thermal_query = query_gpu(base + ",temperature.gpu,clocks.sm,clocks.mem,pstate,power.draw")
+        stamp = time.monotonic_ns()
+        fields = thermal_query["stdout"].strip().split(",")
+        if thermal_query["returncode"] == 0 and len(fields) == 10:
+            result["devices"] = {**thermal_query, "stdout": ",".join(fields[:5]) + "\n"}
+        result["thermal_query"] = thermal_query
+    if "devices" not in result:
+        result["devices"] = query_gpu(base)
+    apps = query_gpu("--query-compute-apps=gpu_uuid,pid,used_memory")
+    result["applications"] = apps
+    if d2 and thermal_query["returncode"] == 0 and len(fields) == 10 and apps["returncode"] == 0:
         try:
-            proc = subprocess.run(
-                ["nvidia-smi", *options], text=True, capture_output=True, timeout=5
+            gpu, _, _, memory, utilization, temperature, sm, mem, pstate, power = (
+                value.strip() for value in fields
             )
-            result[key] = dict(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
-        except (OSError, subprocess.TimeoutExpired) as error:
-            result[key] = dict(returncode=None, stdout="", stderr=str(error))
+            processes = []
+            for line in apps["stdout"].splitlines():
+                uuid, pid, _ = (part.strip() for part in line.split(","))
+                if uuid != gpu:
+                    raise ValueError("foreign GPU application record")
+                try:
+                    pgid = os.getpgid(int(pid))
+                except OSError:
+                    pgid = None
+                processes.append({"pid": int(pid), "pgid": pgid})
+            thermal = {
+                "monotonic_ns": stamp,
+                "gpu_uuid": gpu,
+                "temperature_c": float(temperature),
+                "sm_clock_mhz": float(sm),
+                "memory_clock_mhz": float(mem),
+                "gpu_utilization_percent": float(utilization),
+                "power_w": None if power in {"N/A", "[N/A]", "[Not Supported]"} else float(power),
+                "p_state": pstate,
+                "memory_used_mib": float(memory),
+                "cpu_affinity": sorted(os.sched_getaffinity(0)),
+                "gpu_apps": processes,
+            }
+            if any(type(value) is float and not math.isfinite(value) for value in thermal.values()):
+                raise ValueError("nonfinite GPU telemetry")
+            result["thermal"] = thermal
+        except ValueError as error:
+            result["thermal_parse_error"] = str(error)
     return result
 
 
@@ -182,7 +226,8 @@ def main():
     )
     require(args.role in roles, "M5 role outside approved budget")
     freeze = read_json(freeze_path) if freeze_path else None
-    diagnostic = args.role == D1_ROLE
+    diagnostic = args.role in DIAGNOSTIC_ROLES
+    d2 = args.role == D2_ROLE
     rates = None
     dress_reports = []
     if auxiliary and freeze is None and not diagnostic:
@@ -206,9 +251,12 @@ def main():
             else:
                 dress_reports.append(report)
     if diagnostic:
-        require(auxiliary is not None, "D1 requires its reviewed plan and archived input")
-        d1_table = auxiliary.parent / "input.json"
-        specs = d1_specs(config, auxiliary, d1_table, auxiliary.parent / "original-c3-result.json")
+        require(auxiliary is not None, "diagnostic requires its reviewed plan and archived input")
+        diagnostic_table = auxiliary.parent / "input.json"
+        plan_specs = d2_specs if d2 else d1_specs
+        specs = plan_specs(
+            config, auxiliary, diagnostic_table, auxiliary.parent / "original-c3-result.json"
+        )
     elif freeze:
         specs = formal_specs(config, freeze, args.role)
     else:
@@ -267,12 +315,25 @@ def main():
     stop_sampling = threading.Event()
     before = snapshot()
 
+    d2_samples = args.output / "d2-device.jsonl"
+
     def sample():
-        with (args.output / "gpu-during.jsonl").open("x") as stream:
+        with ExitStack() as stack:
+            stream = stack.enter_context((args.output / "gpu-during.jsonl").open("x"))
+            thermal_stream = stack.enter_context(d2_samples.open("x")) if d2 else None
+            next_sample = time.monotonic()
             while not stop_sampling.is_set():
-                stream.write(json.dumps(snapshot()) + "\n")
+                observed = snapshot(d2=d2)
+                stream.write(json.dumps(observed) + "\n")
                 stream.flush()
-                stop_sampling.wait(2)
+                if thermal_stream is not None and "thermal" in observed:
+                    thermal_stream.write(json.dumps(observed["thermal"], allow_nan=False) + "\n")
+                    thermal_stream.flush()
+                if d2:
+                    next_sample = max(next_sample + 1, time.monotonic())
+                    stop_sampling.wait(max(0, next_sample - time.monotonic()))
+                else:
+                    stop_sampling.wait(2)
 
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
@@ -283,9 +344,10 @@ def main():
         leaf.mkdir()
         if diagnostic:
             table = leaf / "input.json"
-            shutil.copyfile(d1_table, table)
-            require(digest(table) == D1_INPUT_SHA, "D1 input copy differs")
-            atomic_write(leaf / "diagnostic-device-before.json", d1_device_boundary())
+            shutil.copyfile(diagnostic_table, table)
+            require(digest(table) == D1_INPUT_SHA, "diagnostic input copy differs")
+            if not d2:
+                atomic_write(leaf / "diagnostic-device-before.json", d1_device_boundary())
         elif freeze:
             table = freeze_path.parent / "tables" / f"{args.role}.json"
             require(digest(table) == freeze["tables"][args.role], "formal input hash differs")
@@ -323,6 +385,19 @@ def main():
         ]
         if spec["mechanism"]:
             command += ["--mechanism", spec["mechanism"]]
+        if d2:
+            pilot = spec["id"] == "thermal-pilot"
+            command += [
+                "--d2-role",
+                "pilot" if pilot else "measure",
+                "--d2-plan",
+                str(auxiliary),
+                "--d2-samples",
+                str(d2_samples),
+            ]
+            if not pilot:
+                target = args.output / "thermal-pilot/raw/d2-thermal.json"
+                command += ["--d2-target", str(target)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -350,6 +425,10 @@ def main():
             str(raw / "sources.json"),
         ]
         collect += ["--artifact", str(raw / "engine.json")]
+        if d2:
+            collect += ["--config", str(auxiliary), "--artifact", str(raw / "d2-thermal.json")]
+            if not pilot:
+                collect += ["--config", str(target)]
         collect += ["--", python, "scripts/m5_owned.py", str(owner_path), str(ack), *command]
         result = {
             **spec,
@@ -362,7 +441,7 @@ def main():
             "returncode": None,
             "remaining_processes": None,
         }
-        if diagnostic:
+        if diagnostic and not d2:
             result["diagnostic_device_before_sha256"] = digest(
                 leaf / "diagnostic-device-before.json"
             )
@@ -405,6 +484,21 @@ def main():
             active = None
             owner_path = None
             require(result["returncode"] == 0, "M5 replay or collector failed")
+        if d2:
+            thermal = raw / "d2-thermal.json"
+            result["d2_thermal_sha256"] = digest(thermal)
+            thermal_status = read_json(thermal)["status"]
+            expected = "target-frozen" if pilot else "admitted"
+            require(thermal_status in {expected, "invalid"}, "D2 thermal replay status differs")
+            result["d2_thermal_status"] = thermal_status
+            if pilot or thermal_status == "invalid":
+                shutil.copyfile(thermal, audit)
+                result["audit_sha256"] = digest(audit)
+                atomic_write(
+                    args.output / "index.json",
+                    {"schema_version": 1, "stage": args.role, "runs": results},
+                )
+                return thermal_status == expected
         check = [
             python,
             "scripts/check_m5_trace.py",
@@ -428,13 +522,14 @@ def main():
         ]
         auxiliary_command(check, remaining())
         result["audit_sha256"] = digest(audit)
-        if diagnostic:
+        if diagnostic and not d2:
             after_path = leaf / "diagnostic-device-after.json"
             atomic_write(after_path, d1_device_boundary())
             result["diagnostic_device_after_sha256"] = digest(after_path)
         atomic_write(
             args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
         )
+        return True
 
     try:
         # Pinned vLLM appends /<UUID> to VLLM_RPC_BASE_PATH for UNIX sockets.
@@ -445,8 +540,21 @@ def main():
         source_record = collect_sources(ROOT, args.model, config)
         atomic_write(sources, {**source_record, "job_id": job, "task_id": TASK})
         for spec in specs:
-            run_spec(spec)
-        if diagnostic:
+            if not run_spec(spec):
+                break
+        if d2:
+            count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
+            atomic_write(
+                args.output / "d2-result.json",
+                {
+                    "status": "diagnostic-complete" if count == 4 else "diagnostic-incomplete",
+                    "proposal_sha256": digest(auxiliary),
+                    "input_sha256": D1_INPUT_SHA,
+                    "audited_runs": count,
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+            )
+        elif diagnostic:
             atomic_write(
                 args.output / "d1-result.json",
                 {
@@ -553,6 +661,11 @@ def main():
                 "gpu_before": before,
                 "gpu_after": after,
                 "sampler_exited": not sampler.is_alive(),
+                **(
+                    {"d2_device_sha256": digest(d2_samples) if d2_samples.exists() else None}
+                    if d2
+                    else {}
+                ),
                 "rpc_directory_removed": rpc_directory is None or not rpc_directory.exists(),
                 "index_sha256": digest(args.output / "index.json")
                 if (args.output / "index.json").exists()
