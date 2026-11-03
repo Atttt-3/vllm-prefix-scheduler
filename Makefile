@@ -74,3 +74,20 @@ m3-trace-check:
 
 m3-fail-closed:
 	"$(NATIVE_PYTHON)" scripts/check_m3_fail_closed.py $(value ARGS)
+
+# M4 uses dedicated matrices/observers and the existing pinned Linux environment.
+.PHONY: m4-native m4-cpu m4-gpu m4-trace-check m4-fail-closed
+m4-native:
+	"$(NATIVE_PYTHON)" scripts/replay_m4.py $(value ARGS)
+
+m4-cpu:
+	"$(NATIVE_PYTHON)" scripts/measure_m4_cpu.py $(value ARGS)
+
+m4-gpu:
+	"$(NATIVE_PYTHON)" scripts/run_m4_suite.py $(value ARGS)
+
+m4-trace-check:
+	"$(NATIVE_PYTHON)" scripts/check_m4_trace.py $(value ARGS)
+
+m4-fail-closed:
+	"$(NATIVE_PYTHON)" scripts/check_m4_fail_closed.py $(value ARGS)
