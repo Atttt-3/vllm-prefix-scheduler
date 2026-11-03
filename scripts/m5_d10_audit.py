@@ -25,6 +25,7 @@ def core_partition(roles):
             and mask == sorted(set(mask))
             for mask in (allocated, client, engine)
         )
+        and len(allocated) == 8
         and set(client).isdisjoint(engine)
         and set(client) | set(engine) == set(allocated),
         "D10 role masks do not partition the allocated CPUs",
@@ -128,7 +129,9 @@ def observed_placement(
     proof = client["d10_placement"]
     mode = order[identity]
     require(
-        proof["schema_version"] == 1 and proof["mode"] == mode,
+        type(proof["schema_version"]) is int
+        and proof["schema_version"] == 1
+        and proof["mode"] == mode,
         "D10 placement role differs from the frozen ABBA order",
     )
     roles = core_partition(proof["roles"])
@@ -386,6 +389,10 @@ def d10_report(
     )
     return {
         **lineage,
+        "retained_original_C3": {
+            "status": "blocked",
+            "stage_result_sha256": lineage["retained_c3_sha256"],
+        },
         "status": "diagnostic-complete"
         if thermal_verified and all(leaf_ok.values())
         else "diagnostic-incomplete",
