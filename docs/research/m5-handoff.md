@@ -201,3 +201,11 @@ D4 执行与冻结审查 SHA 为 `ddc1c5e4e70305fe6315151102d88b90959f6722`。�
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d4-01 --proposal configs/m5-d4.json --output runs/M5-paired-performance/d4-review/replayed.json
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D5 准入上限对照预检
+
+D5 执行候选 SHA 为 `581c50b7d43480f825b7948f04064fa59e3dbce2`，方案 SHA-256 为 `dc4817bb421c774e2730aba541bf4752d946cb4a3d05a0edce093fdb1df85d1f`。D4 的压力信号支持在固定 8 请求/秒下隔离准入上限。D5 热试跑用 4 个活跃槽，测量按 4/5/5/4，每轮 60 条。所有引擎固定 5 个 runner 槽位、2,048 token 批预算与显式覆盖的 5,553 个 KV 块。执行入口会在预热前核验四项实际配置。D3 热准入和原 TTFT、吞吐门槛保留。
+
+完整 `UV_OFFLINE=1 make check` 为 896 项通过、3 项固定 Linux opt-in 跳过。预检清单 SHA-256 为 `726f8fc612916c903f9a9185f22551ce5961167c987b74679c48e7b553d64640`。真实子进程接受封存输入和 4/5/5/4 顺序，拒绝篡改的方案、继承热计划、到达输入和前序报告。离线模拟引擎控制验证槽位、活跃上限、token 预算及实际 KV 块不匹配时在预热前停止。集群已安装源码哈希与 D4 一致，CPU 子进程用冻结 SHA 和实际上传材料核对热试跑及四轮配置。D4 在其执行 SHA 上逐字节复算，11 次历史资源释放账本与原件一致。
+
+D5 预算为一次串行单 RTX 3090，最多 20 分钟，预计 1,040 秒，作业内硬上限 1,050 秒。显式 KV 覆盖替代自动容量估计，真实五槽位容量须在热试跑中验证。本轮新增 GPU 分配为 0，D5 尚无实测数据，资格复验未启动，正式矩阵为 0/64，原 C3 继续 `blocked`。私有材料位于 `runs/M5-paired-performance/d5-review/`。 [冻结规则与命令](m5-design.md#d5-隔离活跃准入上限)
