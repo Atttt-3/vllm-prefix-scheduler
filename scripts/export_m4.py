@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from collections import defaultdict
@@ -18,6 +19,21 @@ from vllm_prefix_scheduler.m4_contract import (  # noqa: E402
     require,
     sha256,
     strict_int,
+)
+
+EXECUTION_FREEZE = "5525bda3eff2dad20f614eaca7718383c31448e4"
+AUDIT_ONLY_PATHS = frozenset(
+    {
+        "src/vllm_prefix_scheduler/m4_contract.py",
+        "scripts/export_m4.py",
+        "tests/test_m4_contract.py",
+        "tests/test_m4_export.py",
+    }
+)
+SOURCE_AREAS = ("src", "scripts", "tests", "configs", "Makefile")
+AUDIT_ONLY_SCOPE = (
+    "Explicitly authorized audit-only revision over retained execution evidence; "
+    "analysis code was not GPU-tested; no additional GPU allocation"
 )
 
 CPU_META = ("mode", "workload", "window", "outside_length")
@@ -208,45 +224,98 @@ def bind_regression_job(runtime, commit):
     return job
 
 
-def bind_execution(commit, root=ROOT):
-    names = subprocess.check_output(
-        [
-            "git",
-            "-C",
-            str(root),
-            "ls-tree",
-            "-r",
-            "--name-only",
-            commit,
-            "--",
-            "src",
-            "scripts",
-            "tests",
-            "configs",
-            "Makefile",
-        ],
+def source_tree(root, commit):
+    return subprocess.check_output(
+        ["git", "-C", str(root), "ls-tree", "-r", "--name-only", commit, "--", *SOURCE_AREAS],
         text=True,
     ).splitlines()
+
+
+def source_blob_hash(root, commit, name):
+    return hashlib.sha256(
+        subprocess.check_output(["git", "-C", str(root), "cat-file", "blob", f"{commit}:{name}"])
+    ).hexdigest()
+
+
+def bind_execution(commit, root=ROOT, *, analysis_commit=None):
+    require(
+        type(commit) is str and re.fullmatch(r"[0-9a-f]{40}", commit),
+        "tested execution commit must be a full SHA",
+    )
+    names = source_tree(root, commit)
     require(names, "empty tested source catalog")
     current = subprocess.check_output(
-        ["git", "-C", str(root), "ls-files", "src", "scripts", "tests", "configs", "Makefile"],
+        ["git", "-C", str(root), "ls-files", *SOURCE_AREAS],
         text=True,
     ).splitlines()
     require(set(names) == set(current), "execution source catalog differs from tested freeze")
+    if analysis_commit is not None:
+        require(
+            commit == EXECUTION_FREEZE,
+            "audit-only revision requires the authorized execution freeze",
+        )
+        require(
+            type(analysis_commit) is str and re.fullmatch(r"[0-9a-f]{40}", analysis_commit),
+            "analysis commit must be an explicit full SHA",
+        )
+        object_type = subprocess.run(
+            ["git", "-C", str(root), "cat-file", "-t", analysis_commit],
+            text=True,
+            capture_output=True,
+        )
+        require(
+            object_type.returncode == 0 and object_type.stdout.strip() == "commit",
+            "analysis SHA must identify a Git commit object",
+        )
+        require(
+            analysis_commit != commit, "audit-only revision must have a distinct analysis commit"
+        )
+        require(
+            set(source_tree(root, analysis_commit)) == set(names),
+            "analysis source catalog differs from tested execution",
+        )
     bound = {}
     for name in names:
-        expected = hashlib.sha256(
-            subprocess.check_output(
-                ["git", "-C", str(root), "cat-file", "blob", f"{commit}:{name}"]
-            )
-        ).hexdigest()
+        executed = source_blob_hash(root, commit, name)
+        analyzed = (
+            executed if analysis_commit is None else source_blob_hash(root, analysis_commit, name)
+        )
+        require(
+            executed == analyzed or name in AUDIT_ONLY_PATHS,
+            "audit-only revision changed a producer/configuration outside its allowlist: " + name,
+        )
         path = root / name
         require(
-            sha256(path) == expected,
-            "currently executing source differs from tested freeze: " + name,
+            sha256(path) == analyzed,
+            (
+                "currently executing source differs from tested freeze: "
+                if analysis_commit is None
+                else "currently executing source differs from explicit analysis commit: "
+            )
+            + name,
         )
-        bound[str(path)] = expected
+        bound[str(path)] = analyzed
     return bound
+
+
+def audit_revision_provenance(commit, analysis_commit, bound):
+    if analysis_commit is None:
+        return {"analysis_commit": commit, "acceptance_scope": "same execution and analysis freeze"}
+    changed = {}
+    for name in sorted(AUDIT_ONLY_PATHS):
+        old = source_blob_hash(ROOT, commit, name)
+        new = bound[str(ROOT / name)]
+        if old != new:
+            changed[name] = {"execution_sha256": old, "analysis_sha256": new}
+    return {
+        "analysis_commit": analysis_commit,
+        "acceptance_scope": AUDIT_ONLY_SCOPE,
+        "original_frozen_F_status": "FAILED",
+        "original_failed_export_preservation": (
+            "Independent handoff review; not certified by this exporter"
+        ),
+        "analysis_changed_sources": changed,
+    }
 
 
 def bind_collector(directory, commit, job, actual_files):
@@ -379,6 +448,9 @@ def main():
     p.add_argument("--resources", type=Path, required=True)
     p.add_argument("--controls-root", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
+    p.add_argument(
+        "--analysis-commit", help="Explicit authorized audit-only commit; execution stays pinned"
+    )
     args = p.parse_args()
     args.config = args.config.resolve()
     args.data = args.data.resolve()
@@ -405,7 +477,9 @@ def main():
     inputs = args.data / "gpu-inputs.json"
     initial_source = json.loads((args.data / "gpu-data/sources.json").read_text())
     commit = initial_source["project_commit"]
-    bound = bind_execution(commit)
+    source_bound = bind_execution(commit, analysis_commit=args.analysis_commit)
+    revision = audit_revision_provenance(commit, args.analysis_commit, source_bound)
+    bound = dict(source_bound)
     bound[str(args.resources)] = sha256(args.resources)
     bind_resource_references(resources, bound)
     layer_jobs, regression_jobs = {}, {}
@@ -532,6 +606,7 @@ def main():
         "accepted": True,
         "baseline_commit": config["baseline_commit"],
         "tested_commit": commit,
+        **revision,
         "upstream_commit": config["upstream_commit"],
         "model_revision": config["model_revision"],
         "tokenizer_revision": config["tokenizer_revision"],
@@ -575,7 +650,11 @@ def main():
         "schema_version": 1,
         "task_id": config["task_id"],
         "tested_commit": commit,
+        **revision,
         "raw_sha256": originals,
+        "analysis_source_sha256": {
+            str(Path(path).relative_to(ROOT)): digest for path, digest in source_bound.items()
+        },
         "recomputed_audit_sha256": {
             layer: hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
             for layer, value in reports.items()
@@ -584,6 +663,10 @@ def main():
     }
     for path, expected in bound.items():
         require(sha256(path) == expected, "bound input changed during export")
+    require(
+        bind_execution(commit, analysis_commit=args.analysis_commit) == source_bound,
+        "analysis/execution source catalog changed during export",
+    )
     args.output.mkdir(parents=True, exist_ok=False)
     for name, value in (("summary", summary), ("provenance", provenance)):
         (args.output / f"{name}.json").write_text(

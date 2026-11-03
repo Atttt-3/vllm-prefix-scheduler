@@ -579,3 +579,171 @@ def test_final_jobs_reject_nonnumeric_gpu_job(complete_job_binding, job):
     layers["gpu"] = job
     with pytest.raises(ValueError):
         exporter.bind_final_jobs(layers, regressions)
+
+
+AUDIT_PATHS = {
+    "scripts/export_m4.py",
+    "src/vllm_prefix_scheduler/m4_contract.py",
+    "tests/test_m4_contract.py",
+    "tests/test_m4_export.py",
+}
+
+
+def fixture_git(root, *arguments):
+    return subprocess.check_output(["git", "-C", str(root), *arguments], text=True).strip()
+
+
+def commit_fixture_changes(root):
+    fixture_git(root, "add", ".")
+    fixture_git(
+        root,
+        "-c",
+        "user.name=M4 local export fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+        "commit",
+        "-qm",
+        "local audit binding fixture",
+    )
+    return fixture_git(root, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def audit_repository(frozen_repository, monkeypatch):
+    root, _original_commit = frozen_repository
+    (root / "tests/test_m4_contract.py").write_text("# Frozen local contract test fixture.\n")
+    (root / "scripts/m4_engine_fixture.py").write_text("# Frozen local producer fixture.\n")
+    (root / "docs").mkdir()
+    (root / "docs/review.md").write_text("Frozen local documentation fixture.\n")
+    tested = commit_fixture_changes(root)
+    monkeypatch.setattr(exporter, "EXECUTION_FREEZE", tested)
+    assert set(exporter.AUDIT_ONLY_PATHS) == AUDIT_PATHS
+    return root, tested
+
+
+def commit_allowed_audit_changes(root):
+    for name in sorted(AUDIT_PATHS):
+        path = root / name
+        path.write_text(path.read_text() + "# Committed local audit-only revision.\n")
+    return commit_fixture_changes(root)
+
+
+def test_explicit_analysis_binds_all_four_allowed_files_to_actual_git_blobs(audit_repository):
+    root, tested = audit_repository
+    tested_binding = exporter.bind_execution(tested, root=root)
+    analysis = commit_allowed_audit_changes(root)
+    bound = exporter.bind_execution(tested, root=root, analysis_commit=analysis)
+    assert set(bound) == set(tested_binding)
+    assert {
+        str(Path(path).relative_to(root)) for path in bound if bound[path] != tested_binding[path]
+    } == AUDIT_PATHS
+    assert all(exporter.sha256(Path(path)) == digest for path, digest in bound.items())
+    assert fixture_git(root, "cat-file", "-t", analysis) == "commit"
+
+
+def test_default_execution_binding_still_rejects_committed_audit_changes(audit_repository):
+    root, tested = audit_repository
+    commit_allowed_audit_changes(root)
+    with pytest.raises(ValueError, match="currently executing source differs from tested freeze"):
+        exporter.bind_execution(tested, root=root)
+
+
+def test_explicit_analysis_allows_documentation_only_change(audit_repository):
+    root, tested = audit_repository
+    original = exporter.bind_execution(tested, root=root)
+    (root / "docs/review.md").write_text("Documented local analysis result.\n")
+    analysis = commit_fixture_changes(root)
+    assert exporter.bind_execution(tested, root=root, analysis_commit=analysis) == original
+    assert exporter.bind_execution(tested, root=root) == original
+
+
+@pytest.mark.parametrize(
+    "reference", ["head", "abbreviated", "uppercase", "tree", "blob", "missing"]
+)
+def test_explicit_analysis_requires_full_lowercase_existing_commit(audit_repository, reference):
+    root, tested = audit_repository
+    analysis = commit_allowed_audit_changes(root)
+    references = {
+        "head": "HEAD",
+        "abbreviated": analysis[:12],
+        "uppercase": analysis.upper(),
+        "tree": fixture_git(root, "rev-parse", f"{analysis}^{{tree}}"),
+        "blob": fixture_git(root, "rev-parse", f"{analysis}:scripts/export_m4.py"),
+        "missing": "f" * 40,
+    }
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=references[reference])
+
+
+def test_explicit_analysis_rejects_other_tested_commit_even_with_matching_bytes(audit_repository):
+    root, tested = audit_repository
+    analysis = commit_allowed_audit_changes(root)
+    assert analysis != tested
+    with pytest.raises(ValueError):
+        exporter.bind_execution(analysis, root=root, analysis_commit=analysis)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "scripts/m4_engine_fixture.py",
+        "scripts/check_m4_trace.py",
+        "configs/m4-stability.json",
+        "Makefile",
+    ],
+)
+def test_explicit_analysis_rejects_changes_outside_fixed_audit_paths(audit_repository, name):
+    root, tested = audit_repository
+    path = root / name
+    path.write_text(path.read_text() + "\n# Changed outside the fixed audit allowlist.\n")
+    analysis = commit_fixture_changes(root)
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=analysis)
+
+
+@pytest.mark.parametrize("change", ["add", "delete"])
+def test_explicit_analysis_rejects_committed_source_catalog_change(audit_repository, change):
+    root, tested = audit_repository
+    if change == "add":
+        (root / "scripts/new_producer.py").write_text("# New tracked executable fixture.\n")
+    else:
+        (root / "tests/test_m4_export.py").unlink()
+    analysis = commit_fixture_changes(root)
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=analysis)
+
+
+@pytest.mark.parametrize("change", ["add", "delete"])
+def test_explicit_analysis_rejects_current_index_catalog_change(audit_repository, change):
+    root, tested = audit_repository
+    analysis = commit_allowed_audit_changes(root)
+    if change == "add":
+        path = root / "scripts/index_only_producer.py"
+        path.write_text("# Tracked after the selected analysis commit.\n")
+        fixture_git(root, "add", str(path))
+    else:
+        # Leave the original bytes present so only the tracked catalog differs.
+        fixture_git(root, "rm", "--cached", "tests/test_m4_export.py")
+        assert (root / "tests/test_m4_export.py").is_file()
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=analysis)
+
+
+@pytest.mark.parametrize("name", ["scripts/export_m4.py", "configs/m4-stability.json"])
+def test_explicit_analysis_rejects_dirty_bytes_after_selected_analysis(audit_repository, name):
+    root, tested = audit_repository
+    analysis = commit_allowed_audit_changes(root)
+    path = root / name
+    path.write_text(path.read_text() + "# Uncommitted bytes after the analysis freeze.\n")
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=analysis)
+
+
+def test_explicit_analysis_rejects_worktree_matching_tested_instead_of_analysis(audit_repository):
+    root, tested = audit_repository
+    path = root / "scripts/export_m4.py"
+    original = path.read_bytes()
+    analysis = commit_allowed_audit_changes(root)
+    path.write_bytes(original)
+    with pytest.raises(ValueError):
+        exporter.bind_execution(tested, root=root, analysis_commit=analysis)

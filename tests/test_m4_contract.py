@@ -164,6 +164,34 @@ def test_complete_synthetic_gpu_bridge_is_only_contract_evidence():
     assert result["complete_m4_acceptance"] is False
 
 
+@pytest.mark.parametrize("mode", ["native", "off", "prefix", "guarded"])
+@pytest.mark.parametrize("label", ["boundary", "before_shutdown"])
+def test_gpu_resources_outside_cases_fail_closed(mode, label):
+    c = config()
+    events = gpu_fixture(c)
+    checkpoint = copy.deepcopy(
+        next(e for e in events if e["event"] == "m4_generation_drained" and e["mode"] == mode)
+    )
+    stream = [e for e in events if e["engine_id"] == checkpoint["engine_id"]]
+    checkpoint.update(
+        case_id=None,
+        label=label,
+        seq=0 if label == "boundary" else max(e["seq"] for e in stream) + 1,
+        monotonic_ns=0 if label == "boundary" else max(e["monotonic_ns"] for e in stream) + 1000,
+    )
+    events.insert(0 if label == "boundary" else len(events), checkpoint)
+
+    result = audit(c, events, layer="gpu", contract_fixture=True)
+    assert result["case_count"] == 60
+    assert result["scope"] == "contract_fixture"
+    assert result["accepted"] is False
+    assert result["complete_m4_acceptance"] is False
+
+    checkpoint["resources"]["non_null_ref_sum"] = 1
+    with pytest.raises(ValueError, match="native resource not zero: non_null_ref_sum"):
+        audit(c, events, layer="gpu", contract_fixture=True)
+
+
 @pytest.mark.parametrize("operation", ["empty", "missing", "duplicate", "mislabeled"])
 def test_matrix_boundaries_fail_closed(operation):
     c = config()

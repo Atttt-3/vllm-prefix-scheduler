@@ -1236,6 +1236,9 @@ def audit(
         detail = audit_cpu(config, normalized, partial=partial)
         cases = {}
     else:
+        if layer == "gpu":
+            for event in rows(normalized, "m4_generation_drained"):
+                audit_drained(event.get("resources"))
         cases = matrix_gate(config, normalized, layer, partial=partial)
         detail = {
             case: audit_case(
