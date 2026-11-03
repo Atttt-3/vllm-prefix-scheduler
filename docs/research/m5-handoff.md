@@ -513,3 +513,36 @@ D8 与 D9 在各自冻结执行提交复算均与原报告逐字节一致，前 
 python scripts/submit_m5.py --authorization PRIVATE_D10_AUTH --phase calibration --role D10 --attempt d10-01
 python scripts/check_m5_d10.py --attempt runs/M5-paired-performance/attempts/d10-01 --proposal configs/m5-d10.json --output NEW_PRIVATE_D10_AUDIT
 ```
+
+## D10 热准入停止，隔离效果未验证
+
+作业 `140078` 在冻结执行与审查 `503630989fe2b7175ebacde027e282710139a7c8` 使用一张 RTX 3090，申请 20 分钟，Slurm 实跑 **410 秒**，权威终态为 `COMPLETED/0:0`。独立 watcher 在唯一一次提交前 19.490 ms 就绪，权威终态和成功的全队列查询后以 0 退出。最终全队列无 M5 作业。409 份 GPU 样本覆盖三个归属进程组，显存边界 1→1 MiB，归属进程、采样器及 RPC 目录清理通过。前 17 次账本逐字节一致，原 D6 拒绝单列保留。累计 **18 次分配、360 申请分钟、8,820 秒实跑**。
+
+热试跑第 8 波在 72.772 秒冻结首个合格平台 **62°C、SM 1,875 MHz、显存 9,501 MHz**。首个隔离轮通过热准入，在原四槽、8 请求/秒条件下完成 60 条请求。独立原件复算核对客户端和采样器两个物理核、EngineCore 六个物理核，以及测量边界上延续的 7 个客户端线程和 45 个 EngineCore 线程。
+
+| 计划轮次 | 布局 | 执行状态 | 计时完成数 |
+| --- | --- | --- | ---: |
+| E1 | 隔离 B | 热准入、端点、放置核验通过 | 60/60 |
+| E2 | 继承 A | 110 秒内无合格热窗口，计时前停止 | 0 |
+| E3 | 继承 A | 未启动 | 0 |
+| E4 | 隔离 B | 未启动 | 0 |
+
+E2 在 110 秒内完整排空并清理了 12 个预热波次。独立复算在完整波次可见样本中核对 75 个候选窗口，64 个因窗口温差超限，余下 11 个满足基础平台条件，但温度中位数为 65°C 或 66°C，全部超出原目标 62°C 的 ±2°C。E2 未进入 T0 检查或计时，节点按冻结规则停止，无重试。Slurm 命令及资源释放成功，诊断状态为 `diagnostic-incomplete`。
+
+E1 的 TTFT p95 为 **1,833.174 ms**，末终态吞吐为 **6.226 请求/s、99.612 token/s**，提交偏差 p99 为 2.087 ms。该轮在 0.5–3 秒的五个半秒窗仍有 **32.548–36.916 ms** 的真实 token 间隔中位数，复现原慢窗。首次 ≥50 ms 原生等待发生于 `000004`，该请求在 T0 后 0.519 秒入队、等待 70.616 ms。持续待接纳起点为 **0.778 秒**，峰值 **11**。计划在 3–6 秒到达的 24 条请求，实际提交至首 token 中位数为 1,225.844 ms，原生入队至首次调度中位数为 1,108.317 ms。上述结果来自一个已核验的隔离轮。当前无同卡 A/B、A/A 或 B/B 的性能配对，无法估计隔离的改善或回退。
+
+冻结审查与独立复算一致。CPU 隔离对稳定性的改善为 `unresolved`，全 B 资格前置条件未满足。原 C3 保持 `blocked`，原热门槛、TTFT 和两项吞吐门槛继续适用，资格复验未启动，正式矩阵仍为 **0/64**。
+
+| 私有证据 | SHA-256 |
+| --- | --- |
+| 冻结 D10 审查 | `ae0231aa9aa57a2f0fc9ac70856c0a8d2dc975dfb81dcd32e42546e2663177c9` |
+| 独立原件与冻结审查交叉核对 | `87fc78edaf1bde322fe1fbe1e0625eb58cd59547c53b787471436c0b46bfe34b` |
+| 累计资源账本 | `6126535e27afa0049f01cdbeffb6a462c8924d54f87a4d459173d4ea47030a91` |
+| 独立资源审查 | `fb521749284847923fdd286921c5a18f56302f3227af3d952e3dd22f0fef9d36` |
+
+封存原件在 `runs/M5-paired-performance/attempts/d10-01/`，审查、独立复算和资源账本在 `runs/M5-paired-performance/d10-review/`。从冻结执行提交可复放。
+
+```bash
+python scripts/check_m5_d10.py --attempt runs/M5-paired-performance/attempts/d10-01 --proposal configs/m5-d10.json --output NEW_PRIVATE_D10_AUDIT
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
