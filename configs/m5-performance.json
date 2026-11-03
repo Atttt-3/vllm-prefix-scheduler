@@ -69,11 +69,14 @@
     }
   },
   "extra_upstream_sha256": {
+    "vllm/outputs.py": "370d233794f0b571174e63cf318ed282ec19b053dd2991a1c28d7340d4423a4e",
+    "vllm/v1/engine/__init__.py": "5a525d4fc6e9a802be0d211d98b42cd196ac3bfd91906eb98a9dd47a15ecac22",
     "vllm/v1/engine/async_llm.py": "3491dde64ef226b9f65e4341c944615cf6ebd23de3210293dc66767c4c18365c",
     "vllm/v1/engine/core.py": "458fd729771681b124d3a4d5b1c575f689bf789a5e0c8cc9f5c524eb6ec84f87",
     "vllm/v1/engine/core_client.py": "386b528a69029507f80a2df4d6df2a4fa6ba2ba811501dc3449ceea58b5cd90a",
     "vllm/v1/engine/input_processor.py": "97f66659814177d3f7b72b959f09201cbdd1794de21ec1542fe8970f18a1a2b6",
     "vllm/v1/engine/output_processor.py": "e78c5af6b0db10c93f19af359d4cb003a82f7ddfde1ae2c58084a53a56d0adb4",
+    "vllm/v1/metrics/stats.py": "f594c5ea0f9caebe54737528e0da0ffbbdc909d74cfd625e0e384afb324d9663",
     "vllm/v1/executor/uniproc_executor.py": "3cb039b80fe9b03dc1122f93c1f8a4098ef1355104b317ff6df25358f4349494",
     "vllm/v1/worker/gpu/model_runner.py": "5240fe8d62d403e466a4aa07a28fb7af5c0f1e9b9c3bb08c4003185bde461f87",
     "vllm/v1/worker/gpu/async_utils.py": "1797a8abdb46bba9d30d0507d725796ec72ad836f6778a1ece4590fd74b911c9",

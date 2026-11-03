@@ -26,10 +26,13 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D2R110_ROLE,
     D2R_PREVIOUS_ANALYSIS,
     D2R_ROLE,
+    D3_PREVIOUS_ANALYSIS,
+    D3_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
     bind_d2r_inputs,
+    bind_d3_inputs,
     check_authorization,
     digest,
     formal_specs,
@@ -38,7 +41,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     require,
 )
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
-from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r110_specs, d2r_specs  # noqa: E402
+from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r110_specs, d2r_specs, d3_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -268,7 +271,12 @@ def main():
     require(args.role in roles, "M5 role outside approved budget")
     freeze = read_json(freeze_path) if freeze_path else None
     diagnostic = args.role in DIAGNOSTIC_ROLES
-    d2_planners = {D2_ROLE: d2_specs, D2R_ROLE: d2r_specs, D2R110_ROLE: d2r110_specs}
+    d2_planners = {
+        D2_ROLE: d2_specs,
+        D2R_ROLE: d2r_specs,
+        D2R110_ROLE: d2r110_specs,
+        D3_ROLE: d3_specs,
+    }
     d2 = args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
     retained_configs = []
@@ -318,6 +326,24 @@ def main():
                 "role": D2R110_ROLE,
                 "retained_d2_analysis_sha256": d2_sha,
                 "retained_d2r_analysis_sha256": d2r_sha,
+            }
+        elif args.role == D3_ROLE:
+            retained_configs = [
+                auxiliary.parent / filename
+                for filename in (
+                    D2R_PREVIOUS_ANALYSIS,
+                    D2R110_PREVIOUS_ANALYSIS,
+                    D3_PREVIOUS_ANALYSIS,
+                )
+            ]
+            d2_sha, d2r_sha, d2r110_sha = bind_d3_inputs(
+                authorization, auxiliary, *retained_configs
+            )
+            retained_result = {
+                "role": D3_ROLE,
+                "retained_d2_analysis_sha256": d2_sha,
+                "retained_d2r_analysis_sha256": d2r_sha,
+                "retained_d2r110_analysis_sha256": d2r110_sha,
             }
         plan_specs = d2_planners.get(args.role, d1_specs)
         specs = plan_specs(

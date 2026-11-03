@@ -29,12 +29,16 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D2R_PLAN_FILENAME,
     D2R_PREVIOUS_ANALYSIS,
     D2R_ROLE,
+    D3_PLAN_FILENAME,
+    D3_PREVIOUS_ANALYSIS,
+    D3_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
     TASK,
     bind_d2r110_inputs,
     bind_d2r_inputs,
+    bind_d3_inputs,
     check_authorization,
     digest,
     id_ok,
@@ -47,9 +51,11 @@ from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
     D2_D1_REANALYSIS_SHA,
     D2R110_PROPOSAL_NAME,
     D2R_PROPOSAL_NAME,
+    D3_PROPOSAL_NAME,
     d2_specs,
     d2r110_specs,
     d2r_specs,
+    d3_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -334,8 +340,9 @@ def submit(args):
         stage_index = 0
         retained_analyses = {}
         if diagnostic:
+            previous_slots = {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7, D2R110_ROLE: 8, D3_ROLE: 9}
             require(
-                len(history) == {D1_ROLE: 5, D2_ROLE: 6, D2R_ROLE: 7, D2R110_ROLE: 8}[args.role]
+                len(history) == previous_slots[args.role]
                 and all(row["phase"] == "calibration" for row in history),
                 "diagnostic history is outside its single approved allocation",
             )
@@ -368,7 +375,7 @@ def submit(args):
                 bind_d2r_inputs(auth, proposal, retained_analysis)
                 d2r_specs(read_json(CONFIG), proposal, input_table, old_result)
                 retained_analyses[D2R_PREVIOUS_ANALYSIS] = retained_analysis
-            else:
+            elif args.role == D2R110_ROLE:
                 require(
                     history[-1]["role"] == D2R_ROLE
                     and history[-1] == audit_attempt(HISTORY / "d2-r-01", require_completed=True),
@@ -382,6 +389,32 @@ def submit(args):
                 retained_analyses = {
                     D2R_PREVIOUS_ANALYSIS: retained_analysis,
                     D2R110_PREVIOUS_ANALYSIS: retained_d2r,
+                }
+            else:
+                previous = HISTORY / "d2-r110-01"
+                require(
+                    history[-1]["role"] == D2R110_ROLE
+                    and history[-1] == audit_attempt(previous, require_completed=True),
+                    "D3 requires the retained D2-R110 allocation and release",
+                )
+                proposal = CONFIG.with_name(D3_PLAN_FILENAME)
+                retained_analysis = HISTORY.parent / "d2-independent-review" / "analysis.json"
+                retained_d2r = HISTORY.parent / "d2-r-review" / "analysis.json"
+                retained_d2r110 = HISTORY.parent / "d2-r110-review" / "analysis.json"
+                bind_d3_inputs(auth, proposal, retained_analysis, retained_d2r, retained_d2r110)
+                prior_report = read_json(retained_d2r110)
+                require(
+                    prior_report["resource_release"]
+                    == json.loads(json.dumps(history[-1], default=str))
+                    and prior_report["execution_commit"]
+                    == read_json(previous / "planned.json")["execution_commit"],
+                    "D3 retained D2-R110 analysis is detached from the prior release",
+                )
+                d3_specs(config, proposal, input_table, old_result)
+                retained_analyses = {
+                    D2R_PREVIOUS_ANALYSIS: retained_analysis,
+                    D2R110_PREVIOUS_ANALYSIS: retained_d2r,
+                    D3_PREVIOUS_ANALYSIS: retained_d2r110,
                 }
         else:
             if args.phase == "calibration" and calibration_roles != CALIBRATION:
@@ -417,9 +450,12 @@ def submit(args):
         aux = "-"
         auxiliary_hash = None
         if diagnostic:
-            name = {D2R_ROLE: D2R_PROPOSAL_NAME, D2R110_ROLE: D2R110_PROPOSAL_NAME}.get(
-                args.role, proposal.name
-            )
+            staged_names = {
+                D2R_ROLE: D2R_PROPOSAL_NAME,
+                D2R110_ROLE: D2R110_PROPOSAL_NAME,
+                D3_ROLE: D3_PROPOSAL_NAME,
+            }
+            name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
             upload(ssh, aux, proposal.read_bytes().decode("utf-8"))
             upload(ssh, aux.parent / "input.json", input_table.read_bytes().decode("utf-8"))

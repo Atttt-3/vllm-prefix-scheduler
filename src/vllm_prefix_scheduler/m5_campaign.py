@@ -19,10 +19,15 @@ D2R_OFFICIAL_ANALYSIS_SHA256 = "67ef91b0052f59289ec648f84ed88ce161046e737cc54fdf
 D2R110_ROLE = "D2-R110"
 D2R110_PLAN_FILENAME = "m5-d2r110.json"
 D2R110_PREVIOUS_ANALYSIS = "previous-d2-r-analysis.json"
-DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE, D2R110_ROLE)
+D2R110_OFFICIAL_ANALYSIS_SHA256 = "27b389a03dfa8df4f9a6b531663e9767910de6f51ffbceef8006f5039cfdd844"
+D3_ROLE = "D3"
+D3_PLAN_FILENAME = "m5-d3.json"
+D3_PREVIOUS_ANALYSIS = "previous-d2-r110-analysis.json"
+DIAGNOSTIC_ROLES = (D1_ROLE, D2_ROLE, D2R_ROLE, D2R110_ROLE, D3_ROLE)
 REVIEWED_DIAGNOSTIC_PLANS = {
     D2R_ROLE: (8, "d2r_plan_sha256", D2R_PLAN_FILENAME),
     D2R110_ROLE: (9, "d2r110_plan_sha256", D2R110_PLAN_FILENAME),
+    D3_ROLE: (10, "d3_plan_sha256", D3_PLAN_FILENAME),
 }
 SCENARIOS = {"burst": 5, "mixed": 5, "ample": 2, "all-cold": 2, "serial": 2}
 JOB_PREFIX = "m5-paired-"
@@ -243,20 +248,49 @@ def bind_d2r110_inputs(record, plan, previous, previous_d2r):
         "D2-R110 staged plan differs from authorization",
     )
     proposal = read_json(plan)
-    d2_sha = bind_retained_d2_analysis(proposal["retained_D2"], previous, D2R110_ROLE)
+    return _bind_d2r110_lineage(proposal, previous, previous_d2r, D2R110_ROLE)
+
+
+def _bind_d2r110_lineage(proposal, previous, previous_d2r, role):
+    d2_sha = bind_retained_d2_analysis(proposal["retained_D2"], previous, role)
     retained = proposal["retained_D2R"]
     require(
         retained["analysis_sha256"] == digest(previous_d2r) == D2R_OFFICIAL_ANALYSIS_SHA256,
-        "D2-R110 retained D2-R analysis differs",
+        f"{role} retained D2-R analysis differs",
     )
     predecessor = read_json(previous_d2r)
     require(
         predecessor["role"] == D2R_ROLE
         and retained["status"] == predecessor["status"] == "diagnostic-incomplete"
         and retained["proposal_sha256"] == predecessor["proposal_sha256"],
-        "D2-R110 predecessor is not the retained incomplete D2-R",
+        f"{role} predecessor is not the retained incomplete D2-R",
     )
     return d2_sha, retained["analysis_sha256"]
+
+
+def bind_d3_inputs(record, plan, previous, previous_d2r, previous_d2r110):
+    require(
+        record["roles"] == [D3_ROLE] and digest(plan) == record["d3_plan_sha256"],
+        "D3 staged plan differs from authorization",
+    )
+    proposal = read_json(plan)
+    earlier = _bind_d2r110_lineage(proposal, previous, previous_d2r, D3_ROLE)
+    retained = proposal["retained_D2R110"]
+    require(
+        retained["analysis_sha256"] == digest(previous_d2r110) == D2R110_OFFICIAL_ANALYSIS_SHA256,
+        "D3 retained D2-R110 analysis differs",
+    )
+    predecessor = read_json(previous_d2r110)
+    require(
+        predecessor["role"] == D2R110_ROLE
+        and retained["status"] == predecessor["status"] == "diagnostic-complete"
+        and retained["proposal_sha256"] == predecessor["proposal_sha256"]
+        and predecessor["decision"]["thermal_control"] == "verified"
+        and predecessor["decision"]["endpoint_stability_under_control"] == "unstable"
+        and predecessor["decision"]["qualification_started"] is False,
+        "D3 predecessor is not the retained thermally verified, endpoint-unstable D2-R110",
+    )
+    return (*earlier, retained["analysis_sha256"])
 
 
 def formal_specs(config, freeze, role):

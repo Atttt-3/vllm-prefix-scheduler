@@ -83,6 +83,19 @@ python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r
 
 正式冻结独立复算两个 C3 作业，再将其原始客户端与引擎记录、输入、collector、分配和释放绑定到逻辑 C3 的同一摘要。提交和发布重新验证此摘要。原 C3 仍保存在各自历史版本。C4–C6 继续以原自然压力、负对照和单组耗时门槛验收。正式 16 组、64 轮的预算在校准后单独审批。
 
+### D3 提交后分段诊断
+
+[D3 冻结方案](../../configs/m5-d3.json) 使用单独获批的一次串行单 RTX 3090 分配，申请最多 20 分钟。复用 D2-R110 的热试跑、110 秒准入、同一张 mixed 表、8 请求/秒及四轮各 60 条。作业内估算 1,035 秒，硬上限 1,050 秒。提交前核验固定 vLLM 原生事件、输出统计、调度和引擎源文件哈希。计算节点在逐轮测量前后核对客户端和引擎的单调时钟域及往返界限。
+
+四轮采用同一采集方式。客户端先记真实 token 到达，再从既有 `RequestOutput.metrics` 复制原生时间戳，排空后写盘。首次接纳时间指调度轮次起点。原生首末输出时间来自引擎输出封包。独立复算逐请求分解提交到原生入队、入队到首次接纳、首次接纳到原生首输出、原生首输出到客户端首 token，并另列首 token 后的输出和终态。跨进程区间须有已核验的同域证据。缺失时间戳保留在分母内，缺证区间单列。
+
+独立核对 E1/E2、E3/E4、E1/E4 的原热状态、TTFT 和吞吐门槛。额外报告匹配请求的各区间差值、p95 的实际请求身份和最后 15 条，避免用不同请求的分位数相加。若 E3/E4 再次同方向同时越过两项门槛，报告复现；未满足则按本次观测范围报告。D3 证据保留原 C3 的 `blocked`，资格复验单独安排。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D3_AUTH --phase calibration --role D3 --attempt d3-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d3-01 --proposal configs/m5-d3.json --output runs/M5-paired-performance/d3-review/analysis.json
+```
+
 ## 独立审查与交付
 
 `freeze_m5.py` 从 schema 2 collector 和 Git 对象核对源文件与原始输入，再独立复算六个校准作业并绑定正式表。分析使用同一冻结代码，实际执行、分析和文档交付 SHA 分别记录。正式导出先用 `export_m5.py review` 核对完整配对、来源和全作业释放，再用 `check_m5_release_controls.py` 从封存原件运行子进程正负控。负控按指定的退出码和拒绝原因核验。独立审查人核对 A–F、审查包与控制记录，并通过协调渠道交付签认文件 SHA。发布时重新从封存原件复算，核对签认和控制记录绑定后再写出白名单。逐轮表包含相对原生的配对差以及 guarded−prefix。报告中位数、范围、方向和失败分母，负对照为描述性结果。最终区分命令、证据、行为与性能状态，给出实际执行、分析和交付 SHA、原件索引及资源账本。

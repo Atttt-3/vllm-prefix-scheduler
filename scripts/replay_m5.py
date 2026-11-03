@@ -11,8 +11,14 @@ from pathlib import Path
 
 from m3_sources import collect_sources, sha256
 
-from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE
-from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan
+from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE, D3_ROLE
+from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan, d3_plan
+from vllm_prefix_scheduler.m5_d3 import (
+    bind_loaded_sources,
+    monotonic_clock_info,
+    snapshot_native_metrics,
+    verify_clock_brackets,
+)
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,7 +79,7 @@ def _entry(plan, planned_ns):
     }
 
 
-async def _consume(llm, plan, row, params, deadline_ns):
+async def _consume(llm, plan, row, params, deadline_ns, *, native_stats_type=None):
     # Stamp on the executing client task, directly before invoking generate.
     row["submit_ns"] = time.monotonic_ns()
     remaining = (deadline_ns - row["submit_ns"]) / 1_000_000_000
@@ -91,11 +97,22 @@ async def _consume(llm, plan, row, params, deadline_ns):
                 now = time.monotonic_ns()
                 chunk = list(output.outputs[0].token_ids) if output.outputs else []
                 if chunk:
-                    if row["first_token_ns"] is None:
+                    first = row["first_token_ns"] is None
+                    if first:
                         row["first_token_ns"] = now
                     row["last_token_ns"] = now
                     row["chunk_tokens"].append({"at_ns": now, "token_ids": chunk})
                     row["token_ids"].extend(chunk)
+                    if native_stats_type is not None:
+                        last = output.finished or len(row["token_ids"]) >= params.max_tokens
+                        if first or last:
+                            snapshot = snapshot_native_metrics(
+                                getattr(output, "metrics", None), native_stats_type, now
+                            )
+                            if first:
+                                row["native_metrics"]["first"] = snapshot
+                            if last:
+                                row["native_metrics"]["last"] = snapshot
                 if output.num_cached_tokens is not None:
                     row["cached_tokens"] = output.num_cached_tokens
                 if output.finished:
@@ -270,7 +287,7 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
     thermal["reason"] = "conditioning deadline without an admissible plateau"
 
 
-async def _run(args, config, workload, client):
+async def _run(args, config, workload, client, *, native_stats_type=None):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
     from vllm.sampling_params import RequestOutputKind
@@ -279,6 +296,10 @@ async def _run(args, config, workload, client):
     from vllm_prefix_scheduler.m5_observer import clock_identity
 
     options = json.loads((ROOT / config["baseline_config"]).read_text())
+    if native_stats_type is not None:
+        if options.get("disable_log_stats") is not False:
+            raise RuntimeError("D3 requires the existing native log_stats path")
+        client["native_metrics_clock"] = monotonic_clock_info()
     options.update(
         model=str(args.model.resolve()),
         tokenizer=str(args.model.resolve()),
@@ -318,7 +339,7 @@ async def _run(args, config, workload, client):
         from m5_d2_thermal import target_from_plateau
 
         plan = json.loads(args.d2_plan.read_text())
-        prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE)
+        prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(args.d2_plan)
         target, pilot_gpu = None, None
@@ -355,6 +376,17 @@ async def _run(args, config, workload, client):
     async def rpc(name, **kwargs):
         return _single_worker(await llm.collective_rpc(name, timeout=15, kwargs=kwargs))
 
+    async def read_clock_samples():
+        samples = []
+        for _ in range(5):
+            send_ns = time.monotonic_ns()
+            clock = await rpc("m5_clock")
+            recv_ns = time.monotonic_ns()
+            samples.append(
+                {"send_ns": send_ns, "engine_ns": clock["engine_ns"], "recv_ns": recv_ns}
+            )
+        return samples
+
     async def drain(label, stage=None):
         expires = time.monotonic_ns() + deadline_ns
         while True:
@@ -367,7 +399,16 @@ async def _run(args, config, workload, client):
 
     def launch(plan, row):
         tasks.append(
-            asyncio.create_task(_consume(llm, plan, row, params, row["planned_ns"] + deadline_ns))
+            asyncio.create_task(
+                _consume(
+                    llm,
+                    plan,
+                    row,
+                    params,
+                    row["planned_ns"] + deadline_ns,
+                    native_stats_type=native_stats_type,
+                )
+            )
         )
 
     try:
@@ -378,14 +419,7 @@ async def _run(args, config, workload, client):
         armed = await rpc(
             "m5_arm", tier=args.tier, limit=limit, schema_version=client["schema_version"]
         )
-        samples = []
-        for _ in range(5):
-            send_ns = time.monotonic_ns()
-            clock = await rpc("m5_clock")
-            recv_ns = time.monotonic_ns()
-            samples.append(
-                {"send_ns": send_ns, "engine_ns": clock["engine_ns"], "recv_ns": recv_ns}
-            )
+        samples = await read_clock_samples()
         shortest = min(samples, key=lambda row: row["recv_ns"] - row["send_ns"])
         send_ns, engine_ns, recv_ns = (shortest[key] for key in ("send_ns", "engine_ns", "recv_ns"))
         client["clock_check"] = shortest
@@ -397,6 +431,14 @@ async def _run(args, config, workload, client):
             or recv_ns - send_ns > config["gates"]["max_clock_rtt_ns"]
         ):
             raise RuntimeError("M5 could not verify a shared CLOCK_MONOTONIC domain")
+        if native_stats_type is not None:
+            if (
+                llm.log_stats is not True
+                or llm.output_processor.log_stats is not True
+                or client["clock"]["pid"] == armed["clock"]["pid"]
+            ):
+                raise RuntimeError("D3 native stats or distinct EngineCore process missing")
+            verify_clock_brackets(samples, config["gates"]["max_clock_rtt_ns"])
         if armed["profile"]["block_size"] != workload["block_size"]:
             raise RuntimeError("M5 workload and active cache block sizes differ")
         if (
@@ -475,6 +517,9 @@ async def _run(args, config, workload, client):
             _entry(plan, phases["measure_start_ns"] + plan["offset_ns"])
             for plan in workload["requests"]
         ]
+        if native_stats_type is not None:
+            for row in client["requests"]:
+                row["native_metrics"] = {"first": None, "last": None}
         phases["arrival_end_ns"] = client["requests"][-1]["planned_ns"]
         client["drain_deadline_ns"] = phases["arrival_end_ns"] + deadline_ns
         await _open_loop(workload["requests"], client["requests"], launch)
@@ -491,6 +536,14 @@ async def _run(args, config, workload, client):
         await asyncio.gather(*tasks)
         phases["drain_end_ns"] = time.monotonic_ns()
         await drain("measure-drained", stage="done")
+        if native_stats_type is not None:
+            native_clock = client["native_metrics_clock"]
+            native_clock["post_clock_samples"] = await read_clock_samples()
+            native_clock["post_clock_check"] = verify_clock_brackets(
+                native_clock["post_clock_samples"],
+                config["gates"]["max_clock_rtt_ns"],
+                after_ns=phases["drain_end_ns"],
+            )
     finally:
         if llm is not None:
             for task in tasks:
@@ -547,6 +600,7 @@ def main():
     ):
         parser.error("M5 input, phase and mode do not match the frozen design")
     d2_files = (args.d2_plan, args.d2_samples, args.d2_target)
+    native_timing = None
     if args.d2_role is None:
         if any(path is not None for path in d2_files):
             parser.error("D2 evidence paths require --d2-role")
@@ -564,6 +618,8 @@ def main():
             d2r_plan(plan)
         elif plan["role"] == D2R110_ROLE:
             d2r110_plan(plan)
+        elif plan["role"] == D3_ROLE:
+            native_timing = d3_plan(plan)["native_timing"]
         planned = plan["target"]
         expected_id = (
             args.pair_id == "thermal-pilot"
@@ -599,12 +655,17 @@ def main():
         ),
         "warmup": [],
     }
+    if native_timing is not None:
+        client["native_metrics_schema_version"] = native_timing["schema_version"]
     try:
         source = _binding(args, config)
         client["execution_commit"] = source["project_commit"]
         client["job_id"] = source["job_id"]
         _dump(args.output / "sources.json", source)
-        asyncio.run(_run(args, config, workload, client))
+        native_stats_type = None
+        if native_timing is not None:
+            native_stats_type = bind_loaded_sources(source, native_timing["source_sha256"])
+        asyncio.run(_run(args, config, workload, client, native_stats_type=native_stats_type))
     finally:
         _dump(args.output / "client.json", client)
 

@@ -5,10 +5,13 @@ import json
 
 from .m5_campaign import (
     D2_ROLE,
+    D2R110_OFFICIAL_ANALYSIS_SHA256,
     D2R110_ROLE,
     D2R_OFFICIAL_ANALYSIS_SHA256,
     D2R_ROLE,
+    D3_ROLE,
     digest,
+    is_hash,
     read_json,
     require,
 )
@@ -21,7 +24,21 @@ D2R_MEASURED_CAP_S = 95
 D2R_PROPOSAL_NAME = "proposed-d2-r.json"
 D2R_PROPOSAL_SHA = "fe0fde4fa66c498ffafc1c5f1f8fb89c25492a7a3ee6edbb7d06fc1dddcd3eba"
 D2R110_PROPOSAL_NAME = "proposed-d2-r110.json"
+D2R110_PROPOSAL_SHA = "891231f0444a0347be7104bb53ac4c4586d91c7d68e5500a5d971e29046b55c3"
 D2R110_MEASURED_CAP_S = 110
+D3_PROPOSAL_NAME = "proposed-d3.json"
+D3_SCHEDULER_SOURCE = "vllm/v1/core/sched/scheduler.py"
+D3_NATIVE_SOURCES = frozenset(
+    (
+        D3_SCHEDULER_SOURCE,
+        "vllm/outputs.py",
+        "vllm/v1/engine/__init__.py",
+        "vllm/v1/engine/async_llm.py",
+        "vllm/v1/engine/core.py",
+        "vllm/v1/engine/output_processor.py",
+        "vllm/v1/metrics/stats.py",
+    )
+)
 _D2_INVARIANTS_SHA = "8c3695364073476f638a125a2404d0155c61fd98728c56578ee39a6ccc0f78dc"
 
 
@@ -116,6 +133,45 @@ def d2r110_plan(plan):
 
 def d2r110_specs(config, proposal, table, original):
     return _specs(config, d2r110_plan(read_json(proposal)), table, original, D2R110_ROLE)
+
+
+def d3_plan(plan):
+    require(
+        plan["role"] == D3_ROLE
+        and plan["retained_D2R110"]
+        == {
+            "status": "diagnostic-complete",
+            "proposal_sha256": D2R110_PROPOSAL_SHA,
+            "analysis_sha256": D2R110_OFFICIAL_ANALYSIS_SHA256,
+        },
+        "D3 role or retained D2-R110 analysis differs",
+    )
+    d2r110_plan({**plan, "role": D2R110_ROLE})
+    native = plan["native_timing"]
+    sources = native["source_sha256"]
+    require(
+        set(native) == {"schema_version", "source_sha256"}
+        and type(native["schema_version"]) is int
+        and native["schema_version"] == 1
+        and set(sources) == D3_NATIVE_SOURCES
+        and all(is_hash(value) for value in sources.values()),
+        "D3 native timing protocol or source inventory differs",
+    )
+    return plan
+
+
+def d3_specs(config, proposal, table, original):
+    plan = d3_plan(read_json(proposal))
+    configured = config["extra_upstream_sha256"]
+    require(
+        all(
+            configured.get(path) == value
+            for path, value in plan["native_timing"]["source_sha256"].items()
+            if path != D3_SCHEDULER_SOURCE  # Bound by native-m2b.json in collect_sources.
+        ),
+        "D3 native timing sources are detached from the frozen M5 configuration",
+    )
+    return _specs(config, plan, table, original, D3_ROLE)
 
 
 def _specs(config, plan, table, original, role):
