@@ -375,3 +375,17 @@ python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d7-0
 python runs/M5-paired-performance/d7-review/independent-run.py runs/M5-paired-performance/attempts/d7-01
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D8 同条件资格前置离线预检
+
+从 `171eef27df3362d062a701d8d56c96d68378d750` 起步，冻结 D8 执行与审查 SHA 为 `dab68d40a4b786d467e49b8180134175cdd690f6`，方案 SHA-256 为 `18907f0bdd93c6ab1f51f26446b4a689c411fa880578a8b7540bbe8498ec8772`。D2-R110、D7 原执行报告和 15 次实际分配账本逐字节复算一致，D6 被拒提交单列保留。
+
+D8 使用原 D2-R110 输入、热准入和性能判定，原基线四个 runner 槽与原生 KV 容量，8 请求/秒、guarded、仅端点采集。热试跑选择首个原规则合格平台，再启动四个新引擎，各 60 条。独立复算 E1/E2、E3/E4、E1/E4，保留原热状态、TTFT p95 `max(2 ms, 参考轮 p95 × 5%)` 和两项吞吐 ±5% 容限。端点缺证时保留已运行轮次并停止推进，完整配对越界时保留全部证据。仅已登记的 D8 角色在通过原始证据复算并绑定报告哈希后可满足同条件前置。
+
+后续资格提交检查已释放阶段的实际资格状态，核对原始叶、collector、配置和执行 SHA，并独立复算阶段报告。历史 C1/C2 原件均通过该检查。重算哈希后以 D7 冒充 D8 的报告被真实复算子进程拒绝。缺轮、单配对越界、来源不符、阻断阶段与伪造资格报告均有负控。
+
+完整 `UV_OFFLINE=1 make check` 为 1019 项通过、3 项固定 Linux opt-in 跳过，预检清单 SHA-256 为 `886ab3b9cfebdcfce3dad19333c54bfbc2f02d1cfa2391bafdef88c495869a59`。D8 专项及资格检查 24 项通过。封存材料启动子进程接受原件并拒绝五类篡改，集群 CPU 核验五项上传材料、五个阶段规格、Python 3.12.16 和 47 个安装源码哈希。合成 D8 证据检验资格入口，真实端点稳定性仍待实测。
+
+**待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 作业内预计 1,035 秒，硬上限 1,050 秒。提交前绑定冻结 SHA 和独立 watcher 就绪。当前新增分配 0，D8 GPU 实测待授权，原 C3 继续 `blocked`，资格七作业和正式矩阵另行审批。
+
+私有预检位于 `runs/M5-paired-performance/d8-review/`，包含 `preflight/`、`frozen-predecessor-replay/`、`independent-launch-controls/`、`qualification-subprocess-controls.json` 和 `login-stage-preflight.json`。 [冻结方案与复放命令](m5-design.md#d8-同条件端点资格前置)
