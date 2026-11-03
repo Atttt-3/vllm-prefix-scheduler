@@ -668,7 +668,13 @@ async def _run(
                         "status": "incomplete",
                         "errors": [f"trace export failed: {type(error).__name__}"],
                     }
-            _dump(args.output / f"{trace_key}-step.json", trace)
+            trace_path = args.output / f"{trace_key}-step.json"
+            if trace_role == "D9":
+                from vllm_prefix_scheduler.m5_d9_observer import write_d9_trace
+
+                write_d9_trace(trace_path, trace)
+            else:
+                _dump(trace_path, trace)
         if llm is not None:
             try:
                 engine = await rpc("m5_export")

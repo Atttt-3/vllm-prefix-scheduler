@@ -1,5 +1,6 @@
 """Single-arm, bounded two-window observation of the pinned native FIFO."""
 
+import json
 import time
 
 from vllm_prefix_scheduler.m5_d6_observer import (
@@ -14,6 +15,13 @@ from vllm_prefix_scheduler.m5_observer import M5WorkerExtension
 
 D9_WINDOWS_NS = ((0, 3_000_000_000), (6_000_000_000, 8_500_000_000))
 D9_TOKEN_LIMIT = 60 * 16
+
+
+def write_d9_trace(path, trace):
+    """Encode bounded D9 rows once, then write them after the measured drain."""
+    payload = json.dumps(trace, separators=(",", ":"), allow_nan=False)
+    with path.open("x") as stream:
+        stream.write(payload + "\n")
 
 
 class D9WorkerExtension(M5WorkerExtension):

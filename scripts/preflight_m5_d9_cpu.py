@@ -4,7 +4,6 @@ import argparse
 import ast
 import importlib.metadata
 import json
-import os
 import queue
 import sys
 import time
@@ -141,11 +140,7 @@ def measure(native, windows, directory, traced, width, codec):
         if codec is not None:
             result = codec.decode(codec.encode(result))
         path = directory / "cpu-step.json"
-        with path.open("x") as stream:
-            json.dump(result, stream, separators=(",", ":"), allow_nan=False)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
+        m5_d9_observer.write_d9_trace(path, result)
         output_size = path.stat().st_size
         path.unlink()
         stats = SimpleNamespace(

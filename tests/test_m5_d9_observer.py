@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -14,6 +15,15 @@ from vllm_prefix_scheduler import m5_d6_observer, m5_d9_observer
 T0 = 10_000_000_000
 WINDOWS = [(T0 + start, T0 + end) for start, end in m5_d9_observer.D9_WINDOWS_NS]
 EARLY, LATE = WINDOWS
+
+
+def test_d9_post_drain_export_keeps_compact_bytes_and_create_once(tmp_path):
+    path = tmp_path / "d9-step.json"
+    report = {"windows": [{"rows": [{"request_id": "r", "ordinal": 1}]}]}
+    m5_d9_observer.write_d9_trace(path, report)
+    assert path.read_text() == json.dumps(report, separators=(",", ":"), allow_nan=False) + "\n"
+    with pytest.raises(FileExistsError):
+        m5_d9_observer.write_d9_trace(path, report)
 
 
 def harness(monkeypatch, observed=True):
