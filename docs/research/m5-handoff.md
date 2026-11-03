@@ -389,3 +389,40 @@ D8 使用原 D2-R110 输入、热准入和性能判定，原基线四个 runner 
 **待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 作业内预计 1,035 秒，硬上限 1,050 秒。提交前绑定冻结 SHA 和独立 watcher 就绪。当前新增分配 0，D8 GPU 实测待授权，原 C3 继续 `blocked`，资格七作业和正式矩阵另行审批。
 
 私有预检位于 `runs/M5-paired-performance/d8-review/`，包含 `preflight/`、`frozen-predecessor-replay/`、`independent-launch-controls/`、`qualification-subprocess-controls.json` 和 `login-stage-preflight.json`。 [冻结方案与复放命令](m5-design.md#d8-同条件端点资格前置)
+
+## D8 四轮完成，同条件资格前置未通过
+
+作业 `140070` 在冻结执行与审查 SHA `dab68d40a4b786d467e49b8180134175cdd690f6` 使用一张 RTX 3090，申请 20 分钟，实跑 646 秒，Slurm 权威终态 `COMPLETED/0:0`。独立 watcher 提交前就绪并以 0 退出，最终全队列无 M5 作业。644 份设备样本覆盖五个归属进程组，显存边界为 1→1 MiB，进程、采样器和 IPC 清理通过。累计 16 次实际分配、320 申请分钟、7,789 秒实跑。前 15 次账本逐字节一致，D6 被拒提交仍单列。
+
+试跑第 9 波、80.670 秒冻结首个合格平台 63.5°C、SM 1,875 MHz、显存 9,501 MHz。E1–E4 均通过原热准入，240 条请求全部完成且按时取得首 token。测量窗中位温度为 65/66/65/65°C，SM 中位均为 1,860 MHz，显存时钟众数均为 9,501 MHz，三对热状态均可比。
+
+| 轮次 | 完成请求 | TTFT p95 | 末终态请求/s | 末终态 token/s | 提交偏差 p99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| E1 | 60/60 | 1,099.568 ms | 6.856 | 109.690 | 2.302 ms |
+| E2 | 60/60 | 677.575 ms | 7.259 | 116.143 | 2.250 ms |
+| E3 | 60/60 | 878.996 ms | 6.782 | 108.506 | 2.135 ms |
+| E4 | 60/60 | 653.085 ms | 7.255 | 116.076 | 2.232 ms |
+
+| 配对，后者减前者 | TTFT p95 差值 | TTFT 容限 | 请求及 token 吞吐变化 | 判定 |
+| --- | ---: | ---: | ---: | --- |
+| E1→E2 | −421.993 ms | 54.978 ms | +5.883% | TTFT 和两项吞吐越界 |
+| E3→E4 | −225.912 ms | 43.950 ms | +6.977% | TTFT 和两项吞吐越界 |
+| E1→E4 | −446.483 ms | 54.978 ms | +5.822% | TTFT 和两项吞吐越界 |
+
+D8 的命令、证据和释放核验均完成。独立原始复算与冻结审查对三对一致，真实 `same-condition-ee-v1` 检查拒绝放行，端点稳定性为 `unstable`。原 C3 保持 `blocked`，门槛保留，资格复验未启动，正式矩阵为 0/64。
+
+三个配对中 60 个同 ID 请求的缓存 token 数和生成 token 序列均一致。E1 的 0–3 秒六个 500 ms 窗中位 token 间隔约 34 ms，E2 约 22 ms。E3 在约 6.5 秒后出现约 33–36 ms 的慢窗，E4 同期约 22–24 ms。末 15 条同 ID 请求，E2−E1、E4−E3 的提交至首 token 差值中位数分别为 −486.693 和 −170.602 ms，提交偏差差值中位数分别为 +0.036 和 −0.293 ms。D8 端点记录将差异收窄至提交后链路，并给出两种出包起点。原生入队、执行与输出传递之间的归因仍缺证。
+
+后续先用同 ID 端点和历史 D3、D6、D7 原生记录对齐快慢窗、待接纳和已完成请求累计，并比较运行顺序、预热后的设备样本和进程归属。在原四 runner 槽、8 请求/秒的 D8 配置上，下一次可审查的诊断候选为端点／有界观察／有界观察／端点。预先覆盖 T0 后 0–3 秒和 6–8.5 秒，核对原生入队、首次接纳、批次构成、执行、物化、消费和槽位交接。以端点复现、采集等价性及同构快慢批次为因果前置，缺少对照即保留 `unresolved`。设备和主机资源样本作为解释变量，设备阶段定位仍需可关联的设备证据。
+
+优化选择由分段结果决定。若慢窗主要由槽位持有及接纳余量放大，独立对比实际四槽与五槽 runner，或在四槽条件下单独验证较低 offered rate，并验证新鲜候选竞争仍成立。若差异集中在原生推进或物化，则针对对应阶段检查 CPU 运行排队、设备频率和批次形状，优先测试单一控制变量。每个候选先过同档重复，再看跨档收益。涉及改变资格运行条件时，须先冻结并审查新协议。
+
+私有原件在 `runs/M5-paired-performance/attempts/d8-01/`，审查及账本在 `runs/M5-paired-performance/d8-review/`。冻结复算 SHA-256 为 `568ca1a806419f55e08937526ea3fe2d246d747bdc8a0efc23d3a4dc1931bb79`，独立复算为 `995a2366422a7d9d84fa175910b0fc54f04a71501bf253dfa8e25a45c9599c2d`，资格入口复核为 `4e67b80da68fe088c17b6b97e5d75d8f43cf87a9de3400ddc57762734398c6b9`，资源账本为 `d73968a99cede2889c5527c070f54846431e1109089067e826b819094646c291`。完整本地检查为 1,019 通过、3 项固定跳过。
+
+在冻结执行 SHA 上使用新输出路径复算。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d8-01 --proposal configs/m5-d8.json --output NEW_PRIVATE_D8_AUDIT
+python runs/M5-paired-performance/d8-review/independent-replay.py runs/M5-paired-performance/attempts/d8-01
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
