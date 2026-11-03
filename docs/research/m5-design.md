@@ -105,3 +105,20 @@ python scripts/export_m5.py review --config configs/m5-performance.json --freeze
 python scripts/check_m5_release_controls.py --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --review-dir runs/M5-paired-performance/formal-review --output runs/M5-paired-performance/formal-controls
 python scripts/export_m5.py release --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --review-dir runs/M5-paired-performance/formal-review --decision PRIVATE_INDEPENDENT_DECISION --approved-decision-sha256 DECISION_SHA_FROM_REVIEWER --controls runs/M5-paired-performance/formal-controls/controls.json --output evidence/M5-paired-performance
 ```
+
+## D4 到达率对照
+
+[D4 冻结方案](../../configs/m5-d4.json) 检验 D3 尾部积压是否随到达压力变化。固定生产 guarded 策略、端点采集、4 个序列槽位及同一张 mixed 已分词输入。沿用 D3 绑定的原生时间戳、时钟域验证、缓存预置和 8 请求/秒热试跑。四个测量引擎都沿用 110 秒热准入、20 秒热窗口和原采样与准入门槛。按 8、6、6、8 请求/秒启动四个新引擎，每轮 60 条。8 请求/秒使用封存表原字节。6 请求/秒按原 mixed 绝对时间及有界抖动算法重算到达偏移，保留请求顺序、token、冷热标签、采样和预热。两表的哈希和末到达时刻在方案内固定。
+
+E1/E4 和 E2/E3 分别做同速率配对，均以较早轮为参考，沿用原 TTFT p95 与末终态请求和 token 吞吐容限。逐轮报告最后 15 条的原生入队至首次接纳中位数、待接纳峰值、等待累计和与四个原生输出区间重合的比例。四轮完整、提交与时钟证据合格、所有测量窗口两两热可比，才判读跨速率信号。只有两轮 6 请求/秒的尾部等待中位数均低于两轮 8 请求/秒且待接纳峰值均不更高，才记为本批支持到达压力解释。原生接纳至末输出区间仅用于近似占用，真实准入原因与 GPU 执行仍需各自证据。历史 C2 的原生 6 请求/秒未形成新鲜候选竞争，因此 D4 只用于诊断，正式负载继续由 C2/C4/C5 判定。
+
+申请一次串行单 RTX 3090，最多 20 分钟。D3 的估算为 1,035 秒，两轮降速增加的绝对到达窗口共约 4.917 秒，向上取整后估算 1,040 秒，硬上限仍为 1,050 秒。保留原 watcher、权威终态、全队列和清理协议。热准入或边界核验失败时保存原件并停止，额度内无重试。控制器执行角色、提交前检查和实际作业冻结需随 D4 运行材料绑定。D4 两个同速率配对的结果只解释本次压力对照。C3 资格需同条件的新证据独立复算通过。
+
+离线校验与私有输入准备命令使用 D3 原报告或字节一致的独立复算文件。
+
+```bash
+python scripts/prepare_m5_d4.py --plan configs/m5-d4.json --config configs/m5-performance.json \
+  --history runs/M5-paired-performance \
+  --d3-analysis runs/M5-paired-performance/d3-review/analysis.json \
+  --output runs/M5-paired-performance/d4-prepared
+```

@@ -29,7 +29,10 @@ import m5_c3_bundle  # noqa: E402
 
 
 def test_split_c3_bundle_binds_leaf_bytes_and_resource_releases(tmp_path, monkeypatch):
-    config = ROOT / "configs/m5-performance.json"
+    legacy = read_json(ROOT / "configs/m5-performance.json")
+    legacy["calibration"].pop("qualification_authorization_schema_version", None)
+    legacy["calibration"].pop("qualification_predecessor_roles", None)
+    config = put(tmp_path / "m5-performance.json", legacy)
     commit = "a" * 40
     roles = qualification_roles(read_json(config))
     stages = {role: tmp_path / role for role in roles}

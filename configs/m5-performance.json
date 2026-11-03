@@ -359,6 +359,8 @@
   ],
   "calibration": {
     "split_c3": true,
+    "qualification_authorization_schema_version": 2,
+    "qualification_predecessor_roles": [],
     "stages": [
       "C1",
       "C2",

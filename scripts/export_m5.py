@@ -29,7 +29,11 @@ from vllm_prefix_scheduler.m5_campaign import (
     read_json,
     require,
 )
-from vllm_prefix_scheduler.m5_contract import STATUSES
+from vllm_prefix_scheduler.m5_contract import (
+    STATUSES,
+    bind_formal_calibration,
+    validate_formal_tables,
+)
 from vllm_prefix_scheduler.m5_resources import (
     RESOURCE_SCHEMA_VERSION,
     TERMINAL,
@@ -304,13 +308,14 @@ def collect(config_path, freeze_path, history, analysis_commit, output):
             "split C3 original evidence is outside the formal freeze",
         )
     require(set(candidates) == set(matrix), "formal matrix incomplete")
+    bind_formal_calibration(freeze, stages["C2"], stages["C6"])
+    validate_formal_tables(tables, config, matrix, freeze)
     output.mkdir(parents=True, exist_ok=False)
     catalog = git_identity(execution)
     inventory = []
     for role in matrix:
         path, planned, job = candidates[role]
         table = tables / f"{role}.json"
-        require(digest(table) == freeze["tables"][role], "frozen table was modified")
         index = read_json(path / "node/index.json")
         specs = formal_specs(config, freeze, role)
         require(

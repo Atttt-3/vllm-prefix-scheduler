@@ -18,7 +18,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     read_json,
     require,
 )
-from vllm_prefix_scheduler.m5_contract import audit_run  # noqa: E402
+from vllm_prefix_scheduler.m5_contract import audit_run, validate_formal_tables  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     audit_attempt,
     audit_history,
@@ -116,31 +116,11 @@ def freeze_campaign(config_path, history, commit, output):
         for stage in ("C3-burst", "C3-mixed"):
             del report_hashes[stage]
         report_hashes["C3"] = c3_bundle_digest(bound)
-    table_dir = stages["C6"][0] / "node/tables"
-    require(
-        {file.name for file in table_dir.iterdir()} == {f"{pair}.json" for pair in matrix},
-        "C6 formal input inventory differs",
-    )
+    c6 = stages["C6"][0] / "node"
+    hashes = read_json(c6 / "allocation.json")["formal_table_sha256"]
+    require(type(hashes) is dict, "C6 formal table hashes missing")
     rates = {**reports["C2"]["selected_rates"], **reports["C6"]["selected_rates"]}
     interval = reports["C6"]["serial_interval_ms"]
-    hashes = {}
-    for identity, pair in matrix.items():
-        path = table_dir / f"{identity}.json"
-        table = read_json(path)
-        scenario = pair["scenario"]
-        require(
-            table["scenario"] == scenario
-            and table["seed"] == pair["seed"]
-            and len(table["requests"]) == config["request_count"]
-            and table["rate_rps"] == rates.get(scenario)
-            and table["interval_ms"] == (interval if scenario == "serial" else None),
-            f"C6 formal arrival table differs for {identity}",
-        )
-        hashes[identity] = digest(path)
-    require(
-        read_json(stages["C6"][0] / "node/allocation.json")["formal_table_sha256"] == hashes,
-        "formal tables detached from the C6 allocation",
-    )
     freeze = {
         "schema_version": 1,
         "task_id": TASK,
@@ -152,6 +132,7 @@ def freeze_campaign(config_path, history, commit, output):
         "serial_interval_ms": interval,
     }
     check_freeze(freeze, config_path, commit)
+    validate_formal_tables(c6 / "tables", config, matrix, freeze)
     write(output / "formal-freeze.json", freeze)
 
 

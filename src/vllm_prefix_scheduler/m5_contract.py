@@ -193,6 +193,39 @@ def workload_geometry_gate(inputs, rules, block, rows, warmup):
             check_family(row, slot)
 
 
+def expected_arrival_offsets(config, scenario, seed, count, rate, interval):
+    """Recompute absolute nanosecond offsets from the frozen arrival parameters."""
+    if scenario == "serial":
+        require(
+            rate is None
+            and type(interval) in (int, float)
+            and math.isfinite(interval)
+            and interval > 0,
+            "serial offered interval invalid",
+        )
+        spacing = Fraction(str(interval)) * 1_000_000
+    elif scenario == "mechanism":
+        require(rate is None and interval is None, "mechanism has a natural arrival rate")
+        return [0] * count
+    else:
+        require(
+            interval is None and type(rate) in (int, float) and math.isfinite(rate) and rate > 0,
+            "offered rate invalid",
+        )
+        spacing = 1_000_000_000 / Fraction(str(rate))
+    if scenario == "burst":
+        rules = config["scenarios"][scenario]
+        burst, gap = rules["burst_size"], rules["burst_gap_ns"]
+        return [int((i // burst) * burst * spacing + (i % burst) * gap) for i in range(count)]
+    offsets = [int(i * spacing) for i in range(count)]
+    if scenario == "mixed":
+        jitter = random.Random(seed ^ 0x4D350001)
+        bound = int(spacing / 8)
+        for i in range(1, count - 1):
+            offsets[i] += jitter.randint(-bound, bound)
+    return offsets
+
+
 def workload_gate(inputs, config, pair, phase):
     require(inputs.get("schema_version") == 1, "input schema differs")
     require(
@@ -216,27 +249,11 @@ def workload_gate(inputs, config, pair, phase):
         "workload task or block size differs",
     )
     rate, interval = inputs.get("rate_rps"), inputs.get("interval_ms")
-    if scenario == "serial":
-        require(
-            rate is None
-            and type(interval) in (int, float)
-            and math.isfinite(interval)
-            and interval > 0,
-            "serial offered interval invalid",
-        )
-        spacing = Fraction(str(interval)) * 1_000_000
-    elif scenario == "mechanism":
+    if scenario == "mechanism":
         require(
             rate is None and interval is None and phase == "diagnostic",
             "mechanism must be a diagnostic with controlled arrival",
         )
-        spacing = 0
-    else:
-        require(
-            interval is None and type(rate) in (int, float) and math.isfinite(rate) and rate > 0,
-            "offered rate invalid",
-        )
-        spacing = 1_000_000_000 / Fraction(str(rate))
     sampling = require_dict(inputs.get("sampling"), "sampling")
     require(
         sampling
@@ -250,9 +267,8 @@ def workload_gate(inputs, config, pair, phase):
     )
     expected = {}
     previous = 0
-    jitter_rng = random.Random(inputs["seed"] ^ 0x4D350001)
-    jitter_bound_ns = int(spacing / 8)
-    for i, row in enumerate(rows):
+    offsets = expected_arrival_offsets(config, scenario, inputs["seed"], len(rows), rate, interval)
+    for row, planned_offset in zip(rows, offsets, strict=True):
         require_dict(row, "planned request")
         identity = row.get("request_id")
         offset = row.get("offset_ns")
@@ -262,16 +278,6 @@ def workload_gate(inputs, config, pair, phase):
             "invalid or duplicate planned request",
         )
         require(integer(offset, previous), "planned offsets must be nondecreasing")
-        if scenario == "burst":
-            burst = config["scenarios"][scenario]["burst_size"]
-            group, within = divmod(i, burst)
-            planned_offset = int(
-                group * burst * spacing + within * config["scenarios"][scenario]["burst_gap_ns"]
-            )
-        else:
-            planned_offset = int(i * spacing)
-            if scenario == "mixed" and 0 < i < len(rows) - 1:
-                planned_offset += jitter_rng.randint(-jitter_bound_ns, jitter_bound_ns)
         require(offset == planned_offset, "arrival offsets differ from absolute rate")
         require(row.get("class") in {"hot", "cold"}, "frozen hot/cold class missing")
         require(token_ids(ids) and ids, "frozen prompt tokens missing")
@@ -322,6 +328,54 @@ def workload_gate(inputs, config, pair, phase):
     if measurement_schema(config) == 2:
         workload_geometry_gate(inputs, config["scenarios"][scenario], block, rows, measured_warmup)
     return expected
+
+
+def validate_formal_table(path, config, pair, freeze):
+    """Verify the same calibrated bytes and absolute schedule before formal replay or review."""
+    identity, scenario = pair["id"], pair["scenario"]
+    require(sha256(path) == freeze["tables"][identity], f"formal table hash differs for {identity}")
+    inputs = require_dict(read_json(path), "formal inputs")
+    if scenario == "serial":
+        rate, interval = None, freeze["serial_interval_ms"]
+        require(
+            integer(interval, 10) and interval <= 1000 and interval % 10 == 0,
+            "frozen serial interval is outside the calibrated grid",
+        )
+    else:
+        rate, interval = freeze["rates_rps"][scenario], None
+    require(
+        "rate_rps" in inputs
+        and "interval_ms" in inputs
+        and inputs["rate_rps"] == rate
+        and inputs["interval_ms"] == interval,
+        f"formal table rate or interval differs from freeze for {identity}",
+    )
+    workload_gate(inputs, config, pair, "formal")
+
+
+def validate_formal_tables(directory, config, matrix, freeze):
+    require(
+        {path.name for path in directory.iterdir()} == {f"{pair}.json" for pair in matrix},
+        "C6 formal input inventory differs",
+    )
+    for identity, pair in matrix.items():
+        validate_formal_table(directory / f"{identity}.json", config, pair, freeze)
+
+
+def bind_formal_calibration(freeze, c2_attempt, c6_attempt):
+    c2 = read_json(c2_attempt / "node/calibration-result.json")
+    c6 = read_json(c6_attempt / "node/calibration-result.json")
+    require(
+        set(c2["selected_rates"]) == {"burst", "mixed"}
+        and set(c6["selected_rates"]) == {"ample", "all-cold"}
+        and freeze["rates_rps"] == {**c2["selected_rates"], **c6["selected_rates"]}
+        and freeze["serial_interval_ms"] == c6["serial_interval_ms"],
+        "formal rates or serial interval detached from C2/C6 calibration",
+    )
+    require(
+        freeze["tables"] == read_json(c6_attempt / "node/allocation.json")["formal_table_sha256"],
+        "formal tables detached from the C6 allocation",
+    )
 
 
 def client_requests(client, inputs, expected, gates, phase, *, rate_pilot=False):

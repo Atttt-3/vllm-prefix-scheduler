@@ -34,12 +34,14 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     bind_d2r_inputs,
     bind_d3_inputs,
     check_authorization,
+    config_matrix,
     digest,
     formal_specs,
     id_ok,
     read_json,
     require,
 )
+from vllm_prefix_scheduler.m5_contract import validate_formal_table  # noqa: E402
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import d2_specs, d2r110_specs, d2r_specs, d3_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
@@ -350,6 +352,7 @@ def main():
             config, auxiliary, diagnostic_table, auxiliary.parent / "original-c3-result.json"
         )
     elif freeze:
+        formal_pair = config_matrix(config)[args.role]
         specs = formal_specs(config, freeze, args.role)
     else:
         from plan_m5_calibration import plan_stage
@@ -444,7 +447,7 @@ def main():
                 atomic_write(leaf / "diagnostic-device-before.json", d1_device_boundary())
         elif freeze:
             table = freeze_path.parent / "tables" / f"{args.role}.json"
-            require(digest(table) == freeze["tables"][args.role], "formal input hash differs")
+            validate_formal_table(table, config, formal_pair, freeze)
         else:
             table = leaf / "input.json"
             auxiliary_command(
@@ -629,6 +632,12 @@ def main():
         return True
 
     try:
+        if freeze:
+            c6_allocation = read_json(freeze_path.parent / "allocation.json")
+            require(
+                freeze["tables"] == c6_allocation["formal_table_sha256"],
+                "formal tables detached from the C6 allocation",
+            )
         # Pinned vLLM appends /<UUID> to VLLM_RPC_BASE_PATH for UNIX sockets.
         # Keep engine IPC on the node and keep run artifacts in their original directory.
         rpc_directory = Path(tempfile.mkdtemp(prefix=f"m5-{job}-", dir="/tmp"))

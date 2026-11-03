@@ -106,6 +106,8 @@ def test_d2r110_requires_exact_exclusive_ninth_slot():
 def test_split_c3_requires_a_separate_exact_seven_slot_authorization(tmp_path):
     config = tmp_path / CONFIG.name
     prospective = json.loads(CONFIG.read_text())
+    prospective["calibration"].pop("qualification_authorization_schema_version", None)
+    prospective["calibration"].pop("qualification_predecessor_roles", None)
     prospective["calibration"].pop("split_c3", None)
     assert qualification_roles(prospective) == CALIBRATION
     prospective["calibration"]["split_c3"] = True

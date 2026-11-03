@@ -10,6 +10,7 @@ BASELINE = "f4d94d3d22a967efeeb3a00bc13f6a6b8591835b"
 MODES = ("native", "off", "prefix", "guarded")
 CALIBRATION = tuple(f"C{i}" for i in range(1, 7))
 SPLIT_C3_ROLES = ("C3-burst", "C3-mixed")
+QUALIFICATION_SUCCESSOR_PROTOCOL = "same-condition-ee-v1"
 D1_ROLE = "C3-D1"
 D2_ROLE = "D2-E-E"
 D2R_ROLE = "D2-R"
@@ -192,16 +193,20 @@ def check_authorization(record, config_path, commit, phase, *, freeze_path=None)
         and qualifying != CALIBRATION
         and any(role in qualifying for role in roles)
     ):
-        require(
-            tuple(roles) == qualifying
-            and record["max_attempts"] == 16
-            and is_hash(record.get("d2r110_analysis_sha256")),
-            "split C3 requires its exclusive seven-slot qualification authorization",
-        )
+        if qualification_authorization_version(config) == 1:
+            require(
+                tuple(roles) == qualifying
+                and record["max_attempts"] == 16
+                and is_hash(record.get("d2r110_analysis_sha256"))
+                and "qualification_batch" not in record,
+                "split C3 requires its exclusive seven-slot qualification authorization",
+            )
+        else:
+            qualification_batch(record, config)
     else:
         require(
-            "d2r110_analysis_sha256" not in record,
-            "D2-R110 result hash outside split C3 qualification authorization",
+            "d2r110_analysis_sha256" not in record and "qualification_batch" not in record,
+            "qualification evidence outside split C3 qualification authorization",
         )
     if phase == "formal":
         require(freeze_path is not None, "formal authorization requires the frozen tables")
@@ -221,6 +226,74 @@ def qualification_roles(config):
         )
         return roles
     return CALIBRATION
+
+
+def qualification_authorization_version(config):
+    version = config["calibration"].get("qualification_authorization_schema_version", 1)
+    require(
+        type(version) is int and version in (1, 2), "unknown qualification authorization schema"
+    )
+    return version
+
+
+def qualification_batch(record, config):
+    batch = record.get("qualification_batch")
+    roles = qualification_roles(config)
+    require(
+        qualification_authorization_version(config) == 2
+        and roles != CALIBRATION
+        and tuple(record["roles"]) == roles
+        and "d2r110_analysis_sha256" not in record
+        and type(batch) is dict
+        and set(batch)
+        == {
+            "schema_version",
+            "prior_allocation_count",
+            "prior_history_sha256",
+            "new_max_attempts",
+            "predecessor",
+        }
+        and batch["schema_version"] == 2,
+        "split C3 requires its versioned qualification batch authorization",
+    )
+    prior, new = batch["prior_allocation_count"], batch["new_max_attempts"]
+    require(
+        exact_int(prior, 1, 99)
+        and exact_int(new, len(roles), 99 - prior)
+        and record["max_attempts"] == prior + new
+        and record["max_requested_minutes"] == 20 * (prior + new)
+        and is_hash(batch["prior_history_sha256"]),
+        "qualification cumulative budget differs from prior history and new approvals",
+    )
+    predecessor = batch["predecessor"]
+    permitted = config["calibration"].get("qualification_predecessor_roles", [])
+    require(
+        type(permitted) is list
+        and all(id_ok(role) and role != "D4" for role in permitted)
+        and type(predecessor) is dict
+        and set(predecessor)
+        == {
+            "protocol",
+            "role",
+            "attempt",
+            "execution_commit",
+            "proposal_file",
+            "proposal_sha256",
+            "review_directory",
+            "analysis_sha256",
+        }
+        and predecessor["protocol"] == QUALIFICATION_SUCCESSOR_PROTOCOL
+        and predecessor["role"] in permitted
+        and id_ok(predecessor["attempt"])
+        and id_ok(predecessor["review_directory"])
+        and is_hash(predecessor["execution_commit"], 40)
+        and is_hash(predecessor["proposal_sha256"])
+        and is_hash(predecessor["analysis_sha256"])
+        and type(predecessor["proposal_file"]) is str
+        and re.fullmatch(r"m5-[a-z0-9-]+\.json", predecessor["proposal_file"]) is not None,
+        "qualification requires an approved same-condition predecessor protocol",
+    )
+    return batch
 
 
 def bind_d2r_inputs(record, plan, previous):

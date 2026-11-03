@@ -1,8 +1,8 @@
 """M5-only same-process scheduler and V2 runner measurement.
 
-The runner position copy is ordered on its native main stream and read after
-native async output materialization. No device-wide synchronization or native
-output conversion is added. Pin and qualify this path before formal timing.
+The runner position copy is ordered on its native main stream and captured after
+native async output materialization. A bounded host buffer keeps those exact
+positions until post-drain validation. No device synchronization is added.
 """
 
 import hashlib
@@ -12,6 +12,7 @@ import socket
 import sys
 import time
 import weakref
+from array import array
 from pathlib import Path
 
 from vllm_prefix_scheduler.m3_events import module_source, qualified_type
@@ -30,6 +31,7 @@ def clock_identity():
 
 _state = None
 _scheduler = None
+CAPTURE_TOKEN_LIMIT = 2_000_000
 
 
 def _append(name, row):
@@ -39,13 +41,127 @@ def _append(name, row):
     rows.append({"stage": _state["stage"], **row})
 
 
+def _record_error(operation, error):
+    if len(_state["errors"]) < 32:
+        _state["errors"].append({"operation": operation, "error": str(error)})
+
+
 def _observe(operation, callback, *args):
     try:
         return callback(*args)
     except Exception as error:
-        if len(_state["errors"]) < 32:
-            _state["errors"].append({"operation": operation, "error": str(error)})
+        _record_error(operation, error)
         return None
+
+
+def _capture_buffer(limit):
+    positions = array("q", [0]) * limit
+    if positions.itemsize != 8:
+        raise RuntimeError("M5 requires an 8-byte signed host position buffer")
+    return {
+        "positions": positions,
+        "position_bytes": memoryview(positions).cast("B"),
+        "position_count": 0,
+        "prompt_count": 0,
+        "limit": limit,
+    }
+
+
+def _capture_materialized(record, output, slots):
+    slot = record.pop("slot")
+    if slot is None:
+        raise RuntimeError("M5 missing native runner positions")
+    try:
+        if record.get("position_copy_submitted") is not True:
+            raise RuntimeError("M5 native runner position copy was not submitted")
+        shape = record.pop("shape")
+        capture = _state["_capture"]
+        offset = capture["position_count"]
+        end = offset + shape["effective_tokens"]
+        if end > capture["limit"]:
+            raise RuntimeError("M5 raw runner position buffer exhausted")
+        # The original AsyncOutput.get_output has already synchronized its event.
+        # Detach the exact copied bytes before reusing the pinned slot.
+        source = memoryview(slot.numpy())
+        if source.ndim != 1 or source.itemsize != 8 or source.format not in ("l", "q"):
+            raise RuntimeError("M5 unexpected host runner position format")
+        capture["position_bytes"][offset * 8 : end * 8] = source.cast("B")[: (end - offset) * 8]
+        batch = record["batch"]
+        batch["_raw_runner"] = (offset, shape, tuple(output.req_ids))
+        batch["materialized"] = True
+        capture["position_count"] = end
+    finally:
+        slots.append(slot)
+
+
+def _format_runner(batch, raw, positions):
+    offset, shape, output_ids = raw
+    if output_ids != tuple(row[0] for row in shape["rows"]):
+        raise RuntimeError("M5 native runner output request order changed")
+    effective = shape["effective_tokens"]
+    if not 0 <= offset < offset + effective <= len(positions):
+        raise RuntimeError("M5 runner position capture outside committed host bytes")
+    target = positions[offset : offset + effective]
+    generation = {row["request_id"]: row["generation"] for row in batch["scheduled"]}
+    rows = []
+    previous_end = 0
+    for rid, lower, upper, prefill_length in shape["rows"]:
+        if not previous_end == lower < upper <= effective:
+            raise RuntimeError("M5 runner query offsets do not partition effective inputs")
+        start = target[lower]
+        if any(position != start + i for i, position in enumerate(target[lower + 1 : upper], 1)):
+            raise RuntimeError("M5 runner positions are not a contiguous request interval")
+        rows.append(
+            {
+                "request_id": rid,
+                "generation": generation[rid],
+                "start": start,
+                "end": target[upper - 1] + 1,
+                "prefill_length": prefill_length,
+                "position_source": "runner_positions_d2h",
+            }
+        )
+        previous_end = upper
+    if previous_end != effective:
+        raise RuntimeError("M5 runner query offsets do not partition effective inputs")
+    batch["runner"] = {
+        "effective_tokens": effective,
+        "padded_tokens": shape["padded_tokens"],
+        "rows": rows,
+    }
+
+
+def _format_enqueue(row, raw):
+    ids, block_hashes = raw
+    row["prompt_sha256"] = hashlib.sha256(
+        json.dumps(ids, separators=(",", ":")).encode()
+    ).hexdigest()
+    row["block_hashes"] = [block_hash.hex() for block_hash in block_hashes]
+
+
+def _flush_capture():
+    capture = _state["_capture"]
+    if capture is None:
+        return
+    if _state["stage"] != "done" or _state["pending"]:
+        _record_error("export", "M5 observer export before full drain")
+    positions = memoryview(capture["positions"])[: capture["position_count"]]
+    for row in _state["enqueues"]:
+        raw = row.pop("_raw_enqueue")
+        _observe("export_enqueue", _format_enqueue, row, raw)
+    for batch in _state["batches"]:
+        raw = batch.pop("_raw_runner", None)
+        if not batch["scheduled"]:
+            if raw is not None:
+                _record_error("export_runner", "M5 runner capture attached to an empty batch")
+            continue
+        if raw is None or batch["materialized"] is not True or batch["consumed"] is not True:
+            _record_error(
+                "export_runner", "M5 native runner capture was not materialized and consumed"
+            )
+            continue
+        _observe("export_runner", _format_runner, batch, raw, positions)
+    _state["_capture"] = None
 
 
 def _install_runner(runner, config):
@@ -76,38 +192,6 @@ def _install_runner(runner, config):
     ]
     sample_pending = None
 
-    def positions_ready(record, output):
-        if record["slot"] is None:
-            raise RuntimeError("M5 missing native runner positions")
-        slot, shape = record.pop("slot"), record.pop("shape")
-        target = slot.numpy()
-        batch = record["batch"]
-        if list(output.req_ids) != [row[0] for row in shape["rows"]]:
-            raise RuntimeError("M5 native runner output request order changed")
-        generation = {row["request_id"]: row["generation"] for row in batch["scheduled"]}
-        rows = []
-        for rid, lower, upper, prefill_length in shape["rows"]:
-            positions = target[lower:upper]
-            if not len(positions) or not ((positions[1:] - positions[:-1]) == 1).all():
-                raise RuntimeError("M5 runner positions are not a contiguous request interval")
-            rows.append(
-                {
-                    "request_id": rid,
-                    "generation": generation[rid],
-                    "start": int(positions[0]),
-                    "end": int(positions[-1]) + 1,
-                    "prefill_length": prefill_length,
-                    "position_source": "runner_positions_d2h",
-                }
-            )
-        slots.append(slot)
-        batch["runner"] = {
-            "effective_tokens": shape["effective_tokens"],
-            "padded_tokens": shape["padded_tokens"],
-            "rows": rows,
-        }
-        batch["materialized"] = True
-
     def copy_positions(active, record):
         execution = active.execute_model_state
         if execution is None or not slots:
@@ -136,6 +220,7 @@ def _install_runner(runner, config):
         }
         record["slot"] = slots.pop()
         slot[:effective].copy_(positions[:effective], non_blocking=True)
+        record["position_copy_submitted"] = True
 
     def execute(output, *args, **kwargs):
         nonlocal sample_pending
@@ -143,7 +228,7 @@ def _install_runner(runner, config):
         result = original_execute(active, output, *args, **kwargs)
         record = _state["pending"].get(id(output))
         if record is None or record["output"] is not output:
-            _state["errors"].append({"operation": "execute", "error": "unbound batch"})
+            _record_error("execute", "unbound batch")
         elif output.total_num_scheduled_tokens > 0:
             sample_pending = record
             _observe("copy_positions", copy_positions, active, record)
@@ -156,17 +241,17 @@ def _install_runner(runner, config):
         record, sample_pending = sample_pending, None
         output = original_sample(runner_ref(), *args, **kwargs)
         if record is None:
-            _state["errors"].append({"operation": "sample", "error": "missing execute"})
+            _record_error("sample", "missing execute")
             return output
         if not callable(getattr(output, "get_output", None)):
-            _state["errors"].append({"operation": "sample", "error": "expected native AsyncOutput"})
+            _record_error("sample", "expected native AsyncOutput")
             return output
         original = output.get_output.__func__
         output_ref = weakref.ref(output)
 
         def get_output(*inner_args, **inner_kwargs):
             materialized = original(output_ref(), *inner_args, **inner_kwargs)
-            _observe("materialized", positions_ready, record, materialized)
+            _observe("materialized", _capture_materialized, record, materialized, slots)
             return materialized
 
         output.get_output = get_output
@@ -260,7 +345,7 @@ def _profile(worker):
 class M5WorkerExtension:
     """RPC boundaries stay outside the natural-arrival measured path."""
 
-    def m5_arm(self, tier, limit, schema_version=1):
+    def m5_arm(self, tier, limit, schema_version=1, capture_token_limit=CAPTURE_TOKEN_LIMIT):
         global _state
         if (
             _state is not None
@@ -268,6 +353,8 @@ class M5WorkerExtension:
             or limit < 1
             or type(schema_version) is not int
             or schema_version not in (1, 2)
+            or type(capture_token_limit) is not int
+            or not 1 <= capture_token_limit <= CAPTURE_TOKEN_LIMIT
         ):
             raise RuntimeError("M5 already armed or invalid journal limit")
         profile = _profile(self)
@@ -289,6 +376,7 @@ class M5WorkerExtension:
             "stage": "warmup",
             "tier": tier,
             "limit": limit,
+            "_capture": None if tier == "endpoint" else _capture_buffer(capture_token_limit),
         }
         if tier != "endpoint":
             if _scheduler is None or _scheduler() is None:
@@ -346,7 +434,12 @@ class M5WorkerExtension:
         return results
 
     def m5_export(self):
-        return {key: value for key, value in _state.items() if key not in ("pending", "limit")}
+        _flush_capture()
+        return {
+            key: value
+            for key, value in _state.items()
+            if key not in ("pending", "limit", "_capture")
+        }
 
 
 def _define_native_classes():
@@ -476,22 +569,22 @@ def _define_native_classes():
                 def record():
                     if self.requests.get(request.request_id) is not request:
                         raise RuntimeError("request was not bound to native request object")
+                    capture = _state["_capture"]
+                    ids = request.prompt_token_ids
+                    block_hashes = request.block_hashes
+                    prompt_count = capture["prompt_count"] + len(ids)
+                    if prompt_count > capture["limit"] or len(block_hashes) > len(ids):
+                        raise RuntimeError("M5 raw enqueue prompt buffer exhausted or invalid")
                     _append(
                         "enqueues",
                         {
                             "request_id": request.request_id,
                             "generation": self._m5_registry.binding(request)["generation"],
                             "enqueued_ns": time.monotonic_ns(),
-                            "prompt_sha256": hashlib.sha256(
-                                json.dumps(
-                                    list(request.prompt_token_ids), separators=(",", ":")
-                                ).encode()
-                            ).hexdigest(),
-                            "block_hashes": [
-                                bytes(block_hash).hex() for block_hash in request.block_hashes
-                            ],
+                            "_raw_enqueue": (tuple(ids), tuple(map(bytes, block_hashes))),
                         },
                     )
+                    capture["prompt_count"] = prompt_count
 
                 _observe("enqueue", record)
             return result
@@ -499,10 +592,9 @@ def _define_native_classes():
         def schedule(self, throttle_prefills=False):
             if _state is None:
                 return super().schedule(throttle_prefills=throttle_prefills)
+            profile = _state["tier"] == "profile"
             envelope_start = (
-                time.monotonic_ns()
-                if _state["schema_version"] == 2 and _state["tier"] == "profile"
-                else None
+                time.monotonic_ns() if profile and _state["schema_version"] == 2 else None
             )
             self._m5_index += 1
             self._m5_current = {
@@ -512,8 +604,12 @@ def _define_native_classes():
                 "decision_ns": time.monotonic_ns(),
                 "window_kind": "production",
             }
-            self._m5_timings = dict.fromkeys(
-                ("window_ns", "score_ns", "sort_inclusive_ns", "commit_ns", "reorder_ns"), 0
+            self._m5_timings = (
+                dict.fromkeys(
+                    ("window_ns", "score_ns", "sort_inclusive_ns", "commit_ns", "reorder_ns"), 0
+                )
+                if profile
+                else None
             )
             prefix = getattr(self, "prefix_config", None)
             if prefix is None or prefix.mode == "off":

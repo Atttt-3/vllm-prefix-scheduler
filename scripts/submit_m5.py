@@ -17,7 +17,7 @@ from m4_processes import atomic_write
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from m5_c3_bundle import c3_bundle, c3_bundle_digest, verify_d2r110_qualification  # noqa: E402
+from m5_c3_bundle import c3_bundle, c3_bundle_digest, verify_split_qualification  # noqa: E402
 
 from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     CALIBRATION,
@@ -40,11 +40,16 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     bind_d2r_inputs,
     bind_d3_inputs,
     check_authorization,
+    config_matrix,
     digest,
     id_ok,
     qualification_roles,
     read_json,
     require,
+)
+from vllm_prefix_scheduler.m5_contract import (  # noqa: E402
+    bind_formal_calibration,
+    validate_formal_tables,
 )
 from vllm_prefix_scheduler.m5_d1 import d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
@@ -418,7 +423,7 @@ def submit(args):
                 }
         else:
             if args.phase == "calibration" and calibration_roles != CALIBRATION:
-                verify_d2r110_qualification(HISTORY, auth)
+                verify_split_qualification(CONFIG, HISTORY, args.authorization, audits=history)
             stage_index = (
                 calibration_roles.index(args.role)
                 if args.phase == "calibration"
@@ -429,6 +434,30 @@ def submit(args):
                     ("calibration", stage) in completed,
                     f"required qualified calibration stage {stage} missing",
                 )
+            if args.phase == "formal":
+                freeze = read_json(args.freeze)
+                for stage in calibration_roles:
+                    if stage in SPLIT_C3_ROLES:
+                        continue
+                    path, _ = completed[("calibration", stage)]
+                    require(
+                        digest(path / "node/calibration-result.json")
+                        == freeze["calibration_sha256"][stage],
+                        "formal freeze detached from qualified calibration",
+                    )
+                if calibration_roles != CALIBRATION:
+                    stages = {
+                        stage: completed[("calibration", stage)][0] for stage in calibration_roles
+                    }
+                    bundle = c3_bundle(CONFIG, HISTORY, stages, commit)
+                    require(
+                        c3_bundle_digest(bundle) == freeze["calibration_sha256"]["C3"],
+                        "formal freeze detached from split C3 qualification",
+                    )
+                c2, _ = completed[("calibration", "C2")]
+                c6, _ = completed[("calibration", "C6")]
+                bind_formal_calibration(freeze, c2, c6)
+                validate_formal_tables(c6 / "node/tables", config, config_matrix(config), freeze)
 
         alias, paths, partition = connection()
         ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", alias]
@@ -466,31 +495,7 @@ def submit(args):
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
         elif args.phase == "formal":
-            c6, previous = completed[("calibration", "C6")]
-            freeze = read_json(args.freeze)
-            for stage in calibration_roles:
-                if stage in SPLIT_C3_ROLES:
-                    continue
-                path, _ = completed[("calibration", stage)]
-                require(
-                    digest(path / "node/calibration-result.json")
-                    == freeze["calibration_sha256"][stage],
-                    "formal freeze detached from qualified calibration",
-                )
-            if calibration_roles != CALIBRATION:
-                stages = {
-                    stage: completed[("calibration", stage)][0] for stage in calibration_roles
-                }
-                bundle = c3_bundle(CONFIG, HISTORY, stages, commit)
-                require(
-                    c3_bundle_digest(bundle) == freeze["calibration_sha256"]["C3"],
-                    "formal freeze detached from split C3 qualification",
-                )
-            for pair, wanted in freeze["tables"].items():
-                require(
-                    digest(c6 / "node/tables" / f"{pair}.json") == wanted,
-                    "formal table hash differs",
-                )
+            _, previous = completed[("calibration", "C6")]
             aux = PurePosixPath(previous["remote_attempt"]) / "formal-freeze.json"
             upload(ssh, aux, args.freeze.read_text())
             auxiliary_hash = digest(args.freeze)
