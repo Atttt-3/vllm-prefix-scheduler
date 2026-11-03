@@ -283,3 +283,17 @@ D6 对原生 UniProc 新批提交、旧批 FIFO 消费、结果物化和输出�
 **待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 预计作业内 860 秒，硬上限 900 秒。热试跑后按端点、逐步、逐步执行，三轮每轮 60 条。热准入、截止时间或必要采集证据失败时停止并保留已产生原件。慢段未复现时输出 `unresolved`。授权文件、集群与本地干净检出均绑定 D6 执行 SHA。独立 watcher 在提交前就绪。本轮新增 GPU 分配为 0，C3 保持 `blocked`，原门槛与同条件前置流程继续适用，正式矩阵仍为 0/64。
 
 私有记录位于 `runs/M5-paired-performance/d6-review/`。封存请求复算为 `archived-d5r-signature-with-chronology.json`（`a259adcc52e49b701618d30ef1f8d6be63e8f0d0b5cd0a3f985aa92658ee0e7d`），执行 SHA 复放和资源核验在 `archived-d5r-frozen-replay-verified/`。采集成本、上传核验和完整检查分别在 `observer-host-benchmark.json`、`login-stage-preflight.json` 和 `preflight/`。 [冻结规则与复放命令](m5-design.md#d6-最早出包慢段诊断)
+
+## D6 Slurm 提交被拒
+
+按用户授权，从冻结 SHA `3f7b94edca6b602cd4f68444c4850899aa60d061` 以 `d6-01` 请求一次串行单 RTX 3090 分配，时限 20 分钟。实际上传材料预检和提交前全队列查询通过，独立 watcher 在提交前就绪。唯一一次 `sbatch` 返回 1，标准输出为空，错误为 `QOSMaxSubmitJobPerUserLimit`。watcher 按失败回执路径退出 3。没有分配作业 ID，也没有可核验的作业终态或节点运行记录。
+
+提交后全队列查询与 Slurm 控制器查询均返回 0，均无 D6 的精确作业名。远端运行目录未创建，`sacct` 返回记账服务已停用。独立资源复核将此记录归为提交拒绝，新增 GPU 分配 0、分配时间 0、重试 0。之前 13 次已分配作业的释放记录逐字节复算一致，共 260 申请分钟、5,941 秒实跑。本次另外记录一次 20 分钟请求被拒。M5 冻结资源审查保留失败回执，并以 `ambiguous or failed submission receipt` 拒绝将含该回执的目录当作已闭合的作业历史。
+
+热试跑和端点、逐步、逐步三轮均未启动，D6 完成 **0/3 轮**，计划 180 条测量请求，实际提交 0 条。独立复核确认缺少节点原件，最早出包慢段、槽位持有至接纳等待的放大链及实际采集扰动均为 `unresolved`。D5-R 封存顺序仍按其原分析归属。原 C3 保持 `blocked`，原热门槛、TTFT、吞吐和资格前置流程有效。资格复验未启动，正式矩阵为 0/64。
+
+私有提交回执在 `runs/M5-paired-performance/attempts/d6-01/submission.json`，SHA-256 为 `17a7345a35f7be88e2dc155b5f5ac3837397b581ccd67e02a8dc23fb2400ccf2`。提交后的队列、记账和目录检查，以及控制器快照和冻结审查拒绝记录在 `runs/M5-paired-performance/d6-review/`。 [冻结方案与复放入口](m5-design.md#d6-最早出包慢段诊断)
+
+独立拒绝复核为 `independent-submission-rejected.json`，SHA-256 为 `0d06a5b46af008ccf7f6b4728f4fa0f4d4568833f5e5bf88904032a83ea38a3b`。冻结审查和全历史拒绝日志为 `frozen-audit-rejection.json`。
+
+分账记录为 `resource-ledger.json`，SHA-256 为 `f008780e735f90855cc8c8c7daa4074724aa9949c112e50da355fe35f776b9`。账本同时索引原始回执、watcher 就绪和退出、提交后全队列与控制器查询。独立账本复算入口为同目录的 `review-rejected-submission.py`，从冻结 SHA 读取私有原件。
