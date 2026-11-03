@@ -79,7 +79,7 @@ python scripts/submit_m5.py --authorization PRIVATE_D2_R110_AUTH --phase calibra
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r110-01 --proposal configs/m5-d2r110.json --output runs/M5-paired-performance/d2-r110-review/analysis.json
 ```
 
-独立复算验证 D2-R110 受控 E/E 稳定后，资格批另行授权七次。角色顺序为 C1、C2、C3-burst、C3-mixed、C4、C5、C6，新增 140 申请分钟。七个角色使用同一执行 SHA。C3 每场景固定两张 60 条到达表，分别按 E L L E、L E E L 启动新引擎。同块比较须复用同一输入哈希。每场景复算四对 E/L、两对 E/E、两对 L/L，沿用原门槛。C3-mixed 另带阶段计时。常规预热、APC 预置和带外采样与正式轮一致。温度和频率用于解释波动。任一同档或跨档对照越界时保留原始结果，后续阶段受阻。
+拆分 C3 的历史资格入口以 D2-R110 稳定为前提，该轮独立复算为不稳定。新版资格入口等待受控同条件 E/E 的后继角色及原始证据，当前允许的后继角色清单为空。资格批仍规划七次。角色顺序为 C1、C2、C3-burst、C3-mixed、C4、C5、C6，新增 140 申请分钟。七个角色使用同一执行 SHA。C3 每场景固定两张 60 条到达表，分别按 E L L E、L E E L 启动新引擎。同块比较须复用同一输入哈希。每场景复算四对 E/L、两对 E/E、两对 L/L，沿用原门槛。C3-mixed 另带阶段计时。常规预热、APC 预置和带外采样与正式轮一致。温度和频率用于解释波动。任一同档或跨档对照越界时保留原始结果，后续阶段受阻。
 
 正式冻结独立复算两个 C3 作业，再将其原始客户端与引擎记录、输入、collector、分配和释放绑定到逻辑 C3 的同一摘要。提交和发布重新验证此摘要。原 C3 仍保存在各自历史版本。C4–C6 继续以原自然压力、负对照和单组耗时门槛验收。正式 16 组、64 轮的预算在校准后单独审批。
 
@@ -98,7 +98,7 @@ python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d3-0
 
 ## 独立审查与交付
 
-`freeze_m5.py` 从 schema 2 collector 和 Git 对象核对源文件与原始输入，再独立复算六个校准作业并绑定正式表。分析使用同一冻结代码，实际执行、分析和文档交付 SHA 分别记录。正式导出先用 `export_m5.py review` 核对完整配对、来源和全作业释放，再用 `check_m5_release_controls.py` 从封存原件运行子进程正负控。负控按指定的退出码和拒绝原因核验。独立审查人核对 A–F、审查包与控制记录，并通过协调渠道交付签认文件 SHA。发布时重新从封存原件复算，核对签认和控制记录绑定后再写出白名单。逐轮表包含相对原生的配对差以及 guarded−prefix。报告中位数、范围、方向和失败分母，负对照为描述性结果。最终区分命令、证据、行为与性能状态，给出实际执行、分析和交付 SHA、原件索引及资源账本。
+`freeze_m5.py` 从 schema 2 collector 和 Git 对象核对源文件与原始输入，再独立复算六个逻辑校准阶段并绑定正式表，拆分 C3 版本使用七次实际分配。分析使用同一冻结代码，实际执行、分析和文档交付 SHA 分别记录。正式导出先用 `export_m5.py review` 核对完整配对、来源和全作业释放，再用 `check_m5_release_controls.py` 从封存原件运行子进程正负控。负控按指定的退出码和拒绝原因核验。独立审查人核对 A–F、审查包与控制记录，并通过协调渠道交付签认文件 SHA。发布时重新从封存原件复算，核对签认和控制记录绑定后再写出白名单。逐轮表包含相对原生的配对差以及 guarded−prefix。报告中位数、范围、方向和失败分母，负对照为描述性结果。最终区分命令、证据、行为与性能状态，给出实际执行、分析和交付 SHA、原件索引及资源账本。
 
 ```bash
 python scripts/export_m5.py review --config configs/m5-performance.json --freeze runs/M5-paired-performance/frozen/formal-freeze.json --history runs/M5-paired-performance/attempts --analysis-commit ANALYSIS_SHA --output runs/M5-paired-performance/formal-review

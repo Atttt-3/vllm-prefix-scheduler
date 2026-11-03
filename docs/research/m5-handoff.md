@@ -157,3 +157,18 @@ D3 的 E3/E4 方向与 D2-R110 相反，旧 E3/E4 同方向双越界形态未复
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d3-01 --proposal configs/m5-d3.json --output runs/M5-paired-performance/d3-review/replayed.json
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D3 后的离线修订与 D4 方案
+
+实现和本地预检 SHA 为 `dfc37b0e79bd9b19d51f223abf474a6f22be3497`。资格入口版本 2 固定已核验释放的历史前缀，累计预算为前缀实际分配加本批获准次数，失败仍占额度。新版只认事先登记的同条件后继角色，从其冻结执行 SHA 用真实子进程复算封存原件，核对独立摘要、三对原始判定及后继释放与资格批的时序。当前清单为空。D3 原结果、重算哈希后的虚假稳定结论及 D2-R110 的相同反例均被拒绝。正式冻结、提交、节点重放与发布共同验证实际到达表，绑定 C2/C6 参数及 C6 输入清单。
+
+轻量采集在入队时保存有界原值，在排空后生成提示哈希和 KV 键文本。runner 使用原来的同流异步 GPU 至主机复制和原生物化同步点，在 pinned slot 复用前将真实位置保存到 16 MiB 有界主机缓冲，排空后核对每个位置、代际、切片和输出顺序。纯 CPU 专项测量使用原 C3 的 60 条请求、101 次交替重复。入队数据准备中位数由 1.169 ms 降至 0.112 ms，排空后格式化的结果一致。端到端采集扰动仍需重新校准。
+
+| 本地门槛 | 结果 |
+| --- | --- |
+| `UV_OFFLINE=1 make check` | 841 通过，3 项固定 Linux 原生 opt-in 跳过。证据清单 SHA-256 `5ececa558dfd9f7b70a4ec63ec219f06e3d6f072b16970b0f02ce16d0cf4941b` |
+| 真实子进程 | 正式表 8 项，封存资格 5 项，D4 方案 6 项。重算摘要后的语义错误仍被目标门槛拒绝 |
+| 封存复算 | C1–C3、D1、D2、D2-R、D2-R110、D3 的 8 份报告逐字节一致。10 次分配的资源账本也一致 |
+| 原结论及资源 | 原 C3 仍为 `blocked`，原热状态、TTFT、请求与 token 吞吐门槛保留。本轮 GPU 分配为 0，正式矩阵为 0/64 |
+
+D3 四轮累计排队约 99.86%–99.88% 的时间与四条请求的原生首次接纳至末输出区间重合。这个区间只近似槽位占用。D4 冻结 8/6/6/8 请求/秒，每轮 60 条，一张卡串行，申请上限 20 分钟，估算 1,040 秒，硬上限 1,050 秒。方案 SHA-256 为 `d3b200bcda5a4017b40095c741d27b584eac9b1da6fc0a70b6a6806ecd5f075f`。两张表已离线验证。D4 在此次交付中处于方案冻结与输入预检状态，计算节点执行接线和实际测量待完成。私有索引为 `runs/M5-paired-performance/offline-repair2.9SCPGp/`。 [D4 设计与准备命令](m5-design.md#d4-到达率对照)
