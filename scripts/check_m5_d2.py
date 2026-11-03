@@ -31,6 +31,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     D7_ROLE,
     D8_ROLE,
     D9_ROLE,
+    D10_ROLE,
     digest,
     read_json,
     require,
@@ -82,6 +83,13 @@ from vllm_prefix_scheduler.m5_d9 import (
     check_d9_profile,
     d9_plan,
     d9_predecessor,
+)
+from vllm_prefix_scheduler.m5_d10 import (
+    D10_PREVIOUS_ANALYSIS,
+    D10_PROPOSAL_NAME,
+    d10_lineage,
+    d10_plan,
+    d10_predecessor,
 )
 from vllm_prefix_scheduler.m5_resources import audit_history, device
 
@@ -216,7 +224,7 @@ def compare_thermal(reference, observed, limits):
     }
 
 
-def device_samples(path, gpu):
+def device_samples(path, gpu, *, fixed_affinity=True):
     samples = [json.loads(line) for line in path.read_text().splitlines()]
     previous = 0
     affinity = None
@@ -234,7 +242,7 @@ def device_samples(path, gpu):
             and mask
             and all(type(core) is int and core >= 0 for core in mask)
             and mask == sorted(set(mask))
-            and (affinity is None or mask == affinity),
+            and (not fixed_affinity or affinity is None or mask == affinity),
             "D2 telemetry CPU affinity differs",
         )
         affinity = mask
@@ -298,6 +306,7 @@ def bind_thermal_artifact(
         D7_ROLE: D7_PROPOSAL_NAME,
         D8_ROLE: D8_PROPOSAL_NAME,
         D9_ROLE: D9_PROPOSAL_NAME,
+        D10_ROLE: D10_PROPOSAL_NAME,
     }[role]
     require(
         sum(
@@ -310,7 +319,7 @@ def bind_thermal_artifact(
         "D2 reviewed proposal is not in the collector",
     )
     previous = []
-    if role in (D8_ROLE, D9_ROLE):
+    if role in (D8_ROLE, D9_ROLE, D10_ROLE):
         require(type(d8_configs) is dict and d8_configs, f"{role} collector inputs missing")
         previous.extend(d8_configs.items())
     elif role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE):
@@ -635,6 +644,7 @@ def review(attempt, proposal_path):
     d7 = role == D7_ROLE
     d8 = role == D8_ROLE
     d9 = role == D9_ROLE
+    d10 = role == D10_ROLE
     uses_steps = d6 or d7 or d9
     trace_diagnostic = d6 or d7
     trace_key = role.lower()
@@ -653,12 +663,22 @@ def review(attempt, proposal_path):
         D7_ROLE,
         D8_ROLE,
         D9_ROLE,
+        D10_ROLE,
     )
     proposal_sha = digest(proposal_path)
     thermal_plan = capacity_plan = plan
     trace_audit = audit_step_trace
     verify_trace_sources = verify_step_sources
-    if d9:
+    if d10:
+        from m5_d10_audit import d10_report, observed_placement
+
+        inherited_d8 = ROOT / "configs/m5-d8.json"
+        inherited_d2r110 = ROOT / "configs/m5-d2r110.json"
+        plan = d10_plan(proposal_path, inherited_d8, inherited_d2r110)
+        thermal_plan = d8_plan(inherited_d8, inherited_d2r110)
+        placement_order = dict(zip(RUNS, ("inherited", *plan["placement_order"]), strict=True))
+        d10_roles = None
+    elif d9:
         from m5_d9_audit import audit_d9_trace
 
         inherited_d8 = ROOT / "configs/m5-d8.json"
@@ -747,6 +767,7 @@ def review(attempt, proposal_path):
         D7_ROLE: 15,
         D8_ROLE: 16,
         D9_ROLE: 17,
+        D10_ROLE: 18,
     }[role]
     history = audit_history(attempt.parent)[:count]
     job = read_json(attempt / "submission.json")["stdout"].strip().split(";")[0]
@@ -763,7 +784,25 @@ def review(attempt, proposal_path):
         and auth["roles"] == [role],
         "D2 resource receipt or one-allocation authorization differs",
     )
-    if d9:
+    if d10:
+        prior_attempt = attempt.parent / "d9-01"
+        private = attempt.parent.parent
+        prior_release = history[16]
+        prior_execution = read_json(prior_attempt / "planned.json")
+        prior_job = read_json(prior_attempt / "submission.json")["stdout"].strip().split(";")[0]
+        predecessor = d10_predecessor(plan, private / "d9-review/analysis-d9-01.json")
+        require(
+            auth["d10_plan_sha256"] == proposal_sha
+            and prior_release["role"] == D9_ROLE
+            and prior_release["complete"]
+            and prior_release["job_id"] == prior_job
+            and predecessor["resource_ledger"] == json.loads(json.dumps(history[:-1], default=str))
+            and predecessor["resource_release"] == predecessor["resource_ledger"][-1]
+            and predecessor["execution_commit"] == prior_execution["execution_commit"]
+            and predecessor["proposal_sha256"] == prior_execution["auxiliary_sha256"],
+            "D10 authorization, retained D9 diagnostic or release differs",
+        )
+    elif d9:
         prior_attempt = attempt.parent / "d8-01"
         private = attempt.parent.parent
         prior_release = history[15]
@@ -942,6 +981,12 @@ def review(attempt, proposal_path):
         == (2_000_000, 0.05, 0.05),
         "D2 original equivalence gate or config source differs",
     )
+    if d10:
+        require(
+            digest(config_path) == plan["runtime_config_sha256"]
+            and digest(ROOT / config["baseline_config"]) == plan["baseline_config_sha256"],
+            "D10 runtime or baseline config differs from the freeze",
+        )
     commit = planned["execution_commit"]
     verify_analysis(commit, commit)
     git_files = git_identity(commit)
@@ -957,7 +1002,7 @@ def review(attempt, proposal_path):
     verify_thermal_run_order(
         rows,
         prospective=prospective,
-        require_reviewable_pilot=(d5r or uses_steps or d8) and resource["complete"],
+        require_reviewable_pilot=(d5r or uses_steps or d8 or d10) and resource["complete"],
         expected_runs=expected_runs,
         stepped=D6_STEPPED if uses_steps else (),
         step_status_key=f"{trace_key}_step_status",
@@ -970,7 +1015,9 @@ def review(attempt, proposal_path):
             "D2 device journal differs from allocation",
         )
         if samples_path.stat().st_size:
-            samples = device_samples(samples_path, device(allocation["gpu_before"])[0])
+            samples = device_samples(
+                samples_path, device(allocation["gpu_before"])[0], fixed_affinity=not d10
+            )
         else:
             require(not resource["complete"], "Completed D2 has an empty device journal")
     elif resource["complete"]:
@@ -1017,6 +1064,11 @@ def review(attempt, proposal_path):
         )
         if d8:
             require(row["pair_id"] == role, f"D8 indexed pair identity differs for {identity}")
+        if d10:
+            require(
+                row["pair_id"] == role and row["d10_placement"] == placement_order[identity],
+                f"D10 indexed placement differs for {identity}",
+            )
         if row.get("returncode") != 0 or not row.get("audit_sha256"):
             runs[identity] = {"status": "incomplete", "returncode": row.get("returncode")}
             if d4:
@@ -1085,15 +1137,18 @@ def review(attempt, proposal_path):
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d5_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
-        if d8 or d9:
+        if d8 or d9 or d10:
             d8_configs = {
                 D2R110_PROPOSAL_NAME: thermal_plan["D2R110_plan_sha256"],
                 D8_PREVIOUS_ANALYSIS: thermal_plan["retained_D7"]["analysis_sha256"],
                 "original-c3-result.json": C3_BLOCKED_SHA,
             }
-            if d9:
+            if d9 or d10:
                 d8_configs[D8_PROPOSAL_NAME] = plan["retained_D8"]["proposal_sha256"]
                 d8_configs[D9_PREVIOUS_ANALYSIS] = plan["retained_D8"]["analysis_sha256"]
+            if d10:
+                d8_configs[D9_PROPOSAL_NAME] = plan["retained_D9"]["proposal_sha256"]
+                d8_configs[D10_PREVIOUS_ANALYSIS] = plan["retained_D9"]["analysis_sha256"]
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d8_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
@@ -1124,6 +1179,34 @@ def review(attempt, proposal_path):
                 f"D2-R conditioning and cleanup lie outside the owned engine for {identity}",
             )
         client, engine = (read_json(leaf / "raw" / f"{name}.json") for name in ("client", "engine"))
+        if d10:
+            check_d9_profile(engine["profile"], plan)
+            require(
+                client["tier"] == engine["tier"] == expected["tier"] == "endpoint"
+                and not list((leaf / "raw").glob("*-step.json")),
+                f"D10 endpoint capture or profile differs for {identity}",
+            )
+            placement = observed_placement(
+                client,
+                engine,
+                identity,
+                placement_order,
+                thermal=thermal,
+                leaf_end_ns=row["ended_monotonic_ns"],
+                pgid=row["engine_pgid"],
+            )
+            roles = placement["roles"]
+            require(d10_roles is None or d10_roles == roles, "D10 allocated CPU topology varied")
+            d10_roles = roles
+            expected_sampler = (
+                roles["client"] if placement["mode"] == "split" else roles["allocated"]
+            )
+            require(
+                row["d10_sampler_affinity"] == expected_sampler,
+                "D10 indexed sampler affinity differs from the placement",
+            )
+            if not pilot:
+                verify_native_sources(plan, read_json(leaf / "raw/sources.json"))
         if d8:
             require(
                 client["tier"] == engine["tier"] == expected["tier"] == "endpoint"
@@ -1190,7 +1273,7 @@ def review(attempt, proposal_path):
                 and "measure_start_ns" not in phases,
                 f"D2 untimed run contains measured data for {identity}",
             )
-            if d8 or d9:
+            if d8 or d9 or d10:
                 require(
                     f"{trace_key}_endpoint_complete" not in row,
                     f"{role} untimed leaf claims endpoint completeness for {identity}",
@@ -1240,6 +1323,11 @@ def review(attempt, proposal_path):
                 for start, end in owned_windows
             )
         ]
+        if d10:
+            require(
+                all(sample["cpu_affinity"] == expected_sampler for sample in owned_samples),
+                f"D10 sampler placement differs during the leaf for {identity}",
+            )
         foreign = {app["pgid"] for sample in owned_samples for app in sample["gpu_apps"]} - {
             row["engine_pgid"]
         }
@@ -1253,6 +1341,8 @@ def review(attempt, proposal_path):
             "thermal_artifact_sha256": row["d2_thermal_sha256"],
             "prelude": prelude,
         }
+        if d10:
+            runs[identity]["placement"] = placement
         if d4:
             runs[identity]["rate_rps"] = rate
         if capacity:
@@ -1292,7 +1382,7 @@ def review(attempt, proposal_path):
             counts[key] == expected["count_per_engine"]
             for key in ("planned", "submitted", "completed", "timely_first_token")
         )
-        if d8 or d9:
+        if d8 or d9 or d10:
             require(
                 row.get(f"{trace_key}_endpoint_complete") is complete,
                 f"{role} indexed endpoint completeness differs for {identity}",
@@ -1304,10 +1394,24 @@ def review(attempt, proposal_path):
             metrics=metrics,
             endpoint_evidence_complete=complete,
         )
-        if native_timing or d9 and stepped:
+        if native_timing or d9 and stepped or d10:
             runs[identity]["native_timing"] = timing_leaf(
                 client, engine, workload, gates, leaf_end_ns=row["ended_monotonic_ns"]
             )
+        if d10:
+            node_placement = row.get("d10_placement_verified")
+            require(
+                node_placement is True
+                or (
+                    node_placement is None
+                    and identity == rows[-1]["id"]
+                    and not resource["complete"]
+                ),
+                "D10 indexed placement verification is missing or malformed",
+            )
+            if node_placement is None:
+                runs[identity]["placement"]["verified"] = False
+            trace_clients[identity] = client
         if uses_steps:
             trace_clients[identity] = client
             if stepped and trace["status"] == "complete":
@@ -1323,6 +1427,22 @@ def review(attempt, proposal_path):
             valid_metrics[identity] = metrics
             requests[identity] = {row["request_id"]: row for row in client["requests"]}
     require(len(environments) <= 1, "D2 node clock domain or engine profile varied")
+
+    if d10:
+        return d10_report(
+            node,
+            d10_lineage(plan, proposal_sha),
+            commit,
+            resource,
+            history,
+            target,
+            runs,
+            trace_clients,
+            gates,
+            limits,
+            placement_order,
+            compare_thermal,
+        )
 
     if d9:
         from m5_d9_audit import d9_report

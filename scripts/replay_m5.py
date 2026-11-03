@@ -339,6 +339,7 @@ async def _run(
     d5_expected_profile=None,
     pilot_temperature_range=None,
     trace_plan=None,
+    d10_placement_mode=None,
 ):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
@@ -398,6 +399,7 @@ async def _run(
     deadline_ns = client["deadline_ns"]
     client["clock"] = clock_identity()
     d2_thermal = None
+    host_placement = None
     if args.d2_role is not None:
         from m5_d2_thermal import target_from_plateau
 
@@ -405,7 +407,8 @@ async def _run(
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D8_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(
-            getattr(args, "d9_plan", None)
+            getattr(args, "d10_plan", None)
+            or getattr(args, "d9_plan", None)
             or getattr(args, "d7_plan", None)
             or getattr(args, "d6_plan", None)
             or getattr(args, "d5r_plan", None)
@@ -519,6 +522,12 @@ async def _run(
             ):
                 raise RuntimeError("D3 native stats or distinct EngineCore process missing")
             verify_clock_brackets(samples, config["gates"]["max_clock_rtt_ns"])
+        if d10_placement_mode is not None:
+            from vllm_prefix_scheduler.m5_d10_placement import HostPlacement
+
+            host_placement = HostPlacement(armed["clock"]["pid"], d10_placement_mode)
+            client["d10_placement"] = host_placement.evidence
+            host_placement.setup()
         if armed["profile"]["block_size"] != workload["block_size"]:
             raise RuntimeError("M5 workload and active cache block sizes differ")
         if (
@@ -569,6 +578,8 @@ async def _run(
                 raise RuntimeError("M5 fixed cache priming failed")
         await drain("measure-start", stage="measure")
         phases["warmup_end_ns"] = time.monotonic_ns()
+        if host_placement is not None:
+            host_placement.observe("before_measure")
 
         if args.mechanism is not None:
             await llm.pause_generation(mode="keep", clear_cache=False)
@@ -639,6 +650,8 @@ async def _run(
         await asyncio.gather(*tasks)
         phases["drain_end_ns"] = time.monotonic_ns()
         await drain("measure-drained", stage="done")
+        if host_placement is not None:
+            host_placement.observe("after_measure")
         if stepped and trace_role == "D9":
             horizon_ns = phases["measure_start_ns"] + trace_plan["trace"]["windows_ns"][-1][1]
             await _wait_until(horizon_ns)
@@ -693,8 +706,12 @@ async def _run(
                 try:
                     llm.shutdown()
                 finally:
-                    if d2_thermal is not None:
-                        _dump(args.output / "d2-thermal.json", d2_thermal)
+                    try:
+                        if host_placement is not None:
+                            host_placement.restore_client()
+                    finally:
+                        if d2_thermal is not None:
+                            _dump(args.output / "d2-thermal.json", d2_thermal)
         elif d2_thermal is not None:
             _dump(args.output / "d2-thermal.json", d2_thermal)
 
@@ -827,6 +844,7 @@ def main():
         "d7-plan",
         "d8-inherited-plan",
         "d9-plan",
+        "d10-plan",
     ):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
@@ -860,6 +878,8 @@ def main():
         parser.error("D8 inherited plan requires the original endpoint replay")
     if args.d9_plan is not None and args.d8_inherited_plan is None:
         parser.error("D9 requires the original D8 and inherited D2-R110 plans")
+    if args.d10_plan is not None and (args.d8_inherited_plan is None or args.d9_plan is not None):
+        parser.error("D10 requires the original D8 and inherited D2-R110 plans")
     native_timing = None
     preheat_workload = None
     d5_expected_profile = None
@@ -904,7 +924,21 @@ def main():
             native_timing = d3_plan(plan)["native_timing"]
         elif plan["role"] == D8_ROLE:
             try:
-                if args.d9_plan is None:
+                if args.d10_plan is not None:
+                    from vllm_prefix_scheduler.m5_d10 import d10_plan
+
+                    placement_plan = d10_plan(args.d10_plan, args.d2_plan, args.d8_inherited_plan)
+                    placements = dict(
+                        zip(
+                            placement_plan["runs"],
+                            ("inherited", *placement_plan["placement_order"]),
+                            strict=True,
+                        )
+                    )
+                    thermal_options["d10_placement_mode"] = placements[args.pair_id]
+                    if args.d2_role == "measure":
+                        native_timing = placement_plan["native_timing"]
+                elif args.d9_plan is None:
                     d8_plan(args.d2_plan, args.d8_inherited_plan)
                 else:
                     from vllm_prefix_scheduler.m5_d9 import d9_plan

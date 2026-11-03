@@ -46,6 +46,8 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D8_ROLE,
     D9_PLAN_FILENAME,
     D9_ROLE,
+    D10_PLAN_FILENAME,
+    D10_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
@@ -114,6 +116,13 @@ from vllm_prefix_scheduler.m5_d9 import (  # noqa: E402
     D9_PROPOSAL_NAME,
     d9_predecessor,
     d9_specs,
+)
+from vllm_prefix_scheduler.m5_d10 import (  # noqa: E402
+    D10_PREVIOUS_ANALYSIS,
+    D10_PROPOSAL_NAME,
+    d10_plan,
+    d10_predecessor,
+    d10_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -231,6 +240,7 @@ from vllm_prefix_scheduler.m5_d6 import D6_PREVIOUS_ANALYSIS, D6_PROPOSAL_NAME, 
 from vllm_prefix_scheduler.m5_d7 import D7_LATE_TIMELINE, D7_PREVIOUS_ANALYSIS, d7_specs
 from vllm_prefix_scheduler.m5_d8 import D8_PREVIOUS_ANALYSIS, d8_specs
 from vllm_prefix_scheduler.m5_d9 import staged_d9_specs
+from vllm_prefix_scheduler.m5_d10 import staged_d10_specs
 config, proposal = map(Path, sys.argv[1:3])
 staged = proposal.parent
 common = (staged / "original-c3-result.json", staged / D3_PROPOSAL_NAME)
@@ -258,9 +268,11 @@ elif sys.argv[3] == "D7":
 elif sys.argv[3] == "D8":
     specs = d8_specs(read_json(config), proposal, staged / "input.json", common[0],
                      staged / D2R110_PROPOSAL_NAME, staged / D8_PREVIOUS_ANALYSIS)
-else:
-    assert sys.argv[3] == "D9"
+elif sys.argv[3] == "D9":
     specs = staged_d9_specs(config, proposal)
+else:
+    assert sys.argv[3] == "D10"
+    specs = staged_d10_specs(config, proposal)
 print(json.dumps(specs))
 """
     result = remote(
@@ -348,13 +360,39 @@ def d9_submission_preflight(review, commit, staged_inputs, specs, plan):
     return digest(report_path)
 
 
-def d9_no_prior_intent(history):
+def d10_submission_preflight(review, commit, staged_inputs, specs):
+    path = review / "login-stage-preflight.json"
+    report = read_json(path)
+    source = report["source"]
+    source_count = len(
+        {
+            **read_json(CONFIG.with_name("native-m2b.json"))["source_sha256"],
+            **read_json(CONFIG)["extra_upstream_sha256"],
+        }
+    )
+    require(
+        report["execution_commit"] == commit
+        and type(report["gpu_allocations"]) is int
+        and report["gpu_allocations"] == 0
+        and report["verified_inputs_sha256"]
+        == {name: digest(source_path) for name, source_path in staged_inputs.items()}
+        and report["runs"] == specs
+        and source["verified_count"] == source_count
+        and source["python"] == [3, 12, 16]
+        and source["vllm"] == "0.32.0"
+        and source["clock"] == "clock_gettime(CLOCK_MONOTONIC)"
+        and report["placement_cpu_verified"] is True,
+        "D10 CPU preflight differs from the frozen source, inputs or placement proof",
+    )
+    return digest(path)
+
+
+def d9_no_prior_intent(history, role=D9_ROLE):
     require(
         all(
-            read_json(path / "planned.json")["role"] != D9_ROLE
-            for path in submitted_attempts(history)
+            read_json(path / "planned.json")["role"] != role for path in submitted_attempts(history)
         ),
-        "D9 already has a durable submission intent or receipt and has no retry allowance",
+        f"{role} already has a durable submission intent or receipt and has no retry allowance",
     )
 
 
@@ -533,14 +571,14 @@ def submit(args):
     HISTORY.mkdir(parents=True, exist_ok=True)
     with (HISTORY.parent / "controller.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.role == D9_ROLE:
-            d9_no_prior_intent(HISTORY)
+        if args.role in (D9_ROLE, D10_ROLE):
+            d9_no_prior_intent(HISTORY, args.role)
         history = audit_history(HISTORY)
         completed = snapshot_previous(HISTORY, args.role, args.phase, auth, commit)
         diagnostic = args.role in DIAGNOSTIC_ROLES
         stage_index = 0
         retained_analyses = {}
-        d9_cpu_preflight_sha256 = None
+        cpu_preflight_sha256 = None
         if diagnostic:
             previous_slots = {
                 D1_ROLE: 5,
@@ -555,6 +593,7 @@ def submit(args):
                 D7_ROLE: 14,
                 D8_ROLE: 15,
                 D9_ROLE: 16,
+                D10_ROLE: 17,
             }
             require(
                 len(history) == previous_slots[args.role]
@@ -792,7 +831,7 @@ def submit(args):
                     D8_PREVIOUS_ANALYSIS: previous_d7,
                     D9_PREVIOUS_ANALYSIS: previous_d8,
                 }
-                d9_cpu_preflight_sha256 = d9_submission_preflight(
+                cpu_preflight_sha256 = d9_submission_preflight(
                     HISTORY.parent / "d9-review",
                     commit,
                     {
@@ -803,6 +842,61 @@ def submit(args):
                     },
                     diagnostic_run_specs,
                     read_json(proposal),
+                )
+            elif args.role == D10_ROLE:
+                previous = HISTORY / "d9-01"
+                require(
+                    history[-1]["role"] == D9_ROLE
+                    and history[-1] == audit_attempt(previous, require_completed=True),
+                    "D10 requires the retained D9 allocation and release",
+                )
+                proposal = CONFIG.with_name(D10_PLAN_FILENAME)
+                inherited_d8 = CONFIG.with_name(D8_PLAN_FILENAME)
+                inherited_d2r110 = CONFIG.with_name(D2R110_PLAN_FILENAME)
+                inherited_d9 = CONFIG.with_name(D9_PLAN_FILENAME)
+                previous_d7 = HISTORY.parent / "d7-review/analysis-d7-01.json"
+                previous_d8 = HISTORY.parent / "d8-review/analysis-d8-01.json"
+                previous_d9 = HISTORY.parent / "d9-review/analysis-d9-01.json"
+                plan = d10_plan(proposal, inherited_d8, inherited_d2r110)
+                report = d10_predecessor(plan, previous_d9)
+                require(
+                    report["resource_ledger"] == json.loads(json.dumps(history, default=str))
+                    and report["resource_release"] == report["resource_ledger"][-1]
+                    and report["execution_commit"]
+                    == read_json(previous / "planned.json")["execution_commit"],
+                    "D10 retained D9 analysis is detached from the prior releases",
+                )
+                diagnostic_run_specs = d10_specs(
+                    d9_specs(
+                        config,
+                        inherited_d9,
+                        input_table,
+                        old_result,
+                        inherited_d8,
+                        inherited_d2r110,
+                        previous_d7,
+                        previous_d8,
+                    ),
+                    plan,
+                )
+                retained_analyses = {
+                    D8_PROPOSAL_NAME: inherited_d8,
+                    D2R110_PROPOSAL_NAME: inherited_d2r110,
+                    D8_PREVIOUS_ANALYSIS: previous_d7,
+                    D9_PREVIOUS_ANALYSIS: previous_d8,
+                    D9_PROPOSAL_NAME: inherited_d9,
+                    D10_PREVIOUS_ANALYSIS: previous_d9,
+                }
+                cpu_preflight_sha256 = d10_submission_preflight(
+                    HISTORY.parent / "d10-review",
+                    commit,
+                    {
+                        D10_PROPOSAL_NAME: proposal,
+                        "input.json": input_table,
+                        "original-c3-result.json": old_result,
+                        **retained_analyses,
+                    },
+                    diagnostic_run_specs,
                 )
             else:
                 is_d5r = args.role == D5R_ROLE
@@ -938,6 +1032,7 @@ def submit(args):
                 D7_ROLE: D7_PROPOSAL_NAME,
                 D8_ROLE: D8_PROPOSAL_NAME,
                 D9_ROLE: D9_PROPOSAL_NAME,
+                D10_ROLE: D10_PROPOSAL_NAME,
             }
             name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
@@ -950,7 +1045,16 @@ def submit(args):
             for filename, analysis in retained_analyses.items():
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
-            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE, D8_ROLE, D9_ROLE):
+            if args.role in (
+                D4_ROLE,
+                D5_ROLE,
+                D5R_ROLE,
+                D6_ROLE,
+                D7_ROLE,
+                D8_ROLE,
+                D9_ROLE,
+                D10_ROLE,
+            ):
                 node_specs = preflight_diagnostic_stage(
                     ssh,
                     paths["remote_gpu_environment"] / "bin/python",
@@ -1002,8 +1106,8 @@ def submit(args):
         (staging / "authorization.json").write_bytes(args.authorization.read_bytes())
         if node_specs is not None:
             stage_preflight = {"runs": node_specs}
-            if d9_cpu_preflight_sha256 is not None:
-                stage_preflight["cpu_preflight_sha256"] = d9_cpu_preflight_sha256
+            if cpu_preflight_sha256 is not None:
+                stage_preflight["cpu_preflight_sha256"] = cpu_preflight_sha256
             durable_write(staging / f"{args.role.lower()}-stage-preflight.json", stage_preflight)
         durable_write(staging / "pre-submission-queue.json", before_queue)
         durable_write(

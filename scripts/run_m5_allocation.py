@@ -35,6 +35,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D7_ROLE,
     D8_ROLE,
     D9_ROLE,
+    D10_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -90,6 +91,11 @@ from vllm_prefix_scheduler.m5_d9 import (  # noqa: E402
     D9_RETAINED_FILENAMES,
     check_d9_profile,
     staged_d9_specs,
+)
+from vllm_prefix_scheduler.m5_d10 import (  # noqa: E402
+    D10_RETAINED_FILENAMES,
+    d10_lineage,
+    staged_d10_specs,
 )
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
@@ -330,11 +336,12 @@ def main():
     d7 = args.role == D7_ROLE
     d8 = args.role == D8_ROLE
     d9 = args.role == D9_ROLE
+    d10 = args.role == D10_ROLE
     trace_diagnostic = args.role in (D6_ROLE, D7_ROLE)
     trace_key = args.role.lower()
     d5r = trace_diagnostic or args.role == D5R_ROLE
     d5 = d5r or args.role == D5_ROLE
-    d2 = d4 or d5 or d8 or d9 or args.role in d2_planners
+    d2 = d4 or d5 or d8 or d9 or d10 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
     retained_configs = []
     retained_result = {}
@@ -482,6 +489,19 @@ def main():
             "retained_d8_analysis_sha256": digest(staged / D9_PREVIOUS_ANALYSIS),
             "retained_d7_analysis_sha256": digest(staged / D8_PREVIOUS_ANALYSIS),
         }
+    elif d10:
+        require(
+            auxiliary is not None and digest(auxiliary) == authorization["d10_plan_sha256"],
+            "D10 staged plan differs from authorization",
+        )
+        staged = auxiliary.parent
+        diagnostic_table = staged / "input.json"
+        inherited_d8 = staged / D8_PROPOSAL_NAME
+        inherited_d2r110 = staged / D2R110_PROPOSAL_NAME
+        specs = staged_d10_specs(args.config, auxiliary)
+        retained_configs = [staged / name for name in D10_RETAINED_FILENAMES]
+        d10_plan_record = read_json(auxiliary)
+        retained_result = d10_lineage(d10_plan_record, digest(auxiliary))
     elif diagnostic:
         require(auxiliary is not None, "diagnostic requires its reviewed plan and archived input")
         diagnostic_table = auxiliary.parent / "input.json"
@@ -552,7 +572,7 @@ def main():
     )
     start = time.monotonic_ns()
     work_limit = config["gates"]["max_allocation_work_s"]
-    if trace_diagnostic or d9:
+    if trace_diagnostic or d9 or d10:
         work_limit = read_json(auxiliary)["budget"]["work_deadline_s"]
     deadline = start + work_limit * 10**9
 
@@ -615,8 +635,37 @@ def main():
     sampler = threading.Thread(target=sample, daemon=True)
     sampler.start()
 
+    placement_roles = None
+
     def run_spec(spec):
-        nonlocal active, owner_path
+        nonlocal active, owner_path, placement_roles
+        sampler_affinity = None
+        if d10:
+            from vllm_prefix_scheduler.m5_d10_placement import choose_roles
+
+            if placement_roles is None:
+                allocated = sorted(os.sched_getaffinity(0))
+                require(
+                    len(allocated)
+                    == d10_plan_record["placement_policy"]["allocated_logical_cpu_count"],
+                    "D10 allocated CPU mask differs from the frozen eight CPUs",
+                )
+                placement_roles = choose_roles(allocated)
+            sampler_affinity = placement_roles[
+                "client" if spec["d10_placement"] == "split" else "allocated"
+            ]
+            sampler_id = sampler.native_id
+            require(
+                sampler_id is not None
+                and sampler_id != threading.get_native_id()
+                and sampler.is_alive(),
+                "D10 sampler thread identity is invalid",
+            )
+            os.sched_setaffinity(sampler_id, sampler_affinity)
+            require(
+                os.sched_getaffinity(sampler_id) == set(sampler_affinity),
+                "D10 sampler affinity differs",
+            )
         leaf = args.output / spec["id"]
         leaf.mkdir()
         stepped = (trace_diagnostic or d9) and spec[f"{trace_key}_capture"] == "step"
@@ -674,7 +723,7 @@ def main():
                 "--d2-role",
                 "pilot" if pilot else "measure",
                 "--d2-plan",
-                str(inherited if d4 or d5 else inherited_d8 if d9 else auxiliary),
+                str(inherited if d4 or d5 else inherited_d8 if d9 or d10 else auxiliary),
                 "--d2-samples",
                 str(d2_samples),
             ]
@@ -691,10 +740,10 @@ def main():
                 command += ["--d6-plan", str(inherited_d6 if d7 else auxiliary)]
             if d7:
                 command += ["--d7-plan", str(auxiliary)]
-            if d8 or d9:
+            if d8 or d9 or d10:
                 command += ["--d8-inherited-plan", str(inherited_d2r110)]
-            if d9:
-                command += ["--d9-plan", str(auxiliary)]
+            if d9 or d10:
+                command += [f"--{trace_key}-plan", str(auxiliary)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -742,6 +791,8 @@ def main():
             "returncode": None,
             "remaining_processes": None,
         }
+        if d10:
+            result["d10_sampler_affinity"] = sampler_affinity
         if diagnostic and not d2:
             result["diagnostic_device_before_sha256"] = digest(
                 leaf / "diagnostic-device-before.json"
@@ -793,8 +844,11 @@ def main():
             expected = "target-frozen" if pilot else "admitted"
             require(thermal_status in {expected, "invalid"}, "D2 thermal replay status differs")
             result["d2_thermal_status"] = thermal_status
-            if d9 and thermal_status == expected:
-                check_d9_profile(read_json(raw / "engine.json")["profile"], d9_plan_record)
+            if (d9 or d10) and thermal_status == expected:
+                check_d9_profile(
+                    read_json(raw / "engine.json")["profile"],
+                    d10_plan_record if d10 else d9_plan_record,
+                )
             if stepped:
                 step_trace = raw / f"{trace_key}-step.json"
                 step_status = read_json(step_trace)["status"]
@@ -835,7 +889,7 @@ def main():
         ]
         auxiliary_command(check, remaining())
         result["audit_sha256"] = digest(audit)
-        if d8 or d9:
+        if d8 or d9 or d10:
             counts = read_json(audit)["metrics"]["strata"]["all"]["counts"]
             result[f"{trace_key}_endpoint_complete"] = all(
                 counts[key] == spec["count"]
@@ -871,6 +925,44 @@ def main():
                     ],
                     remaining(),
                 )
+            return True
+        if d10:
+            if not result["d10_endpoint_complete"]:
+                return False
+            auxiliary_command(
+                [
+                    python,
+                    "scripts/check_m5_d10.py",
+                    "--raw",
+                    str(raw),
+                    "--config",
+                    str(args.config),
+                    "--proposal",
+                    str(auxiliary),
+                    "--identity",
+                    spec["id"],
+                    "--leaf-end-ns",
+                    str(result["ended_monotonic_ns"]),
+                ],
+                remaining(),
+            )
+            client = read_json(raw / "client.json")
+            phases = client["phases"]
+            in_window = [
+                sample
+                for sample in (json.loads(line) for line in d2_samples.read_text().split("\n")[:-1])
+                if phases["measure_start_ns"] <= sample["monotonic_ns"] <= phases["drain_end_ns"]
+            ]
+            require(
+                in_window
+                and all(sample["cpu_affinity"] == sampler_affinity for sample in in_window),
+                "D10 sampler placement differs inside measurement window",
+            )
+            result["d10_placement_verified"] = True
+            atomic_write(
+                args.output / "index.json",
+                {"schema_version": 1, "stage": args.role, "runs": results},
+            )
             return True
         if not trace_diagnostic:
             return True
@@ -1008,6 +1100,24 @@ def main():
                     "audited_runs": count,
                     "retained_c3_sha256": C3_BLOCKED_SHA,
                     **retained_result,
+                },
+            )
+        elif d10:
+            count = sum(
+                "audit_sha256" in row and row.get("d2_thermal_status") == "admitted"
+                for row in results
+            )
+            complete = count == len(specs) - 1 and all(
+                row.get("d10_endpoint_complete") is True
+                and row.get("d10_placement_verified") is True
+                for row in results[1:]
+            )
+            atomic_write(
+                args.output / "d10-result.json",
+                {
+                    **retained_result,
+                    "status": "diagnostic-complete" if complete else "diagnostic-incomplete",
+                    "audited_runs": count,
                 },
             )
         elif d2:
