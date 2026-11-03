@@ -59,3 +59,24 @@ D1 使用最后一次获批分配，独立核验 Slurm 终态为 COMPLETED/0:0�
 D2 使用单独获批的一次单卡分配。Slurm 终态为 COMPLETED/0:0，实际 510 秒，释放审查通过。独立热试跑成功冻结目标。E1/E2 通过热状态可比性和原 TTFT、吞吐门槛。E3 在预定的 75 秒内没有满足 20 秒稳定窗口的温差门槛，按方案停止计时，E4 未启动。E3/E4 与 E1/E4 缺少比较数据，整组热状态与受控 E/E 稳定性均未验证。原 C3 的 blocked、原 TTFT 和吞吐门槛保留，资格复验未启动。
 
 D2 私有原件在 `runs/M5-paired-performance/attempts/d2-01/`，独立结果在 `runs/M5-paired-performance/d2-independent-review/analysis.json`，SHA-256 为 `0f369e956dd62373a310d467054d684e371b63303662563b7eba790ed12400ba`。E3 热窗口补充复算 SHA-256 为 `097b91cdfaf6a6311250141abb25a9b6cb6f622db3fa8ad75c647f546f997eeb`。从 D2 执行冻结运行 `scripts/check_m5_d2.py`，传入私有作业、原方案和新的输出路径，可重放同一审查。
+
+## 离线修订验收
+
+离线实现与验证 SHA 为 `b641d64a283af5318a9bcf628717194f5fd60112`。新冻结启用 M5 测量和资源 schema 2。候选决策、淘汰账本、全冷零命中和资源归属按逐条证据核验。正式吞吐配对使用共同计划窗口，调度外层计时只在 profile 采集。发布重新审查正式原件并绑定独立签认、正负控和资源记录，按显式白名单生成材料。校准原件在正式冻结阶段独立复算，发布阶段绑定校准报告与冻结表哈希。
+
+| 核验 | 结果 |
+| --- | --- |
+| 完整本地命令 | `UV_OFFLINE=1 make check` 通过。759 项测试通过，3 项固定 Linux 原生 opt-in 跳过。Ruff、脚本语法、已有证据校验和打包通过。默认缓存刷新在本地网络权限下失败，复跑使用已有缓存。 |
+| 真实子进程 | 封存输入专项为 3 项正控、5 项负控，按预期退出。另有 27 份 schema 2 派生正控覆盖 C1–C3 的 1,156 条请求。派生字段用于本地验证审查契约。正式发布控制仍需完整正式原件。 |
+| 封存原件 | 按各自执行 SHA 重放 C1–C3、D1、D2，五份结果 SHA-256 与历史记录相同。1,012 份原件哈希一致，7 次分配的终态与释放证据仍通过。 |
+| 实验资格 | 原 C3 仍为 `blocked`。TTFT p95 绝对差仍须在 `max(2 ms, 参考轮 p95 × 5%)` 内，请求与 token 吞吐仍各在 ±5% 内。D2 整组仍未验证。D2-R 待单独审批，正式运行仍为 0/64 轮。 |
+
+私有验收入口为 `runs/M5-paired-performance/offline-repair-review/make-check-offline/`。`manifest.json` SHA-256 为 `66ec13f1ec9714e372a6a1ef6a4ed686100da720d1ab9b6dec9445a63b83b98c`，`acceptance.json` SHA-256 为 `b0735bba7146c5778eee3441c5f7ee701a71c246ee09164224d5d892058e9bf8`。同级目录保存历史复算脚本、逐条原件哈希、子进程退出和私有记录。可在该离线实现 SHA 上复查。
+
+```bash
+UV_OFFLINE=1 make check
+python scripts/check_run_evidence.py runs/M5-paired-performance/offline-repair-review/make-check-offline --require-command-success --require-accepted
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
+
+本次新增 GPU 作业为 0，累计资源账本仍为 7 次、140 申请分钟。草稿 PR #9 保持待总站验收。D2-R 仍按前述热状态门槛另行审批，诊断完成前资格复验保持受阻。
