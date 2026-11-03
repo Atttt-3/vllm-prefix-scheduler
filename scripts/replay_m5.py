@@ -1,0 +1,376 @@
+"""Replay one frozen M5 workload against one freshly initialized native AsyncLLM."""
+
+import argparse
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from m3_sources import collect_sources, sha256
+
+from vllm_prefix_scheduler.m5_workload import MODES
+
+ROOT = Path(__file__).resolve().parents[1]
+TIER = ("endpoint", "light", "profile")
+
+
+def _dump(path, value):
+    with path.open("x") as stream:
+        json.dump(value, stream, separators=(",", ":"), allow_nan=False)
+        stream.write("\n")
+
+
+def _single_worker(values):
+    if len(values) != 1:
+        raise RuntimeError("M5 replay requires exactly one worker")
+    return values[0]
+
+
+def _binding(args, config):
+    job_id = os.environ.get("SLURM_JOB_ID", "")
+    if not __debug__ or sys.platform != "linux" or not job_id.isdigit():
+        raise RuntimeError("M5 replay requires unoptimized Linux and an owned Slurm allocation")
+    if args.sources is None:
+        source = collect_sources(ROOT, args.model, config)
+    else:
+        source = json.loads(args.sources.read_text())
+        head = subprocess.check_output(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"], text=True
+        ).strip()
+        dirty = subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"])
+        if (
+            dirty
+            or source["project_commit"] != head
+            or source["project_dirty"] is not False
+            or source["python_version"] != "3.12.16"
+            or source["packages"]["vllm"] != "0.32.0"
+            or source["upstream_commit"] != config["upstream_commit"]
+            or source["model"]["revision"] != config["model_revision"]
+            or source["model"]["tokenizer_revision"] != config["tokenizer_revision"]
+            or Path(source["model"]["directory"]).resolve() != args.model.resolve()
+        ):
+            raise RuntimeError("M5 precomputed source document does not bind the replay runtime")
+    return {**source, "job_id": job_id}
+
+
+def _entry(plan, planned_ns):
+    return {
+        "request_id": plan["request_id"],
+        "planned_ns": planned_ns,
+        "submit_ns": None,
+        "first_token_ns": None,
+        "last_token_ns": None,
+        "end_ns": None,
+        "status": "unfinished",
+        "token_ids": [],
+        "cached_tokens": None,
+        "chunk_tokens": [],
+    }
+
+
+async def _consume(llm, plan, row, params, deadline_ns):
+    # Stamp on the executing client task, directly before invoking generate.
+    row["submit_ns"] = time.monotonic_ns()
+    remaining = (deadline_ns - row["submit_ns"]) / 1_000_000_000
+    if remaining <= 0:
+        row.update(submit_ns=None, status="timeout", end_ns=time.monotonic_ns())
+        return
+    finished = False
+    try:
+        async with asyncio.timeout(remaining):
+            async for output in llm.generate(
+                {"prompt_token_ids": plan["prompt_token_ids"], "cache_salt": plan["cache_salt"]},
+                params,
+                request_id=plan["request_id"],
+            ):
+                now = time.monotonic_ns()
+                chunk = list(output.outputs[0].token_ids) if output.outputs else []
+                if chunk:
+                    if row["first_token_ns"] is None:
+                        row["first_token_ns"] = now
+                    row["last_token_ns"] = now
+                    row["chunk_tokens"].append({"at_ns": now, "token_ids": chunk})
+                    row["token_ids"].extend(chunk)
+                if output.num_cached_tokens is not None:
+                    row["cached_tokens"] = output.num_cached_tokens
+                if output.finished:
+                    finished = True
+            row["status"] = "completed" if finished else "failed"
+    except TimeoutError:
+        row["status"] = "timeout"
+    except asyncio.CancelledError:
+        row["status"] = "cancelled"
+        raise
+    except Exception as error:
+        row.update(status="failed", error=type(error).__name__)
+    finally:
+        row["end_ns"] = time.monotonic_ns()
+        if row["status"] == "completed" and row["end_ns"] > deadline_ns:
+            row["status"] = "timeout"
+
+
+async def _sleep_until(deadline_ns):
+    while (remaining := deadline_ns - time.monotonic_ns()) > 0:
+        await asyncio.sleep(remaining / 1_000_000_000)
+
+
+async def _open_loop(plans, rows, launch):
+    """Stamp and spawn from absolute deadlines, independent of prior request results."""
+    for plan, row in zip(plans, rows, strict=True):
+        await _sleep_until(row["planned_ns"])
+        launch(plan, row)
+
+
+def _drained(row):
+    fields = (
+        "requests",
+        "waiting",
+        "running",
+        "holding",
+        "deferred",
+        "finished_req_ids",
+        "reset_preempted_req_ids",
+        "inflight_prefills",
+        "deferred_frees",
+        "request_blocks",
+        "non_null_ref_sum",
+        "pending_batches",
+        "inflight_tokens",
+        "stale_tokens",
+        "output_placeholders",
+        "guard_records",
+        "guard_fault_code",
+        "runner_request_ids",
+        "runner_pending",
+        "m5_pending",
+        "observation_errors",
+    )
+    return not any(row.get(key) for key in fields) and (
+        "free_count" not in row
+        or len(
+            {
+                row[key]
+                for key in (
+                    "free_count",
+                    "free_unique_count",
+                    "free_traversed_count",
+                    "total_non_null_blocks",
+                )
+            }
+        )
+        == 1
+    )
+
+
+async def _run(args, config, workload, client):
+    from vllm import SamplingParams
+    from vllm.engine.arg_utils import AsyncEngineArgs
+    from vllm.sampling_params import RequestOutputKind
+    from vllm.v1.engine.async_llm import AsyncLLM
+
+    from vllm_prefix_scheduler.m5_observer import clock_identity
+
+    options = json.loads((ROOT / config["baseline_config"]).read_text())
+    options.update(
+        model=str(args.model.resolve()),
+        tokenizer=str(args.model.resolve()),
+        block_size=config["block_size"],
+        attention_config={"backend": config["attention_backend"]},
+        worker_extension_cls="vllm_prefix_scheduler.m5_observer.M5WorkerExtension",
+    )
+    if args.tier == "endpoint":
+        if args.mode != "native":
+            options["scheduler_cls"] = "vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler"
+    else:
+        observer = "M5NativeScheduler" if args.mode == "native" else "M5PrefixScheduler"
+        options["scheduler_cls"] = f"vllm_prefix_scheduler.m5_observer.{observer}"
+    if args.mode != "native":
+        options["additional_config"] = {
+            "prefix_scheduler": {
+                "mode": args.mode,
+                "window": config["window"],
+                "max_wait_ms": config["max_wait_ms"],
+            }
+        }
+    if args.mechanism is not None:
+        diag = config["scenarios"]["mechanism"]
+        options.update(
+            num_gpu_blocks_override=diag[f"{args.mechanism}_blocks"],
+            max_model_len=diag["max_model_len"],
+        )
+
+    llm = None
+    tasks = []
+    params = SamplingParams(output_kind=RequestOutputKind.DELTA, **workload["sampling"])
+    phases = client["phases"]
+    deadline_ns = client["deadline_ns"]
+    client["clock"] = clock_identity()
+
+    async def rpc(name, **kwargs):
+        return _single_worker(await llm.collective_rpc(name, timeout=15, kwargs=kwargs))
+
+    async def drain(label, stage=None):
+        expires = time.monotonic_ns() + deadline_ns
+        while True:
+            row = await rpc("m5_boundary", label=f"{label}-poll")
+            if _drained(row) and llm.get_num_unfinished_requests() == 0:
+                return await rpc("m5_boundary", label=label, stage=stage)
+            if time.monotonic_ns() >= expires:
+                raise TimeoutError(f"native engine failed to drain at {label}")
+            await asyncio.sleep(0.01)
+
+    def launch(plan, row):
+        tasks.append(
+            asyncio.create_task(_consume(llm, plan, row, params, row["planned_ns"] + deadline_ns))
+        )
+
+    try:
+        phases["load_start_ns"] = time.monotonic_ns()
+        llm = AsyncLLM.from_engine_args(AsyncEngineArgs(**options))
+        phases["load_end_ns"] = time.monotonic_ns()
+        limit = config.get("observation_buffer_rows", 250_000)
+        armed = await rpc("m5_arm", tier=args.tier, limit=limit)
+        samples = []
+        for _ in range(5):
+            send_ns = time.monotonic_ns()
+            clock = await rpc("m5_clock")
+            recv_ns = time.monotonic_ns()
+            samples.append(
+                {"send_ns": send_ns, "engine_ns": clock["engine_ns"], "recv_ns": recv_ns}
+            )
+        shortest = min(samples, key=lambda row: row["recv_ns"] - row["send_ns"])
+        send_ns, engine_ns, recv_ns = (shortest[key] for key in ("send_ns", "engine_ns", "recv_ns"))
+        client["clock_check"] = shortest
+        client["clock_samples"] = samples
+        same_domain = ("clock", "host", "boot_id", "time_namespace")
+        if (
+            not all(client["clock"][key] == armed["clock"][key] for key in same_domain)
+            or not send_ns <= engine_ns <= recv_ns
+            or recv_ns - send_ns > config["gates"]["max_clock_rtt_ns"]
+        ):
+            raise RuntimeError("M5 could not verify a shared CLOCK_MONOTONIC domain")
+        if armed["profile"]["block_size"] != workload["block_size"]:
+            raise RuntimeError("M5 workload and active cache block sizes differ")
+        if (
+            args.mechanism is not None
+            and armed["profile"]["num_gpu_blocks"] != options["num_gpu_blocks_override"]
+        ):
+            raise RuntimeError("M5 mechanism override not reflected in actual block count")
+
+        phases["warmup_start_ns"] = time.monotonic_ns()
+        primer = {**workload["requests"][0], "request_id": "runtime-primer"}
+        row = _entry(primer, time.monotonic_ns())
+        await _consume(llm, primer, row, params, row["planned_ns"] + deadline_ns)
+        client["primer"] = row
+        if row["status"] != "completed":
+            raise RuntimeError("M5 native runtime primer failed")
+        await drain("pre-reset")
+        if not await llm.reset_prefix_cache(reset_running_requests=False, reset_connector=False):
+            raise RuntimeError("M5 idle prefix cache reset failed")
+        cleared = await drain("cache-reset")
+        if args.tier != "endpoint" and cleared["cached_block_count"] != 0:
+            raise RuntimeError("M5 cache reset left native APC entries")
+        for plan in workload["warmup"]:
+            row = _entry(plan, time.monotonic_ns())
+            client["warmup"].append(row)
+            await _consume(llm, plan, row, params, row["planned_ns"] + deadline_ns)
+            if row["status"] != "completed":
+                raise RuntimeError("M5 fixed cache priming failed")
+        await drain("measure-start", stage="measure")
+        phases["warmup_end_ns"] = time.monotonic_ns()
+
+        if args.mechanism is not None:
+            await llm.pause_generation(mode="keep", clear_cache=False)
+        phases["measure_start_ns"] = time.monotonic_ns() + 20_000_000
+        client["requests"] = [
+            _entry(plan, phases["measure_start_ns"] + plan["offset_ns"])
+            for plan in workload["requests"]
+        ]
+        phases["arrival_end_ns"] = client["requests"][-1]["planned_ns"]
+        client["drain_deadline_ns"] = phases["arrival_end_ns"] + deadline_ns
+        await _open_loop(workload["requests"], client["requests"], launch)
+        if args.mechanism is not None:
+            expires = time.monotonic_ns() + 2_000_000_000
+            while True:
+                probes = await rpc("m5_probe", request_ids=["B", "C"])
+                if len(probes) == 2:
+                    break
+                if time.monotonic_ns() >= expires:
+                    raise RuntimeError("mechanism did not enqueue both requests while paused")
+                await asyncio.sleep(0.002)
+            await llm.resume_generation()
+        await asyncio.gather(*tasks)
+        phases["drain_end_ns"] = time.monotonic_ns()
+        await drain("measure-drained", stage="done")
+    finally:
+        if llm is not None:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                engine = await rpc("m5_export")
+                _dump(args.output / "engine.json", engine)
+                if engine["errors"]:
+                    raise RuntimeError("M5 failed to collect trustworthy native evidence")
+            finally:
+                llm.shutdown()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    for field in ("config", "input", "model", "output"):
+        parser.add_argument(f"--{field}", type=Path, required=True)
+    parser.add_argument("--sources", type=Path)
+    parser.add_argument("--mode", choices=MODES, required=True)
+    parser.add_argument("--tier", choices=TIER, required=True)
+    parser.add_argument("--phase", choices=("formal", "calibration", "diagnostic"), required=True)
+    parser.add_argument("--pair-id", required=True)
+    parser.add_argument("--mechanism", choices=("pressure", "ample"))
+    args = parser.parse_args()
+    config = json.loads(args.config.read_text())
+    workload = json.loads(args.input.read_text())
+    if (
+        workload["task_id"] != config["task_id"]
+        or workload["tokenizer_revision"] != config["tokenizer_revision"]
+        or (workload["scenario"] == "mechanism") != (args.mechanism is not None)
+        or workload["mechanism"] != args.mechanism
+        or (args.mechanism is not None and (args.tier != "profile" or args.phase == "formal"))
+        or (args.phase == "formal" and args.tier != "light")
+    ):
+        parser.error("M5 input, phase and mode do not match the frozen design")
+    os.environ.update(config["environment"])
+    os.environ["M5_WINDOW"] = str(config["window"])
+    args.output.mkdir(parents=True, exist_ok=False)
+    client = {
+        "schema_version": 1,
+        "task_id": config["task_id"],
+        "pair_id": args.pair_id,
+        "scenario": workload["scenario"],
+        "seed": workload["seed"],
+        "mode": args.mode,
+        "tier": args.tier,
+        "phase": args.phase,
+        "input_sha256": sha256(args.input),
+        "config_sha256": sha256(args.config),
+        "deadline_ns": config["gates"]["deadline_ns"],
+        "phases": {},
+        "requests": [_entry(plan, None) for plan in workload["requests"]],
+        "warmup": [],
+    }
+    try:
+        source = _binding(args, config)
+        client["execution_commit"] = source["project_commit"]
+        client["job_id"] = source["job_id"]
+        _dump(args.output / "sources.json", source)
+        asyncio.run(_run(args, config, workload, client))
+    finally:
+        _dump(args.output / "client.json", client)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,503 @@
+"""Run one approved M5 stage or pair inside an existing allocation."""
+
+import argparse
+import json
+import math
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+
+from m3_sources import collect_sources
+from m4_processes import atomic_write
+from run_m3_suite import owned_processes
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
+    TASK,
+    check_authorization,
+    digest,
+    formal_specs,
+    id_ok,
+    read_json,
+    require,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def snapshot():
+    result = {"monotonic_ns": time.monotonic_ns()}
+    queries = {
+        "devices": [
+            "--query-gpu=uuid,name,memory.total,memory.used,utilization.gpu",
+            "--format=csv,noheader,nounits",
+        ],
+        "applications": [
+            "--query-compute-apps=gpu_uuid,pid,used_memory",
+            "--format=csv,noheader,nounits",
+        ],
+    }
+    for key, options in queries.items():
+        try:
+            proc = subprocess.run(
+                ["nvidia-smi", *options], text=True, capture_output=True, timeout=5
+            )
+            result[key] = dict(returncode=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            result[key] = dict(returncode=None, stdout="", stderr=str(error))
+    return result
+
+
+def owner_group(path, job, collector_pid):
+    owner = read_json(path)
+    pgid = owner["pgid"]
+    require(
+        owner["task_id"] == TASK
+        and owner["job_id"] == job
+        and owner["collector_pid"] == collector_pid
+        and owner["uid"] == os.getuid()
+        and type(pgid) is int
+        and pgid > 1
+        and pgid != os.getpgrp()
+        and owner["pid"] == pgid,
+        "unexpected M5 child owner",
+    )
+    return pgid
+
+
+def stop_group(pgid, process=None):
+    if pgid is None:
+        return []
+    for sig, seconds in ((signal.SIGTERM, 8), (signal.SIGKILL, 3)):
+        if process is not None:
+            process.poll()
+        if not owned_processes(pgid):
+            return []
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            pass
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline:
+            if process is not None:
+                process.poll()
+            if not owned_processes(pgid):
+                return []
+            time.sleep(0.05)
+    return owned_processes(pgid)
+
+
+def input_command(python, config, model, table, spec):
+    cmd = [
+        python,
+        "scripts/prepare_m5_inputs.py",
+        "--config",
+        str(config),
+        "--model",
+        str(model),
+        "--output",
+        str(table),
+        "--scenario",
+        spec["scenario"],
+        "--seed",
+        str(spec["seed"]),
+        "--count",
+        str(spec["count"]),
+    ]
+    if spec["rate_rps"] is not None:
+        cmd += ["--rate", str(spec["rate_rps"])]
+    if spec["interval_ms"] is not None:
+        cmd += ["--interval-ms", str(spec["interval_ms"])]
+    if spec.get("mechanism"):
+        cmd += ["--mechanism", spec["mechanism"]]
+    return cmd
+
+
+def auxiliary_command(command, timeout):
+    if timeout < 1:
+        raise TimeoutError("M5 allocation work deadline")
+    subprocess.run(command, cwd=ROOT, check=True, timeout=timeout)
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("config", type=Path)
+    p.add_argument("authorization", type=Path)
+    p.add_argument("phase", choices=("calibration", "formal"))
+    p.add_argument("role")
+    p.add_argument("attempt")
+    p.add_argument("output", type=Path)
+    p.add_argument("model", type=Path)
+    p.add_argument("cache", type=Path)
+    p.add_argument("auxiliary", help="calibration rates or formal freeze, '-' if unused")
+    args = p.parse_args()
+    job = os.environ.get("SLURM_JOB_ID", "")
+    require(
+        sys.platform == "linux" and not sys.flags.optimize and job.isdigit(),
+        "unoptimized Linux interpreter in an owned Slurm allocation required",
+    )
+    require(id_ok(args.attempt), "invalid attempt ID")
+    args.output = args.output.resolve()
+    require(args.output.is_relative_to(ROOT / "runs" / TASK), "use the M5 private runs directory")
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    require(
+        not subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT),
+        "dirty GPU checkout",
+    )
+    config = read_json(args.config)
+    auxiliary = None if args.auxiliary == "-" else Path(args.auxiliary)
+    freeze_path = auxiliary if args.phase == "formal" else None
+    roles = check_authorization(
+        read_json(args.authorization), args.config, commit, args.phase, freeze_path=freeze_path
+    )
+    require(args.role in roles, "M5 role outside approved budget")
+    freeze = read_json(freeze_path) if freeze_path else None
+    rates = None
+    dress_reports = []
+    if auxiliary and freeze is None:
+        dependencies = read_json(auxiliary)
+        require(
+            dependencies["config_sha256"] == digest(args.config),
+            "calibration dependencies detached",
+        )
+        for item in dependencies["reports"]:
+            path = Path(item["path"])
+            require(digest(path) == item["sha256"], "calibration dependency hash differs")
+            report = read_json(path)
+            require(
+                report["status"] == "qualified"
+                and report["config_sha256"] == digest(args.config)
+                and report["stage"] == item["stage"],
+                "calibration dependency not qualified",
+            )
+            if item["stage"] == "C2":
+                rates = report["selected_rates"]
+            else:
+                dress_reports.append(report)
+    if freeze:
+        specs = formal_specs(config, freeze, args.role)
+    else:
+        from plan_m5_calibration import plan_stage
+
+        specs = plan_stage(config, args.role, rates=rates)
+        if isinstance(specs, dict):
+            specs = specs["runs"]
+    require(specs and all(id_ok(row["id"]) for row in specs), "invalid M5 run plan")
+    args.output.mkdir(parents=True, exist_ok=False)
+    cache_tmp = args.output / "tmp"
+    cache_tmp.mkdir()
+    os.environ.update(config["environment"])
+    os.environ.update(
+        PYTHONPATH=f"{ROOT / 'src'}:{ROOT / 'scripts'}",
+        TOKENIZERS_PARALLELISM="false",
+        OMP_NUM_THREADS="1",
+        HF_HOME=str(args.cache / "huggingface"),
+        XDG_CACHE_HOME=str(args.cache),
+        TMPDIR=str(cache_tmp),
+    )
+    start = time.monotonic_ns()
+    deadline = start + config["gates"]["max_allocation_work_s"] * 10**9
+
+    def remaining():
+        return (deadline - time.monotonic_ns()) / 10**9
+
+    binding = {
+        "task_id": TASK,
+        "job_id": job,
+        "attempt": args.attempt,
+        "role": args.role,
+        "phase": args.phase,
+        "execution_commit": commit,
+        "config_sha256": digest(args.config),
+        "authorization_sha256": digest(args.authorization),
+        "auxiliary_sha256": digest(auxiliary) if auxiliary else None,
+        "started_monotonic_ns": start,
+    }
+    atomic_write(args.output / "binding.json", binding)
+    python = sys.executable
+    sources = args.output / "allocation-sources.json"
+    results = []
+    active = None
+    owner_path = None
+    errors = []
+    table_hashes = {}
+    code = 1
+
+    def interrupt(signum, _frame):
+        raise InterruptedError(f"M5 allocation interrupted by signal {signum}")
+
+    signal.signal(signal.SIGTERM, interrupt)
+    signal.signal(signal.SIGINT, interrupt)
+    stop_sampling = threading.Event()
+    before = snapshot()
+
+    def sample():
+        with (args.output / "gpu-during.jsonl").open("x") as stream:
+            while not stop_sampling.is_set():
+                stream.write(json.dumps(snapshot()) + "\n")
+                stream.flush()
+                stop_sampling.wait(2)
+
+    sampler = threading.Thread(target=sample, daemon=True)
+    sampler.start()
+
+    def run_spec(spec):
+        nonlocal active, owner_path
+        leaf = args.output / spec["id"]
+        leaf.mkdir()
+        if freeze:
+            table = freeze_path.parent / "tables" / f"{args.role}.json"
+            require(digest(table) == freeze["tables"][args.role], "formal input hash differs")
+        else:
+            table = leaf / "input.json"
+            auxiliary_command(
+                input_command(python, args.config, args.model, table, spec), remaining()
+            )
+        raw = leaf / "raw"
+        collector = leaf / "collector"
+        audit = leaf / "audit.json"
+        owner_path, ack = leaf / "owner.json", leaf / "ack.json"
+        command = [
+            python,
+            "-u",
+            "scripts/replay_m5.py",
+            "--config",
+            str(args.config),
+            "--input",
+            str(table),
+            "--model",
+            str(args.model),
+            "--output",
+            str(raw),
+            "--mode",
+            spec["mode"],
+            "--tier",
+            spec["tier"],
+            "--phase",
+            "diagnostic" if args.role == "C1" else args.phase,
+            "--pair-id",
+            args.role if freeze else spec["id"],
+            "--sources",
+            str(sources),
+        ]
+        if spec["mechanism"]:
+            command += ["--mechanism", spec["mechanism"]]
+        timeout = math.floor(remaining()) - 15
+        require(timeout > 0, "M5 allocation work deadline")
+        collect = [
+            python,
+            "scripts/run_evidence.py",
+            "--task-id",
+            TASK,
+            "--kind",
+            "performance" if args.phase == "formal" else "gpu",
+            "--output",
+            str(collector),
+            "--timeout",
+            str(timeout),
+            "--seed",
+            str(spec["seed"]),
+            "--config",
+            str(args.config),
+            "--config",
+            str(table),
+            "--criterion",
+            "independent M5 raw request and batch audit required",
+            "--artifact",
+            str(raw / "client.json"),
+            "--artifact",
+            str(raw / "sources.json"),
+        ]
+        collect += ["--artifact", str(raw / "engine.json")]
+        collect += ["--", python, "scripts/m5_owned.py", str(owner_path), str(ack), *command]
+        result = {
+            **spec,
+            "pair_id": args.role,
+            "inputs": str(table),
+            "run": str(raw),
+            "collector": str(collector),
+            "audit": str(audit),
+            "started_monotonic_ns": time.monotonic_ns(),
+            "returncode": None,
+            "remaining_processes": None,
+        }
+        results.append(result)
+        with (leaf / "launcher.log").open("xb") as log:
+            active = subprocess.Popen(
+                collect, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+            )
+            result["collector_pid"] = active.pid
+            atomic_write(
+                args.output / "index.json",
+                {"schema_version": 1, "stage": args.role, "runs": results},
+            )
+            owner_deadline = time.monotonic() + 10
+            while (
+                not owner_path.exists()
+                and active.poll() is None
+                and time.monotonic() < owner_deadline
+            ):
+                time.sleep(0.01)
+            require(owner_path.exists(), "collector child ownership registration missing")
+            pgid = owner_group(owner_path, job, active.pid)
+            result["engine_pgid"] = pgid
+            atomic_write(
+                args.output / "index.json",
+                {"schema_version": 1, "stage": args.role, "runs": results},
+            )
+            atomic_write(ack, {"job_id": job, "pgid": pgid})
+            result["returncode"] = active.wait(timeout=max(1, remaining()))
+            result["remaining_processes"] = owned_processes(pgid) + owned_processes(active.pid)
+            result["ended_monotonic_ns"] = time.monotonic_ns()
+            result["elapsed_seconds"] = (
+                result["ended_monotonic_ns"] - result["started_monotonic_ns"]
+            ) / 10**9
+            atomic_write(
+                args.output / "index.json",
+                {"schema_version": 1, "stage": args.role, "runs": results},
+            )
+            require(result["remaining_processes"] == [], "M5 process group remained after replay")
+            active = None
+            owner_path = None
+            require(result["returncode"] == 0, "M5 replay or collector failed")
+        check = [
+            python,
+            "scripts/check_m5_trace.py",
+            "run",
+            "--config",
+            str(args.config),
+            "--inputs",
+            str(table),
+            "--run",
+            str(raw),
+            "--output",
+            str(audit),
+            "--mode",
+            spec["mode"],
+        ]
+        check += [
+            "--pair",
+            args.role if freeze else spec["id"],
+            "--phase",
+            "diagnostic" if args.role == "C1" else args.phase,
+        ]
+        auxiliary_command(check, remaining())
+        result["audit_sha256"] = digest(audit)
+        atomic_write(
+            args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
+        )
+
+    try:
+        source_record = collect_sources(ROOT, args.model, config)
+        atomic_write(sources, {**source_record, "job_id": job, "task_id": TASK})
+        for spec in specs:
+            run_spec(spec)
+        if args.phase == "calibration":
+            from plan_m5_calibration import evaluate_stage, serial_interval_from_pilot
+
+            if args.role == "C6":
+                pilot = next(row for row in results if row["id"] == "serial-pilot")
+                interval = serial_interval_from_pilot(read_json(pilot["audit"]))
+                followup = plan_stage(config, "C6", rates=rates, serial_interval_ms=interval)
+                for spec in followup["runs"] if isinstance(followup, dict) else followup:
+                    run_spec(spec)
+            qualification = evaluate_stage(
+                config,
+                args.role,
+                args.output / "index.json",
+                rates,
+                dress_reports,
+                config_sha256=digest(args.config),
+            )
+            qualification["config_sha256"] = digest(args.config)
+            atomic_write(args.output / "calibration-result.json", qualification)
+            require(qualification["status"] == "qualified", "M5 calibration failed its gates")
+            if args.role == "C6":
+                table_specs = []
+                formal_rates = {**rates, **qualification["selected_rates"]}
+                for pair in config["matrix"]:
+                    scenario = pair["scenario"]
+                    table_specs.append(
+                        {
+                            "id": pair["id"],
+                            "scenario": scenario,
+                            "seed": pair["seed"],
+                            "count": config["request_count"],
+                            "rate_rps": formal_rates.get(scenario),
+                            "interval_ms": interval if scenario == "serial" else None,
+                        }
+                    )
+                batch = args.output / "formal-table-specs.json"
+                atomic_write(batch, table_specs)
+                auxiliary_command(
+                    [
+                        python,
+                        "scripts/prepare_m5_inputs.py",
+                        "--config",
+                        str(args.config),
+                        "--model",
+                        str(args.model),
+                        "--batch",
+                        str(batch),
+                        "--output",
+                        str(args.output / "tables"),
+                    ],
+                    remaining(),
+                )
+                table_hashes = {
+                    spec["id"]: digest(args.output / "tables" / f"{spec['id']}.json")
+                    for spec in table_specs
+                }
+        require(remaining() >= 0, "M5 allocation work deadline")
+        code = 0
+    except Exception as error:
+        errors.append(f"{type(error).__name__}: {error}")
+        raise
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        residue = []
+        if active is not None:
+            try:
+                if owner_path and owner_path.exists():
+                    residue.extend(stop_group(owner_group(owner_path, job, active.pid)))
+            except Exception as error:
+                errors.append(f"engine cleanup: {error}")
+            try:
+                residue.extend(stop_group(active.pid, active))
+            except Exception as error:
+                errors.append(f"collector cleanup: {error}")
+        stop_sampling.set()
+        sampler.join(timeout=12)
+        after = snapshot()
+        atomic_write(
+            args.output / "allocation.json",
+            {
+                **binding,
+                "ended_monotonic_ns": time.monotonic_ns(),
+                "work_returncode": code,
+                "formal_table_sha256": table_hashes,
+                "node": os.uname().nodename,
+                "errors": errors,
+                "remaining_processes": residue,
+                "gpu_before": before,
+                "gpu_after": after,
+                "sampler_exited": not sampler.is_alive(),
+                "index_sha256": digest(args.output / "index.json")
+                if (args.output / "index.json").exists()
+                else None,
+            },
+        )
+        require(
+            not residue and not errors and not sampler.is_alive(),
+            "M5 allocation failed or cleanup incomplete",
+        )
+
+
+if __name__ == "__main__":
+    main()
