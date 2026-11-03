@@ -57,7 +57,7 @@ def _matching(plateau, target, limits):
     )
 
 
-def first_plateau(samples, started_ns, conditioning, target=None):
+def first_plateau(samples, started_ns, conditioning, target=None, *, pilot_temperature_range=None):
     """Select the earliest eligible trailing window, never the best window."""
     gate = conditioning["pilot_plateau"]
     minimum_end_ns = started_ns + conditioning["minimum_conditioning_s"] * NS
@@ -101,12 +101,17 @@ def first_plateau(samples, started_ns, conditioning, target=None):
         memory, count = Counter(row["memory_clock_mhz"] for row in active).most_common(1)[0]
         if count / len(active) < gate["min_active_memory_clock_mode_share"]:
             continue
+        temperature = median(temp)
+        if pilot_temperature_range is not None and not (
+            pilot_temperature_range[0] <= temperature <= pilot_temperature_range[1]
+        ):
+            continue
         plateau = {
             "start_ns": start_ns,
             "end_ns": end_ns,
             "sample_count": len(window),
             "active_sample_count": len(active),
-            "temperature_c": median(temp),
+            "temperature_c": temperature,
             "sm_clock_mhz": median(early + late),
             "memory_clock_mhz": memory,
             "gpu_uuid": sample["gpu_uuid"],

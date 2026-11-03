@@ -21,6 +21,7 @@ from vllm_prefix_scheduler.m5_d3 import (
 )
 from vllm_prefix_scheduler.m5_d4 import d4_plan
 from vllm_prefix_scheduler.m5_d5 import d5_plan, d5_profile
+from vllm_prefix_scheduler.m5_d5r import d5r_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,7 +205,18 @@ async def _d2_replay_wave(llm, plans, rows, params, cutoff_ns, deadline_ns):
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-async def _d2_condition(args, workload, llm, params, drain, thermal, conditioning, deadline_ns):
+async def _d2_condition(
+    args,
+    workload,
+    llm,
+    params,
+    drain,
+    thermal,
+    conditioning,
+    deadline_ns,
+    *,
+    pilot_temperature_range=None,
+):
     from m5_d2_thermal import NS, first_plateau, read_samples, target_from_plateau
 
     prospective = thermal["schema_version"] == 2
@@ -215,6 +227,11 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
     if prospective:
         thermal["conditioning_cutoff_ns"] = cutoff_ns
     timeout_s = (cutoff_ns - time.monotonic_ns()) / NS if prospective else cap_s
+    selection = (
+        {"pilot_temperature_range": pilot_temperature_range}
+        if args.d2_role == "pilot" and pilot_temperature_range is not None
+        else {}
+    )
     try:
         async with asyncio.timeout(max(0, timeout_s)):
             while time.monotonic_ns() < cutoff_ns:
@@ -266,7 +283,9 @@ async def _d2_condition(args, workload, llm, params, drain, thermal, conditionin
                 ):
                     thermal["reason"] = "conditioning GPU differs from pilot"
                     return
-                plateau = first_plateau(telemetry, started_ns, conditioning, thermal["target"])
+                plateau = first_plateau(
+                    telemetry, started_ns, conditioning, thermal["target"], **selection
+                )
                 if prospective:
                     record["plateau_decision_ns"] = time.monotonic_ns()
                     if record["plateau_decision_ns"] > cutoff_ns:
@@ -308,6 +327,7 @@ async def _run(
     native_stats_type=None,
     preheat_workload=None,
     d5_expected_profile=None,
+    pilot_temperature_range=None,
 ):
     from vllm import SamplingParams
     from vllm.engine.arg_utils import AsyncEngineArgs
@@ -365,7 +385,9 @@ async def _run(
         plan = json.loads(args.d2_plan.read_text())
         prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
         conditioning = plan["conditioning"]
-        plan_sha = sha256(args.d5_plan or args.d4_plan or args.d2_plan)
+        plan_sha = sha256(
+            getattr(args, "d5r_plan", None) or args.d5_plan or args.d4_plan or args.d2_plan
+        )
         target, pilot_gpu = None, None
         if args.d2_role == "measure":
             pilot = json.loads(args.d2_target.read_text())
@@ -378,6 +400,13 @@ async def _run(
             ):
                 raise RuntimeError("D2 pilot target does not bind this plan")
             target = pilot["target"]
+            if pilot_temperature_range is not None:
+                require(
+                    pilot_temperature_range[0]
+                    <= target["temperature_c"]
+                    <= pilot_temperature_range[1],
+                    "D5-R pilot target temperature differs from the frozen band",
+                )
             pilot_gpu = pilot["plateau"]["gpu_uuid"]
         d2_thermal = {
             "schema_version": 2 if prospective else 1,
@@ -475,6 +504,11 @@ async def _run(
 
         if d2_thermal is not None:
             conditioning_workload = workload if preheat_workload is None else preheat_workload
+            thermal_options = (
+                {"pilot_temperature_range": pilot_temperature_range}
+                if args.d2_role == "pilot" and pilot_temperature_range is not None
+                else {}
+            )
             await _d2_condition(
                 args,
                 conditioning_workload,
@@ -484,6 +518,7 @@ async def _run(
                 d2_thermal,
                 conditioning,
                 deadline_ns,
+                **thermal_options,
             )
             if args.d2_role == "pilot" or d2_thermal["plateau"] is None:
                 return
@@ -649,7 +684,12 @@ def _d4_replay_inputs(args, workload):
 
 
 def _d5_replay_inputs(args, workload):
-    plan, inherited = d5_plan(args.d5_plan, args.d2_plan)
+    temperature_range = None
+    if args.d5r_plan is None:
+        plan, inherited = d5_plan(args.d5_plan, args.d2_plan)
+    else:
+        retry, plan, inherited = d5r_plan(args.d5r_plan, args.d5_plan, args.d2_plan)
+        temperature_range = retry["pilot_target_median_c"]
     target = inherited["target"]
     require(
         args.pair_id in target["fresh_engines"]
@@ -664,7 +704,7 @@ def _d5_replay_inputs(args, workload):
         and len(workload["requests"]) == target["count_per_engine"],
         "D5 input differs from the frozen original 8 rps table",
     )
-    return inherited["native_timing"], d5_profile(plan, args.pair_id)
+    return inherited["native_timing"], d5_profile(plan, args.pair_id), temperature_range
 
 
 def main():
@@ -678,7 +718,15 @@ def main():
     parser.add_argument("--pair-id", required=True)
     parser.add_argument("--mechanism", choices=("pressure", "ample"))
     parser.add_argument("--d2-role", choices=("pilot", "measure"))
-    for field in ("d2-plan", "d2-samples", "d2-target", "d4-plan", "d4-preheat-input", "d5-plan"):
+    for field in (
+        "d2-plan",
+        "d2-samples",
+        "d2-target",
+        "d4-plan",
+        "d4-preheat-input",
+        "d5-plan",
+        "d5r-plan",
+    ):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
@@ -699,9 +747,12 @@ def main():
         parser.error("D4 requires its plan and 8 rps preheat input with a thermal replay role")
     if args.d5_plan is not None and (args.d2_role is None or args.d4_plan is not None):
         parser.error("D5 requires a thermal replay role and its own plan")
+    if args.d5r_plan is not None and args.d5_plan is None:
+        parser.error("D5-R requires its inherited D5 plan")
     native_timing = None
     preheat_workload = None
     d5_expected_profile = None
+    thermal_options = {}
     if args.d2_role is None:
         if any(path is not None for path in d2_files):
             parser.error("D2 evidence paths require --d2-role")
@@ -715,7 +766,11 @@ def main():
         parser.error("D2 requires the guarded endpoint calibration and thermal inputs")
     elif args.d5_plan is not None:
         try:
-            native_timing, d5_expected_profile = _d5_replay_inputs(args, workload)
+            native_timing, d5_expected_profile, temperature_range = _d5_replay_inputs(
+                args, workload
+            )
+            if temperature_range is not None:
+                thermal_options["pilot_temperature_range"] = temperature_range
         except (KeyError, OSError, TypeError, ValueError) as error:
             parser.error(str(error))
     elif args.d4_plan is not None:
@@ -785,6 +840,7 @@ def main():
                 native_stats_type=native_stats_type,
                 preheat_workload=preheat_workload,
                 d5_expected_profile=d5_expected_profile,
+                **thermal_options,
             )
         )
     finally:

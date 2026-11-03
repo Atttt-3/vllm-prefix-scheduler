@@ -36,6 +36,8 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D4_ROLE,
     D5_PLAN_FILENAME,
     D5_ROLE,
+    D5R_PLAN_FILENAME,
+    D5R_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
@@ -77,6 +79,11 @@ from vllm_prefix_scheduler.m5_d5 import (  # noqa: E402
     D5_PREVIOUS_ANALYSIS,
     D5_PROPOSAL_NAME,
     d5_specs,
+)
+from vllm_prefix_scheduler.m5_d5r import (  # noqa: E402
+    D5R_PREVIOUS_ANALYSIS,
+    D5R_PROPOSAL_NAME,
+    d5r_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -188,16 +195,21 @@ from pathlib import Path
 from vllm_prefix_scheduler.m5_campaign import read_json
 from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
 from vllm_prefix_scheduler.m5_d4 import D4_INPUT_8_NAME, D4_INPUT_6_NAME, D4_PREVIOUS_ANALYSIS, d4_specs
-from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, d5_specs
+from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_specs
+from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, d5r_specs
 config, proposal = map(Path, sys.argv[1:3])
 staged = proposal.parent
 common = (staged / "original-c3-result.json", staged / D3_PROPOSAL_NAME)
 if sys.argv[3] == "D4":
     specs = d4_specs(read_json(config), proposal, staged / D4_INPUT_8_NAME,
                      staged / D4_INPUT_6_NAME, *common, staged / D4_PREVIOUS_ANALYSIS)
-else:
+elif sys.argv[3] == "D5":
     specs = d5_specs(read_json(config), proposal, staged / "input.json",
                      *common, staged / D5_PREVIOUS_ANALYSIS)
+else:
+    specs = d5r_specs(read_json(config), proposal, staged / "input.json",
+                      common[0], staged / D5_PROPOSAL_NAME, common[1],
+                      staged / D5_PREVIOUS_ANALYSIS, staged / D5R_PREVIOUS_ANALYSIS)
 print(json.dumps(specs))
 """
     result = remote(
@@ -407,6 +419,7 @@ def submit(args):
                 D3_ROLE: 9,
                 D4_ROLE: 10,
                 D5_ROLE: 11,
+                D5R_ROLE: 12,
             }
             require(
                 len(history) == previous_slots[args.role]
@@ -511,29 +524,52 @@ def submit(args):
                     D4_PREVIOUS_ANALYSIS: prior_analysis,
                 }
             else:
-                previous = HISTORY / "d4-01"
+                is_d5r = args.role == D5R_ROLE
+                prior_role = D5_ROLE if is_d5r else D4_ROLE
+                previous = HISTORY / ("d5-01" if is_d5r else "d4-01")
                 require(
-                    history[-1]["role"] == D4_ROLE
+                    history[-1]["role"] == prior_role
                     and history[-1] == audit_attempt(previous, require_completed=True),
-                    "D5 requires the retained D4 allocation and release",
+                    f"{args.role} requires the retained {prior_role} allocation and release",
                 )
-                proposal = CONFIG.with_name(D5_PLAN_FILENAME)
+                d5_proposal = CONFIG.with_name(D5_PLAN_FILENAME)
                 inherited = CONFIG.with_name(D3_PLAN_FILENAME)
-                prior_analysis = HISTORY.parent / "d4-review/analysis.json"
-                diagnostic_run_specs = d5_specs(
-                    config, proposal, input_table, old_result, inherited, prior_analysis
-                )
+                d4_analysis = HISTORY.parent / "d4-review/analysis.json"
+                retained_analyses = {
+                    D3_PROPOSAL_NAME: inherited,
+                    D5_PREVIOUS_ANALYSIS: d4_analysis,
+                }
+                if is_d5r:
+                    proposal = CONFIG.with_name(D5R_PLAN_FILENAME)
+                    prior_analysis = HISTORY.parent / "d5-review/analysis.json"
+                    diagnostic_run_specs = d5r_specs(
+                        config,
+                        proposal,
+                        input_table,
+                        old_result,
+                        d5_proposal,
+                        inherited,
+                        d4_analysis,
+                        prior_analysis,
+                    )
+                    retained_analyses.update(
+                        {
+                            D5_PROPOSAL_NAME: d5_proposal,
+                            D5R_PREVIOUS_ANALYSIS: prior_analysis,
+                        }
+                    )
+                else:
+                    proposal, prior_analysis = d5_proposal, d4_analysis
+                    diagnostic_run_specs = d5_specs(
+                        config, proposal, input_table, old_result, inherited, prior_analysis
+                    )
                 report = read_json(prior_analysis)
                 require(
                     report["resource_release"] == json.loads(json.dumps(history[-1], default=str))
                     and report["execution_commit"]
                     == read_json(previous / "planned.json")["execution_commit"],
-                    "D5 retained D4 analysis is detached from the prior release",
+                    f"{args.role} retained {prior_role} analysis is detached from the prior release",
                 )
-                retained_analyses = {
-                    D3_PROPOSAL_NAME: inherited,
-                    D5_PREVIOUS_ANALYSIS: prior_analysis,
-                }
         else:
             if args.phase == "calibration" and calibration_roles != CALIBRATION:
                 verify_split_qualification(CONFIG, HISTORY, args.authorization, audits=history)
@@ -599,6 +635,7 @@ def submit(args):
                 D3_ROLE: D3_PROPOSAL_NAME,
                 D4_ROLE: D4_PROPOSAL_NAME,
                 D5_ROLE: D5_PROPOSAL_NAME,
+                D5R_ROLE: D5R_PROPOSAL_NAME,
             }
             name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
@@ -611,7 +648,7 @@ def submit(args):
             for filename, analysis in retained_analyses.items():
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
-            if args.role in (D4_ROLE, D5_ROLE):
+            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE):
                 node_specs = preflight_diagnostic_stage(
                     ssh,
                     paths["remote_gpu_environment"] / "bin/python",

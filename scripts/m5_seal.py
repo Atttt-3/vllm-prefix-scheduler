@@ -36,7 +36,7 @@ def verify_analysis(execution, analysis):
 
 
 def validate_profile(profile, run, config, source, git_files, *, d5_expected_profile=None):
-    if run.get("pair_id") == "D5":
+    if run.get("pair_id") in ("D5", "D5-R"):
         require(d5_expected_profile is not None, "D5 capacity profile expectations are required")
     baseline = read_json(ROOT / config["baseline_config"])
     expected = {
@@ -75,7 +75,7 @@ def validate_profile(profile, run, config, source, git_files, *, d5_expected_pro
     if d5_expected_profile is not None:
         active_cap = d5_expected_profile.get("max_num_active_seqs")
         require(
-            run["pair_id"] == "D5"
+            run["pair_id"] in ("D5", "D5-R")
             and run["mode"] == "guarded"
             and run["tier"] == "endpoint"
             and run["mechanism"] is None
@@ -169,7 +169,7 @@ def sealed_leaf(
     expected_layer = "performance" if planned["phase"] == "formal" else "gpu"
     if d5_expected_profile is not None:
         require(
-            planned["role"] == "D5" and planned["phase"] == "calibration",
+            planned["role"] in ("D5", "D5-R") and planned["phase"] == "calibration",
             "D5 capacity profile cannot be used outside its diagnostic allocation",
         )
     require(

@@ -24,6 +24,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     D3_ROLE,
     D4_ROLE,
     D5_ROLE,
+    D5R_ROLE,
     digest,
     read_json,
     require,
@@ -47,6 +48,7 @@ from vllm_prefix_scheduler.m5_d4 import (
     d4_plan,
 )
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_plan, d5_profile
+from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, D5R_PROPOSAL_NAME, d5r_plan
 from vllm_prefix_scheduler.m5_resources import audit_history, device
 
 ROLE = D2_ROLE
@@ -64,7 +66,7 @@ def memory_mode(active):
     return Counter(sample["memory_clock_mhz"] for sample in active).most_common(1)[0]
 
 
-def thermal_window(samples, start, end, limits, target=None):
+def thermal_window(samples, start, end, limits, target=None, *, pilot_temperature_range=None):
     """Find the first eligible trailing window using independently read samples."""
     period = limits["pilot_plateau"]["window_s"] * SECOND
     max_gap = limits["read_only_side_sampler"]["max_gap_s"] * SECOND
@@ -113,6 +115,10 @@ def thermal_window(samples, start, end, limits, target=None):
             "memory_clock_mhz": clock,
             "gpu_uuid": last["gpu_uuid"],
         }
+        if pilot_temperature_range is not None:
+            low, high = pilot_temperature_range
+            if not low <= profile["temperature_c"] <= high:
+                continue
         if target is None or (
             abs(profile["temperature_c"] - target["temperature_c"])
             <= per_engine["preheat_temp_median_from_target_c"]
@@ -246,6 +252,7 @@ def bind_thermal_artifact(
         D3_ROLE: D3_PROPOSAL_NAME,
         D4_ROLE: D4_PROPOSAL_NAME,
         D5_ROLE: D5_PROPOSAL_NAME,
+        D5R_ROLE: D5R_PROPOSAL_NAME,
     }[role]
     require(
         sum(
@@ -258,7 +265,7 @@ def bind_thermal_artifact(
         "D2 reviewed proposal is not in the collector",
     )
     previous = []
-    if role in (D4_ROLE, D5_ROLE):
+    if role in (D4_ROLE, D5_ROLE, D5R_ROLE):
         staged = d4_configs if role == D4_ROLE else d5_configs
         require(type(staged) is dict and staged, f"{role} collector inputs missing")
         previous.extend(staged.items())
@@ -334,9 +341,15 @@ def completed_wave(wave, number, workload, raw_boundaries, earliest):
     )
 
 
-def prelude_summary(raw, workload, samples, limits, expected_target):
+def prelude_summary(
+    raw, workload, samples, limits, expected_target, *, pilot_temperature_range=None
+):
     start, end = raw["conditioning_start_ns"], raw["conditioning_end_ns"]
     role = raw["role"]
+    require(
+        pilot_temperature_range is None or (role == "pilot" and expected_target is None),
+        "D5-R target filter applies only to the independent pilot",
+    )
     prospective = raw.get("schema_version", 1) == 2
     cap = limits["pilot_cap_s" if role == "pilot" else "per_measured_engine_cap_s"] * SECOND
     issues = []
@@ -393,7 +406,14 @@ def prelude_summary(raw, workload, samples, limits, expected_target):
                     issues.append("preheat_sample_visibility_boundary_invalid")
                     break
                 previous_observed = observed
-                selected = thermal_window(samples, start, observed, limits, expected_target)
+                selected = thermal_window(
+                    samples,
+                    start,
+                    observed,
+                    limits,
+                    expected_target,
+                    pilot_temperature_range=pilot_temperature_range,
+                )
                 if selected is not None:
                     selected_after = decision
                 if prospective:
@@ -495,18 +515,74 @@ def thermal_target(plateau):
     return {name: plateau[name] for name in ("temperature_c", "sm_clock_mhz", "memory_clock_mhz")}
 
 
+def verified_pilot_target(thermal, prelude, *, strict=False):
+    selected = prelude["selected_plateau"]
+    candidate = thermal_target(selected)
+    reported = thermal["status"] == "target-frozen"
+    verified = (
+        reported
+        and prelude["verified"]
+        and selected is not None
+        and thermal["target"] == candidate
+        and thermal["target_gpu_uuid"] == selected["gpu_uuid"]
+        and thermal["pre_t0"] is None
+    )
+    if strict:
+        require(
+            verified
+            if reported
+            else all(
+                value is None
+                for value in (
+                    selected,
+                    thermal["plateau"],
+                    thermal["target"],
+                    thermal["target_gpu_uuid"],
+                )
+            ),
+            "D5-R reported pilot target differs from independent in-band selection",
+        )
+    return candidate if verified else None
+
+
+def verify_thermal_run_order(rows, *, prospective, require_reviewable_pilot=False):
+    require(
+        tuple(row["id"] for row in rows) == RUNS[: len(rows)], "D2 executed engine order differs"
+    )
+    if require_reviewable_pilot:
+        require(
+            rows and rows[0].get("returncode") == 0 and rows[0].get("audit_sha256"),
+            "D5-R completed allocation lacks an independently reviewable pilot",
+        )
+    if prospective:
+        require(
+            all(
+                row.get("returncode") == 0
+                and row.get("audit_sha256")
+                and row.get("d2_thermal_status") == ("target-frozen" if i == 0 else "admitted")
+                for i, row in enumerate(rows[:-1])
+            ),
+            "D2-R continued after an invalid or failed engine",
+        )
+
+
 def review(attempt, proposal_path):
     plan = read_json(proposal_path)
     role = plan["role"]
     latest = role == D2R110_ROLE
     d3 = role == D3_ROLE
     d4 = role == D4_ROLE
-    d5 = role == D5_ROLE
+    d5r = role == D5R_ROLE
+    d5 = role in (D5_ROLE, D5R_ROLE)
     native_timing = d3 or d4 or d5
-    prospective = role in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE, D5_ROLE)
+    prospective = role in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D4_ROLE, D5_ROLE, D5R_ROLE)
     proposal_sha = digest(proposal_path)
-    thermal_plan = plan
-    if d5:
+    thermal_plan = capacity_plan = plan
+    if d5r:
+        plan, capacity_plan, thermal_plan = d5r_plan(
+            proposal_path, ROOT / "configs/m5-d5.json", ROOT / "configs/m5-d3.json"
+        )
+    elif d5:
         plan, thermal_plan = d5_plan(proposal_path, ROOT / "configs/m5-d3.json")
     elif d4:
         plan, thermal_plan = d4_plan(proposal_path, ROOT / "configs/m5-d3.json")
@@ -522,7 +598,7 @@ def review(attempt, proposal_path):
             "D2 plan differs from the authorized proposal",
         )
     limits = thermal_plan["conditioning"]
-    expected = plan["target"]
+    expected = capacity_plan["target"] if d5 else plan["target"]
     pairs_to_review = (
         tuple(tuple(pair) for pair in expected["same_cap_pairs"])
         if d5
@@ -546,7 +622,15 @@ def review(attempt, proposal_path):
         digest(c3) == C3_BLOCKED_SHA and read_json(c3)["status"] == "blocked",
         "D2 original C3 blocked outcome differs",
     )
-    count = {ROLE: 7, D2R_ROLE: 8, D2R110_ROLE: 9, D3_ROLE: 10, D4_ROLE: 11, D5_ROLE: 12}[role]
+    count = {
+        ROLE: 7,
+        D2R_ROLE: 8,
+        D2R110_ROLE: 9,
+        D3_ROLE: 10,
+        D4_ROLE: 11,
+        D5_ROLE: 12,
+        D5R_ROLE: 13,
+    }[role]
     history = audit_history(attempt.parent)[:count]
     job = read_json(attempt / "submission.json")["stdout"].strip().split(";")[0]
     auth = read_json(attempt / "authorization.json")
@@ -618,16 +702,31 @@ def review(attempt, proposal_path):
         prior_d4 = attempt.parent.parent / "d4-review/analysis.json"
         predecessor = read_json(prior_d4)
         require(
-            auth["d5_plan_sha256"] == proposal_sha
+            auth["d5r_plan_sha256" if d5r else "d5_plan_sha256"] == proposal_sha
             and history[10]["role"] == D4_ROLE
             and history[10]["complete"]
-            and digest(prior_d4) == plan["D4_analysis_sha256"]
+            and digest(prior_d4) == capacity_plan["D4_analysis_sha256"]
             and predecessor["role"] == D4_ROLE
             and predecessor["status"] == "diagnostic-complete"
-            and predecessor["proposal_sha256"] == plan["D4_plan_sha256"]
+            and predecessor["proposal_sha256"] == capacity_plan["D4_plan_sha256"]
             and predecessor["d4_assessment"]["pressure_signal"] == "supported"
             and predecessor["resource_release"] == json.loads(json.dumps(history[10], default=str)),
             "D5 authorization or retained D4 evidence differs",
+        )
+    if d5r:
+        prior_d5 = attempt.parent.parent / "d5-review/analysis.json"
+        predecessor = read_json(prior_d5)
+        require(
+            history[11]["role"] == D5_ROLE
+            and history[11]["complete"]
+            and digest(prior_d5) == plan["D5_analysis_sha256"]
+            and predecessor["role"] == D5_ROLE
+            and predecessor["status"] == "diagnostic-incomplete"
+            and predecessor["proposal_sha256"] == plan["D5_plan_sha256"]
+            and predecessor["runs"]["E1"]["status"] == "invalid"
+            and predecessor["d5_assessment"]["optimization_signal"] == "unverified"
+            and predecessor["resource_release"] == json.loads(json.dumps(history[11], default=str)),
+            "D5-R retained D5 thermal stop or release differs",
         )
     resource = history[-1]
     planned = read_json(attempt / "planned.json")
@@ -657,19 +756,9 @@ def review(attempt, proposal_path):
         rows = index["runs"]
     else:
         rows = []
-    require(
-        tuple(row["id"] for row in rows) == RUNS[: len(rows)], "D2 executed engine order differs"
+    verify_thermal_run_order(
+        rows, prospective=prospective, require_reviewable_pilot=d5r and resource["complete"]
     )
-    if prospective:
-        require(
-            all(
-                row.get("returncode") == 0
-                and row.get("audit_sha256")
-                and row.get("d2_thermal_status") == ("target-frozen" if i == 0 else "admitted")
-                for i, row in enumerate(rows[:-1])
-            ),
-            "D2-R continued after an invalid or failed engine",
-        )
     samples_path = node / "d2-device.jsonl"
     samples = []
     if samples_path.is_file():
@@ -696,7 +785,7 @@ def review(attempt, proposal_path):
         identity = row["id"]
         pilot = identity == RUNS[0]
         rate = rates[identity] if d4 else expected["arrival_rate_rps"]
-        d5_expected_profile = d5_profile(plan, identity) if d5 else None
+        d5_expected_profile = d5_profile(capacity_plan, identity) if d5 else None
         if d5:
             require(
                 all(
@@ -762,10 +851,13 @@ def review(attempt, proposal_path):
                 d4_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
         if d5:
             d5_configs = {
-                D3_PROPOSAL_NAME: plan["D3_plan_sha256"],
-                D5_PREVIOUS_ANALYSIS: plan["D4_analysis_sha256"],
+                D3_PROPOSAL_NAME: capacity_plan["D3_plan_sha256"],
+                D5_PREVIOUS_ANALYSIS: capacity_plan["D4_analysis_sha256"],
                 "original-c3-result.json": C3_BLOCKED_SHA,
             }
+            if d5r:
+                d5_configs[D5_PROPOSAL_NAME] = plan["D5_plan_sha256"]
+                d5_configs[D5R_PREVIOUS_ANALYSIS] = plan["D5_analysis_sha256"]
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d5_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
@@ -827,7 +919,12 @@ def review(attempt, proposal_path):
         ]
         workload = read_json(table)
         prelude = prelude_summary(
-            thermal, preheat_workload if d4 else workload, leaf_samples, limits, target
+            thermal,
+            preheat_workload if d4 else workload,
+            leaf_samples,
+            limits,
+            target,
+            pilot_temperature_range=plan["pilot_target_median_c"] if d5r and pilot else None,
         )
         owned_windows = [
             (thermal["conditioning_start_ns"], thermal["conditioning_end_ns"]),
@@ -863,16 +960,8 @@ def review(attempt, proposal_path):
                 thermal, prelude, plan["shadow_conditioning_cap_s"]
             )
         if pilot:
-            candidate = thermal_target(prelude["selected_plateau"])
-            if (
-                thermal["status"] == "target-frozen"
-                and prelude["verified"]
-                and thermal["target"] == candidate
-                and thermal["target_gpu_uuid"] == prelude["selected_plateau"]["gpu_uuid"]
-                and thermal["pre_t0"] is None
-            ):
-                target = candidate
-            else:
+            target = verified_pilot_target(thermal, prelude, strict=d5r)
+            if target is None:
                 prelude["verified"] = False
                 prelude["issues"].append("pilot_target_unverified")
             continue
@@ -918,7 +1007,7 @@ def review(attempt, proposal_path):
     require(len(environments) <= 1, "D2 node clock domain or engine profile varied")
 
     if d5:
-        node_path = node / "d5-result.json"
+        node_path = node / ("d5-r-result.json" if d5r else "d5-result.json")
         if node_path.exists():
             audited = sum("metrics" in run for run in runs.values())
             require(
@@ -927,10 +1016,18 @@ def review(attempt, proposal_path):
                     "status": "diagnostic-complete"
                     if audited == len(RUNS) - 1
                     else "diagnostic-incomplete",
-                    "role": D5_ROLE,
+                    "role": role,
                     "proposal_sha256": proposal_sha,
-                    "inherited_d3_proposal_sha256": plan["D3_plan_sha256"],
-                    "retained_d4_analysis_sha256": plan["D4_analysis_sha256"],
+                    "inherited_d3_proposal_sha256": capacity_plan["D3_plan_sha256"],
+                    "retained_d4_analysis_sha256": capacity_plan["D4_analysis_sha256"],
+                    **(
+                        {
+                            "inherited_d5_proposal_sha256": plan["D5_plan_sha256"],
+                            "retained_d5_analysis_sha256": plan["D5_analysis_sha256"],
+                        }
+                        if d5r
+                        else {}
+                    ),
                     "input_sha256": D1_INPUT_SHA,
                     "audited_runs": audited,
                     "retained_c3_sha256": C3_BLOCKED_SHA,
@@ -1003,9 +1100,9 @@ def review(attempt, proposal_path):
             require(rates[first] == rates[second], "D4 comparison joins different rates")
             result["rate_rps"] = rates[first]
         if d5:
-            first_cap = d5_profile(plan, first)["max_num_active_seqs"]
+            first_cap = d5_profile(capacity_plan, first)["max_num_active_seqs"]
             require(
-                first_cap == d5_profile(plan, second)["max_num_active_seqs"],
+                first_cap == d5_profile(capacity_plan, second)["max_num_active_seqs"],
                 "D5 comparison joins different caps",
             )
             result["max_num_active_seqs"] = first_cap
@@ -1037,7 +1134,7 @@ def review(attempt, proposal_path):
             runs,
             pairs,
             expected,
-            plan["assessment"],
+            capacity_plan["assessment"],
             limits,
             compare_thermal,
             released=resource["complete"],
@@ -1125,11 +1222,20 @@ def review(attempt, proposal_path):
         **(
             {
                 "role": role,
-                "inherited_d3_proposal_sha256": plan["D3_plan_sha256"],
-                "retained_d4_analysis_sha256": plan["D4_analysis_sha256"],
+                "inherited_d3_proposal_sha256": capacity_plan["D3_plan_sha256"],
+                "retained_d4_analysis_sha256": capacity_plan["D4_analysis_sha256"],
                 "d5_assessment": assessment,
             }
             if d5
+            else {}
+        ),
+        **(
+            {
+                "inherited_d5_proposal_sha256": plan["D5_plan_sha256"],
+                "retained_d5_analysis_sha256": plan["D5_analysis_sha256"],
+                "pilot_target_median_c": plan["pilot_target_median_c"],
+            }
+            if d5r
             else {}
         ),
         "execution_commit": commit,

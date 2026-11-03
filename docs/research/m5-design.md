@@ -141,3 +141,20 @@ E1/E4 与 E2/E3 分别按原热状态、TTFT p95 与末终态请求及 token 吞
 python scripts/submit_m5.py --authorization PRIVATE_D5_AUTH --phase calibration --role D5 --attempt d5-01
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d5-01 --proposal configs/m5-d5.json --output runs/M5-paired-performance/d5-review/analysis.json
 ```
+
+## D5-R 热目标修复
+
+[D5-R 冻结方案](../../configs/m5-d5r.json) 继承 D5 的 8 请求/秒输入、4/5/5/4 顺序、实际容量、判定规则及预算。热试跑仍使用原 150 秒，在每个完整波次排空并清 APC 后，按原采样可见边界检查 20 秒平台。选取第一个通过原平台检查且温度中位数在 **64–66°C（含边界）**的窗口，将该窗口实际温度、SM 和显存时钟冻结为目标。超过热试跑截止时间仍无合格目标，保留原件并停止。测量各轮的 110 秒热准入、±2°C 目标温差、时钟、缓存预置和性能门槛沿用 D5。
+
+原 D5 的热试跑在 62°C 冻结，E1 有 17 个基础合格平台的中位数为 65–66°C。用同一份封存 E1 按 64、65、66°C 的假设目标分别复算，均在第八个完整波次的 70.764 秒通过。该复算只使用截止前已可见且完成排空与清 APC 的波次。原热试跑停止后的温度轨迹仍需实测。
+
+D5-R 执行与独立审查分别实现热试跑的带宽过滤与首个窗口选择。D5 封存审查逐字节复现。四个测量轮的六对热窗口、两组同档及四组跨档均按原规则复算。四轮不齐、热不可比、同档失败或两个 4 槽轮次未复现积压时，优化记为 `unverified`。前提完整后按 D5 的尾部等待、TTFT 和吞吐规则判断。资格入口明确排除 D5-R，原 C3 保持 `blocked`。
+
+D5-R 单独授权一次串行单 RTX 3090，最多 20 分钟，预计 1,040 秒，硬上限 1,050 秒。累计上限为第 13 次分配、260 申请分钟。候选提交只允许绑定原 D5 已核验释放的第 12 次分配。提交前用计算环境复核已上传计划及原件，独立 watcher 就绪后才提交。任一轮热准入失败即停止，保留缺组。此批无重试。热状态与两组同档重复均通过后，才设计并审核单独的同条件资格前置试验。
+
+在 D5-R 执行 SHA 和新增单次授权文件就绪后，按以下入口运行及复算。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D5R_AUTH --phase calibration --role D5-R --attempt d5-r-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d5-r-01 --proposal configs/m5-d5r.json --output runs/M5-paired-performance/d5-r-review/analysis.json
+```

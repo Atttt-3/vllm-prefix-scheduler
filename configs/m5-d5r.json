@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "role": "D5-R",
+  "scope": "warm-pilot-admission-cap-diagnostic",
+  "D5_plan_sha256": "dc4817bb421c774e2730aba541bf4752d946cb4a3d05a0edce093fdb1df85d1f",
+  "D5_analysis_sha256": "b321f08ab51d16ffedf0cbeb0cf5bb9fe2f8e926eb712586ecd5e7c398bf9aa6",
+  "pilot_target_median_c": [64, 66],
+  "can_qualify_C3": false
+}

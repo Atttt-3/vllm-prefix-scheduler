@@ -9,7 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vllm_prefix_scheduler.m5_campaign import D4_ROLE, D5_ROLE, TASK, digest, read_json
+from vllm_prefix_scheduler.m5_campaign import D4_ROLE, D5_ROLE, D5R_ROLE, TASK, digest, read_json
 from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
 from vllm_prefix_scheduler.m5_d4 import (
     D4_INPUT_6_NAME,
@@ -18,6 +18,7 @@ from vllm_prefix_scheduler.m5_d4 import (
     D4_PROPOSAL_NAME,
 )
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_profile
+from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, D5R_PROPOSAL_NAME
 
 ROOT = Path(__file__).resolve().parents[1]
 ORDER = {"thermal-pilot": 8, "E1": 8, "E2": 6, "E3": 6, "E4": 8}
@@ -140,13 +141,15 @@ def test_d4_cli_routes_measured_six_rps_and_frozen_eight_rps_preheat(staged, tmp
     assert calls == [(6, 8, object)]
 
 
-@pytest.mark.parametrize("role", (D4_ROLE, D5_ROLE))
+@pytest.mark.parametrize("role", (D4_ROLE, D5_ROLE, D5R_ROLE))
 def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, monkeypatch, role):
     runner = importlib.import_module("run_m5_allocation")
     role_name = role.lower()
+    planner_name = role_name.replace("-", "")
     attempt = f"{role_name}-01"
     output = tmp_path / "runs" / TASK / attempt
-    d5 = role == D5_ROLE
+    d5r = role == D5R_ROLE
+    d5 = d5r or role == D5_ROLE
     proposal = staged.proposal
     previous = staged.previous
     if d5:
@@ -155,10 +158,15 @@ def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, mo
         previous = write(tmp_path / D5_PREVIOUS_ANALYSIS, {})
         (tmp_path / "input.json").write_bytes(staged.tables[8].read_bytes())
         monkeypatch.setattr(runner, "D1_INPUT_SHA", digest(staged.tables[8]))
+    d5_plan = proposal
+    if d5r:
+        proposal = tmp_path / D5R_PROPOSAL_NAME
+        proposal.write_bytes((ROOT / "configs/m5-d5r.json").read_bytes())
+        previous_d5 = write(tmp_path / D5R_PREVIOUS_ANALYSIS, {})
     authorization = write(
-        tmp_path / "authorization.json", {f"{role_name}_plan_sha256": digest(proposal)}
+        tmp_path / "authorization.json", {f"{planner_name}_plan_sha256": digest(proposal)}
     )
-    plan = read_json(proposal)
+    plan = read_json(d5_plan)
     specs = [
         {
             "id": identity,
@@ -186,7 +194,7 @@ def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, mo
 
     monkeypatch.setattr(runner, "ROOT", tmp_path)
     monkeypatch.setattr(runner, "check_authorization", lambda *args, **kwargs: [role])
-    monkeypatch.setattr(runner, f"{role_name}_specs", lambda *args: specs)
+    monkeypatch.setattr(runner, f"{planner_name}_specs", lambda *args: specs)
     monkeypatch.setattr(runner, "collect_sources", lambda *args: {})
     monkeypatch.setattr(runner, "owner_group", lambda *args: 124)
     monkeypatch.setattr(runner, "owned_processes", lambda *args: [])
@@ -236,7 +244,9 @@ def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, mo
         leaf = output / identity
         assert digest(leaf / "input.json") == digest(staged.tables[8 if d5 else rate])
         assert child[child.index("--d2-plan") + 1] == str(staged.inherited)
-        assert child[child.index(f"--{role_name}-plan") + 1] == str(proposal)
+        assert child[child.index(f"--{planner_name}-plan") + 1] == str(proposal)
+        if d5r:
+            assert child[child.index("--d5-plan") + 1] == str(d5_plan)
         if not d5:
             assert child[child.index("--d4-preheat-input") + 1] == str(staged.tables[8])
         configs = [
@@ -248,9 +258,11 @@ def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, mo
             staged.config,
             leaf / "input.json",
             proposal,
+            *([d5_plan] if d5r else []),
             staged.inherited,
             *([] if d5 else [staged.tables[8]]),
             previous,
+            *([previous_d5] if d5r else []),
             staged.original,
             *(
                 []
@@ -263,6 +275,9 @@ def test_thermal_node_runs_abba_and_seals_diagnostic_inputs(staged, tmp_path, mo
     assert result["audited_runs"] == 4
     if d5:
         assert result["retained_d4_analysis_sha256"] == digest(previous)
+        if d5r:
+            assert result["retained_d5_analysis_sha256"] == digest(previous_d5)
+            assert result["inherited_d5_proposal_sha256"] == digest(d5_plan)
         index = read_json(output / "index.json")
         assert [row["max_num_active_seqs"] for row in index["runs"]] == [4, 4, 5, 5, 4]
     else:
