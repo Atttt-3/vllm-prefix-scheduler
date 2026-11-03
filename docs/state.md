@@ -26,6 +26,8 @@ D6 在 `3f7b94e` 冻结四槽最早出包慢段的逐步观察。封存 D5-R 显
 
 D6 唯一一次提交被 Slurm 的 `QOSMaxSubmitJobPerUserLimit` 拒绝。新增 GPU 分配 0，测量 0/3，出包慢段和槽位放大链均为 `unresolved`。历史 13 次分配释放记录与本次拒绝分开记账，C3 仍为 `blocked`。 [D6 提交拒绝与资源复核](research/m5-handoff.md#d6-slurm-提交被拒)
 
+D6 重试作业 `140064` 在 `3f7b94e` 完成三轮 180 条请求，热状态与资源释放通过。原慢段未复现，最早出包慢段和槽位放大链均为 `unresolved`。累计 14 次实际分配，上次拒绝原件单列。C3 仍为 `blocked`，资格复验未启动。 [D6 重试结果](research/m5-handoff.md#d6-重试完成慢段未复现)
+
 ## M4 独立审查修订完成，待总站验收（2026-11-03）
 
 M4 从 M3 交付12705a8开始，真实执行冻结为5525bda：native105叶/1200轮、CPU540组、GPU完整60例及同提交compat432/M1原12/full636均完成。原冻结导出因漏检case外排空反例而失败，原F永久保留FAILED。用户明确授权不追加GPU的独立审查修订后，分析冻结34fa4ea修复该三行检查，完整本地627通过/3原有跳过，全部49个真实子进程控制通过，双SHA数值白名单导出成功。执行、分析与文档交付版本不混同；完整成本、A–F证据及限制见[M4交接](research/m4-handoff.md)、[审查修订授权](research/m4-audit-revision.md)。

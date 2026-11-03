@@ -292,8 +292,36 @@ D6 对原生 UniProc 新批提交、旧批 FIFO 消费、结果物化和输出�
 
 热试跑和端点、逐步、逐步三轮均未启动，D6 完成 **0/3 轮**，计划 180 条测量请求，实际提交 0 条。独立复核确认缺少节点原件，最早出包慢段、槽位持有至接纳等待的放大链及实际采集扰动均为 `unresolved`。D5-R 封存顺序仍按其原分析归属。原 C3 保持 `blocked`，原热门槛、TTFT、吞吐和资格前置流程有效。资格复验未启动，正式矩阵为 0/64。
 
-私有提交回执在 `runs/M5-paired-performance/attempts/d6-01/submission.json`，SHA-256 为 `17a7345a35f7be88e2dc155b5f5ac3837397b581ccd67e02a8dc23fb2400ccf2`。提交后的队列、记账和目录检查，以及控制器快照和冻结审查拒绝记录在 `runs/M5-paired-performance/d6-review/`。 [冻结方案与复放入口](m5-design.md#d6-最早出包慢段诊断)
+私有提交回执在 `runs/M5-paired-performance/rejected-submissions/d6-01/submission.json`，SHA-256 为 `17a7345a35f7be88e2dc155b5f5ac3837397b581ccd67e02a8dc23fb2400ccf2`。提交后的队列、记账和目录检查，以及控制器快照和冻结审查拒绝记录在 `runs/M5-paired-performance/d6-review/`。 [冻结方案与复放入口](m5-design.md#d6-最早出包慢段诊断)
 
 独立拒绝复核为 `independent-submission-rejected.json`，SHA-256 为 `0d06a5b46af008ccf7f6b4728f4fa0f4d4568833f5e5bf88904032a83ea38a3b`。冻结审查和全历史拒绝日志为 `frozen-audit-rejection.json`。
 
 分账记录为 `resource-ledger.json`，SHA-256 为 `f008780e735f90855cc8c8c7daa4074724aa9949c112e50da355fe35f776b9`。账本同时索引原始回执、watcher 就绪和退出、提交后全队列与控制器查询。独立账本复算入口为同目录的 `review-rejected-submission.py`，从冻结 SHA 读取私有原件。
+
+## D6 重试完成，慢段未复现
+
+用户重新授权一次提交。提交前只读检查确认 `d6-01` 无作业 ID、队列和控制器无同名记录、远端运行目录不存在。10 个失败回执原件按路径、大小和 SHA-256 独立核验，原子移入私有 `rejected-submissions/d6-01/`。冻结控制器随后复算 13 个实际分配并使用新编号 `d6-02`。旧失败复算保留了当时把拒绝回执放在 `attempts/` 内的审查结论。
+
+作业 `140064` 按冻结执行与审查 SHA `3f7b94edca6b602cd4f68444c4850899aa60d061` 使用一张 RTX 3090。申请 20 分钟，实跑 542 秒，Slurm 权威终态 `COMPLETED/0:0`。独立 watcher 提交前就绪并以 0 退出。最终全队列查询、540 份设备样本、四组归属进程、采样器及 IPC 清理均核验，显存边界为 1→1 MiB。累计 14 次实际分配、280 申请分钟、6,483 秒实跑。先前被拒的 20 分钟请求单列。
+
+热试跑第 10 波、92.635 秒冻结 64°C、SM 1,882.5 MHz、显存 9,501 MHz。三轮分别在 78.850、73.709、54.602 秒通过热准入，180 条请求全部完成且按时取得首 token。三个测量窗中位温度均为 65°C，SM 中位频率依次为 1,890、1,860、1,905 MHz，显存频率众数均为 9,501 MHz，三对热状态均可比。
+
+| 轮次 | 完成请求 | 1.5–2.0 s token 间隔中位数 | 2.0–2.5 s token 间隔中位数 | TTFT p95 | 末终态吞吐请求/s | 末终态吞吐 token/s |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| E1 端点 | 60/60 | 21.634 ms | 21.286 ms | 634.340 ms | 7.334 | 117.350 |
+| E2 逐步 | 60/60 | 21.544 ms | 22.114 ms | 587.869 ms | 7.356 | 117.696 |
+| E3 逐步 | 60/60 | 21.852 ms | 21.445 ms | 717.372 ms | 7.153 | 114.454 |
+
+三轮各 6 个 500 ms 窗的中位数均低于 30 ms，范围为 21.286–22.406 ms。端点参照和两轮逐步采集均未复现 D5-R 的持续慢段。E2/E3 在前三秒分别验证 105/106 个正批和 365/366 个真实 token。独立复算在两轮均观察到满槽时最多一条待接纳请求，未观察到持续满槽等待。E2 有两次、E3 有一次已关联的释放→接纳。三次释放后至接纳启动为 0.080–0.104 ms，对应入队至接纳为 22.082–22.606 ms。全轮末 15 条接纳前等待中位数仍为 334.068、312.632、541.568 ms。前三秒观测可核验个别槽位交接，较晚的积压缺少逐步证据。最早出包慢段和槽位放大链均判为 `unresolved`。
+
+E2/E3 相对 E1 的 TTFT p95 差分别为 −46.470、+83.032 ms，均越过原 31.717 ms 容限。请求和 token 末终态吞吐分别变化 +0.295% 和 −2.468%，均在原 ±5% 容限内。单个端点参照下的同档波动保留为诊断对照，采集等价性仍未建立。原 C3 为 `blocked`，热门槛、TTFT、吞吐和同条件前置均按原规则。资格复验未启动，正式矩阵为 0/64。
+
+私有原件在 `runs/M5-paired-performance/attempts/d6-02/`。冻结复算、独立复算和资源账本位于 `runs/M5-paired-performance/d6-review/`。冻结复算 SHA-256 为 `334a2266605317de3cdb42f986d295ff67e1e0f5d251348f6e6513e552ff6d99`，独立复算为 `317874de57e819de9fde9a0afb0d9c4c711ca3ea3368ea167be914486c855c11`。资源账本为 `b44893f9c6eb2303927ffa60d62d2278833202f702b239b846d6bcf8890f3152`，释放抽查为 `89feda51fe65b95b00956bb1a9e092c30ea513fb7a70db7ed15e0047a93cc3ef`，旧拒绝归档清单为 `a2e15f33d3d736bcd0749515d08f8feb7700e843dff0c468e8f2c77e34f3933a`。完整 `UV_OFFLINE=1 make check` 为 971 通过、3 项固定跳过。
+
+在冻结执行 SHA 上使用新输出路径复算。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d6-02 --proposal configs/m5-d6.json --output NEW_PRIVATE_AUDIT
+python runs/M5-paired-performance/d6-review/independent-recompute.py runs/M5-paired-performance/attempts/d6-02
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
