@@ -185,6 +185,7 @@ def test_resource_positive(private_attempt):
         ("unknown_terminal", "slurm-final.json"),
         ("device_residue", "GPU process or memory residue"),
         ("process_residue", "process cleanup"),
+        ("ipc_residue", "process cleanup"),
         ("replay_residue", "replay group residue"),
         ("missing_boundary", "gpu-during.jsonl"),
     ],
@@ -209,6 +210,8 @@ def test_resource_semantic_negative(private_attempt, case, expected):
             write(allocation_path, {**read(allocation_path), "gpu_after": gpu(170, active=True)})
         elif case == "process_residue":
             write(allocation_path, {**read(allocation_path), "remaining_processes": ["foreign"]})
+        elif case == "ipc_residue":
+            write(allocation_path, {**read(allocation_path), "rpc_directory_removed": False})
         else:
             path = folder / "node/index.json"
             new_hash = write(

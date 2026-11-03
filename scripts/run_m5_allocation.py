@@ -4,9 +4,11 @@ import argparse
 import json
 import math
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -226,6 +228,7 @@ def main():
     owner_path = None
     errors = []
     table_hashes = {}
+    rpc_directory = None
     code = 1
 
     def interrupt(signum, _frame):
@@ -393,6 +396,11 @@ def main():
         )
 
     try:
+        # Pinned vLLM appends /<UUID> to VLLM_RPC_BASE_PATH for UNIX sockets.
+        # Keep engine IPC on the node and keep run artifacts in their original directory.
+        rpc_directory = Path(tempfile.mkdtemp(prefix=f"m5-{job}-", dir="/tmp"))
+        require(len(os.fsencode(rpc_directory)) + 37 <= 107, "M5 engine IPC path is too long")
+        os.environ["VLLM_RPC_BASE_PATH"] = str(rpc_directory)
         source_record = collect_sources(ROOT, args.model, config)
         atomic_write(sources, {**source_record, "job_id": job, "task_id": TASK})
         for spec in specs:
@@ -472,6 +480,11 @@ def main():
                 residue.extend(stop_group(active.pid, active))
             except Exception as error:
                 errors.append(f"collector cleanup: {error}")
+        if rpc_directory is not None:
+            try:
+                shutil.rmtree(rpc_directory)
+            except OSError as error:
+                errors.append(f"engine IPC cleanup: {error}")
         stop_sampling.set()
         sampler.join(timeout=12)
         after = snapshot()
@@ -488,6 +501,7 @@ def main():
                 "gpu_before": before,
                 "gpu_after": after,
                 "sampler_exited": not sampler.is_alive(),
+                "rpc_directory_removed": rpc_directory is None or not rpc_directory.exists(),
                 "index_sha256": digest(args.output / "index.json")
                 if (args.output / "index.json").exists()
                 else None,

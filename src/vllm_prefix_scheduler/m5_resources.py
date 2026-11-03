@@ -203,6 +203,7 @@ def audit_attempt(directory, *, require_completed=False):
         and 0 < ended - started <= 1200 * 10**9
         and allocation["remaining_processes"] == []
         and allocation["sampler_exited"] is True
+        and allocation.get("rpc_directory_removed", True) is True
         and not any("cleanup" in text for text in allocation["errors"]),
         "allocation process cleanup or timing evidence invalid",
     )
