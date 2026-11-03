@@ -360,7 +360,7 @@
   "calibration": {
     "split_c3": true,
     "qualification_authorization_schema_version": 2,
-    "qualification_predecessor_roles": [],
+    "qualification_predecessor_roles": ["D8"],
     "stages": [
       "C1",
       "C2",

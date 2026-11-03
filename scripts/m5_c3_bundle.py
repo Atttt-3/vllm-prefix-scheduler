@@ -9,7 +9,8 @@ from tempfile import TemporaryDirectory
 
 from check_m5_d1 import compare_pair
 from check_m5_d2 import PAIRS, RUNS, compare_thermal
-from plan_m5_calibration import C3_SPLIT_STAGES, aggregate_c3
+from m5_seal import git_identity, sealed_leaf
+from plan_m5_calibration import C3_SPLIT_STAGES, aggregate_c3, evaluate_stage
 
 from vllm_prefix_scheduler.m5_campaign import (
     D2R110_OFFICIAL_ANALYSIS_SHA256,
@@ -23,6 +24,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     read_json,
     require,
 )
+from vllm_prefix_scheduler.m5_contract import audit_run
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA
 from vllm_prefix_scheduler.m5_d2 import D2R110_PROPOSAL_SHA
 from vllm_prefix_scheduler.m5_resources import (
@@ -287,6 +289,84 @@ def verify_split_qualification(
     )
     verify_same_condition_report(replayed, proposal, predecessor, resource)
     return {"qualification_batch": batch, "qualification_authorization_sha256": authorization_sha}
+
+
+def qualified_calibration_stage(
+    config_path, attempt, role, execution_commit, *, rates=None, dress_reports=()
+):
+    """Recompute a released stage before it can advance or feed calibration."""
+    config_path, attempt = Path(config_path).resolve(), Path(attempt).resolve()
+    config, config_hash = read_json(config_path), digest(config_path)
+    planned = read_json(attempt / "planned.json")
+    resource = audit_attempt(attempt, require_completed=True)
+    require(
+        role in qualification_roles(config)
+        and planned["role"] == resource["role"] == role
+        and planned["phase"] == resource["phase"] == "calibration"
+        and planned["execution_commit"] == execution_commit
+        and planned["config_sha256"] == config_hash
+        and planned.get("resource_schema_version", 1) == config.get("resource_schema_version", 1)
+        and resource["complete"] is True,
+        f"calibration prerequisite role, source or release differs for {role}",
+    )
+    node = attempt / "node"
+    report = read_json(node / "calibration-result.json")
+    require(
+        report.get("stage") == role
+        and report.get("status") == "qualified"
+        and report.get("config_sha256") == config_hash,
+        f"calibration prerequisite is not a qualified {role} report",
+    )
+    catalog = git_identity(execution_commit)
+    require(
+        catalog.get("configs/m5-performance.json") == config_hash,
+        f"calibration prerequisite configuration differs from execution Git tree for {role}",
+    )
+    index = read_json(node / "index.json")
+    require(
+        index.get("schema_version") == 1 and index.get("stage") == role,
+        f"calibration prerequisite allocation index differs for {role}",
+    )
+    identities = set()
+    for row in index["runs"]:
+        identity = row["id"]
+        require(id_ok(identity) and identity not in identities, "invalid calibration leaf identity")
+        identities.add(identity)
+        table = node / identity / "input.json"
+        bound = sealed_leaf(
+            attempt,
+            planned["remote_attempt"],
+            row,
+            table,
+            config_path,
+            config,
+            resource["job_id"],
+            catalog,
+            execution_commit,
+        )
+        replayed = audit_run(
+            config_path,
+            table,
+            Path(bound["run"]),
+            pair_id=identity,
+            mode=row["mode"],
+            phase="diagnostic" if role == "C1" else "calibration",
+        )
+        require(
+            replayed == read_json(bound["audit"]), f"calibration leaf audit differs: {identity}"
+        )
+        row.update(inputs=bound["inputs"], run=bound["run"], audit=bound["audit"])
+    with TemporaryDirectory(prefix="m5-stage-audit-") as temporary:
+        relocated = Path(temporary) / "index.json"
+        relocated.write_text(json.dumps(index, allow_nan=False))
+        recomputed = evaluate_stage(
+            config, role, relocated, rates, dress_reports, config_sha256=config_hash
+        )
+    require(
+        recomputed["status"] == "qualified" and recomputed == report,
+        f"independent calibration result differs for {role}",
+    )
+    return recomputed
 
 
 def c3_bundle(config_path, history, stages, commit):

@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from test_m5_calibration import evidence_index
 
 from vllm_prefix_scheduler.m5_campaign import TASK, check_authorization, digest, qualification_roles
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA
@@ -107,7 +108,7 @@ def released(index, role, *, complete=True):
     }
 
 
-def stable_review(module, plan, predecessor):
+def stable_review(module, plan, predecessor, *, role=ROLE):
     counts = dict.fromkeys(("planned", "submitted", "completed", "timely_first_token"), 60)
     gates = {
         "overhead_ttft_ns": 2_000_000,
@@ -138,7 +139,7 @@ def stable_review(module, plan, predecessor):
             }
         )
     return {
-        "role": ROLE,
+        "role": role,
         "status": "diagnostic-complete",
         "proposal_sha256": PLAN_SHA,
         "input_sha256": D1_INPUT_SHA,
@@ -270,3 +271,121 @@ def test_summary_stable_cannot_override_native_pair_metrics(bundle_module):
     report["runs"]["E4"]["metrics"]["strata"]["all"]["ttft_ns"]["p95"] = 140_000_000
     with pytest.raises(ValueError, match="original thermal or paired performance gate"):
         module.verify_same_condition_report(report, plan, predecessor, resource)
+
+
+def test_d8_requires_exact_complete_three_pair_evidence(bundle_module):
+    module = bundle_module
+    plan = json.loads((ROOT / "configs/m5-d8.json").read_text())
+    resource = released(15, "D8")
+    predecessor = {"role": "D8", "proposal_sha256": PLAN_SHA, "execution_commit": PRIOR_COMMIT}
+    report = stable_review(module, plan, resource, role="D8")
+    module.verify_same_condition_report(report, plan, predecessor, resource)
+
+    missing_pair = deepcopy(report)
+    missing_pair["pairs"].pop()
+    with pytest.raises(ValueError, match="frozen complete three-pair matrix"):
+        module.verify_same_condition_report(missing_pair, plan, predecessor, resource)
+
+    altered_pair = deepcopy(report)
+    altered_pair["pairs"][0]["performance"]["within_tolerance"] = False
+    with pytest.raises(ValueError, match="original thermal or paired performance gate"):
+        module.verify_same_condition_report(altered_pair, plan, predecessor, resource)
+
+    with pytest.raises(ValueError, match="original same-condition evidence"):
+        module.verify_same_condition_report({**report, "role": "D7"}, plan, predecessor, resource)
+
+
+def test_d7_cannot_be_approved_as_same_condition_predecessor(tmp_path):
+    config, path = prospective_config(tmp_path)
+    config["calibration"]["qualification_predecessor_roles"] = ["D7", "D8"]
+    put(path, config)
+    auth = approval(path, config, 16)
+    auth["qualification_batch"]["predecessor"]["role"] = "D7"
+    with pytest.raises(ValueError, match="approved same-condition predecessor"):
+        check_authorization(auth, path, COMMIT, "calibration")
+
+
+@pytest.fixture
+def qualified_c2(tmp_path, monkeypatch, bundle_module):
+    module = bundle_module
+    config, config_path = prospective_config(tmp_path)
+    config_hash = digest(config_path)
+    attempt = tmp_path / "c2-01"
+    node = attempt / "node"
+    node.mkdir(parents=True)
+    remote = "/remote/m5/node/c2-01"
+    put(
+        attempt / "planned.json",
+        {
+            "role": "C2",
+            "phase": "calibration",
+            "execution_commit": COMMIT,
+            "resource_schema_version": config["resource_schema_version"],
+            "config_sha256": config_hash,
+            "remote_attempt": remote,
+        },
+    )
+    plan = importlib.import_module("plan_m5_calibration").plan_stage(config, "C2")
+    index_path = evidence_index(node, plan, config=config_path)
+    report = module.evaluate_stage(config, "C2", index_path, config_sha256=config_hash)
+    assert report["status"] == "qualified"
+    report_path = put(node / "calibration-result.json", report)
+    index = json.loads(index_path.read_text())
+    specs = {spec["id"]: spec for spec in plan["runs"]}
+    for row in index["runs"]:
+        identity = row["id"]
+        Path(row["inputs"]).rename(node / identity / "input.json")
+        row.update(
+            mode=specs[identity]["mode"],
+            inputs=f"{remote}/{identity}/input.json",
+            run=f"{remote}/{identity}/raw",
+            audit=f"{remote}/{identity}/audit.json",
+        )
+    put(index_path, index)
+    resource = released(15, "C2")
+
+    def release(path, *, require_completed):
+        assert path == attempt and require_completed is True
+        return resource
+
+    def git_tree(commit):
+        assert commit == COMMIT
+        return {"configs/m5-performance.json": config_hash}
+
+    def seal(path, remote_root, row, table, config_arg, data, job, catalog, commit):
+        assert path == attempt and remote_root == remote and job == resource["job_id"]
+        assert table == node / row["id"] / "input.json" and table.is_file()
+        assert config_arg == config_path and data == config and catalog == git_tree(commit)
+        leaf = table.parent
+        return {"inputs": str(table), "run": str(leaf / "raw"), "audit": str(leaf / "audit.json")}
+
+    def replay(config_arg, table, directory, *, pair_id, mode, phase):
+        assert config_arg == config_path and table == node / pair_id / "input.json"
+        assert directory == table.parent / "raw" and mode == "native" and phase == "calibration"
+        return json.loads((directory.parent / "audit.json").read_text())
+
+    monkeypatch.setattr(module, "audit_attempt", release)
+    monkeypatch.setattr(module, "git_identity", git_tree)
+    monkeypatch.setattr(module, "sealed_leaf", seal)
+    monkeypatch.setattr(module, "audit_run", replay)
+    return module, config_path, attempt, report_path, report
+
+
+def test_released_calibration_stage_recomputes_raw_and_selected_rates(qualified_c2):
+    module, config, attempt, result, report = qualified_c2
+    assert module.qualified_calibration_stage(config, attempt, "C2", COMMIT) == report
+    put(result, {**report, "selected_rates": {"burst": 8, "mixed": 8}})
+    with pytest.raises(ValueError, match="independent calibration result differs for C2"):
+        module.qualified_calibration_stage(config, attempt, "C2", COMMIT)
+    put(result, {**report, "status": "blocked"})
+    with pytest.raises(ValueError, match="not a qualified C2 report"):
+        module.qualified_calibration_stage(config, attempt, "C2", COMMIT)
+
+
+def test_qualified_calibration_stage_rejects_detached_source_or_leaf(qualified_c2, monkeypatch):
+    module, config, attempt, _, _ = qualified_c2
+    with pytest.raises(ValueError, match="prerequisite role, source or release differs for C2"):
+        module.qualified_calibration_stage(config, attempt, "C2", PRIOR_COMMIT)
+    monkeypatch.setattr(module, "audit_run", lambda *_args, **_kwargs: {"status": "valid"})
+    with pytest.raises(ValueError, match="calibration leaf audit differs"):
+        module.qualified_calibration_stage(config, attempt, "C2", COMMIT)

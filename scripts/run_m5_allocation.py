@@ -33,6 +33,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D5R_ROLE,
     D6_ROLE,
     D7_ROLE,
+    D8_ROLE,
     DIAGNOSTIC_ROLES,
     TASK,
     bind_d2r110_inputs,
@@ -49,6 +50,7 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
 from vllm_prefix_scheduler.m5_contract import validate_formal_table  # noqa: E402
 from vllm_prefix_scheduler.m5_d1 import C3_BLOCKED_SHA, D1_INPUT_SHA, d1_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_d2 import (  # noqa: E402
+    D2R110_PROPOSAL_NAME,
     D3_PROPOSAL_NAME,
     d2_specs,
     d2r110_specs,
@@ -77,6 +79,7 @@ from vllm_prefix_scheduler.m5_d7 import (  # noqa: E402
     D7_PREVIOUS_ANALYSIS,
     d7_specs,
 )
+from vllm_prefix_scheduler.m5_d8 import D8_PREVIOUS_ANALYSIS, d8_specs  # noqa: E402
 from vllm_prefix_scheduler.m5_resources import RESOURCE_SCHEMA_VERSION  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -314,11 +317,12 @@ def main():
     }
     d4 = args.role == D4_ROLE
     d7 = args.role == D7_ROLE
+    d8 = args.role == D8_ROLE
     trace_diagnostic = args.role in (D6_ROLE, D7_ROLE)
     trace_key = args.role.lower()
     d5r = trace_diagnostic or args.role == D5R_ROLE
     d5 = d5r or args.role == D5_ROLE
-    d2 = d4 or d5 or args.role in d2_planners
+    d2 = d4 or d5 or d8 or args.role in d2_planners
     thermal_context = config["calibration"].get("split_c3") is True and not diagnostic
     retained_configs = []
     retained_result = {}
@@ -428,6 +432,25 @@ def main():
             int(rate): row["sha256"] for rate, row in d4_target["arrival_tables"].items()
         }
         retained_configs = [inherited, d4_tables[8], previous_d3, original_c3]
+    elif d8:
+        require(
+            auxiliary is not None and digest(auxiliary) == authorization["d8_plan_sha256"],
+            "D8 staged plan differs from authorization",
+        )
+        staged = auxiliary.parent
+        diagnostic_table = staged / "input.json"
+        original_c3 = staged / "original-c3-result.json"
+        inherited_d2r110 = staged / D2R110_PROPOSAL_NAME
+        previous_d7 = staged / D8_PREVIOUS_ANALYSIS
+        specs = d8_specs(
+            config, auxiliary, diagnostic_table, original_c3, inherited_d2r110, previous_d7
+        )
+        retained_configs = [original_c3, inherited_d2r110, previous_d7]
+        retained_result = {
+            "role": D8_ROLE,
+            "inherited_d2r110_proposal_sha256": digest(inherited_d2r110),
+            "retained_d7_analysis_sha256": digest(previous_d7),
+        }
     elif diagnostic:
         require(auxiliary is not None, "diagnostic requires its reviewed plan and archived input")
         diagnostic_table = auxiliary.parent / "input.json"
@@ -637,6 +660,8 @@ def main():
                 command += ["--d6-plan", str(inherited_d6 if d7 else auxiliary)]
             if d7:
                 command += ["--d7-plan", str(auxiliary)]
+            if d8:
+                command += ["--d8-inherited-plan", str(inherited_d2r110)]
         timeout = math.floor(remaining()) - 15
         require(timeout > 0, "M5 allocation work deadline")
         collect = [
@@ -775,6 +800,12 @@ def main():
         ]
         auxiliary_command(check, remaining())
         result["audit_sha256"] = digest(audit)
+        if d8:
+            counts = read_json(audit)["metrics"]["strata"]["all"]["counts"]
+            result["d8_endpoint_complete"] = all(
+                counts[key] == spec["count"]
+                for key in ("planned", "submitted", "completed", "timely_first_token")
+            )
         if diagnostic and not d2:
             after_path = leaf / "diagnostic-device-after.json"
             atomic_write(after_path, d1_device_boundary())
@@ -782,6 +813,8 @@ def main():
         atomic_write(
             args.output / "index.json", {"schema_version": 1, "stage": args.role, "runs": results}
         )
+        if d8:
+            return result["d8_endpoint_complete"]
         if not trace_diagnostic:
             return True
         from m5_d3_audit import timing_leaf
@@ -904,10 +937,13 @@ def main():
             )
         elif d2:
             count = sum(row.get("d2_thermal_status") == "admitted" for row in results)
+            complete = count == 4 and (
+                not d8 or all(row.get("d8_endpoint_complete") is True for row in results[1:])
+            )
             atomic_write(
-                args.output / "d2-result.json",
+                args.output / ("d8-result.json" if d8 else "d2-result.json"),
                 {
-                    "status": "diagnostic-complete" if count == 4 else "diagnostic-incomplete",
+                    "status": "diagnostic-complete" if complete else "diagnostic-incomplete",
                     "proposal_sha256": digest(auxiliary),
                     "input_sha256": D1_INPUT_SHA,
                     "audited_runs": count,

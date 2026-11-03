@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "role": "D8",
+  "scope": "same-condition-endpoint-qualification-predecessor",
+  "retained_C3": {
+    "status": "blocked",
+    "sha256": "e8618fde6793d2c2d749e32b7f8052a495f695ab1ddc68dc015ac58012495866"
+  },
+  "target": {
+    "input_sha256": "e52cd3e00563b3e7827b089faa3e4a8aaffafa8a873867b2dfde8c6b5ea713ab",
+    "scenario": "mixed",
+    "seed": 51213,
+    "mode": "guarded",
+    "tier": "endpoint",
+    "count_per_engine": 60,
+    "arrival_rate_rps": 8,
+    "model_and_baseline_profile": "same pinned M5 D1 workload and runtime",
+    "fresh_engines": [
+      "thermal-pilot",
+      "E1",
+      "E2",
+      "E3",
+      "E4"
+    ],
+    "primary_pairs": [
+      [
+        "E1",
+        "E2"
+      ],
+      [
+        "E3",
+        "E4"
+      ]
+    ],
+    "order_drift_sentinel": [
+      "E1",
+      "E4"
+    ]
+  },
+  "conditioning": {
+    "sequence": "Archived mixed input with private preheat request IDs at 8 req/s; complete and drain every wave; clear APC between waves",
+    "normal_primer_after_final_prelude": "Drain/reset the preheat and then execute original M5 primer, APC reset and deterministic cache priming",
+    "pilot_has_no_measured_requests": true,
+    "pilot_cap_s": 150,
+    "minimum_conditioning_s": 30,
+    "per_measured_engine_cap_s": 110,
+    "read_only_side_sampler": {
+      "interval_s": 1,
+      "max_gap_s": 1.5,
+      "clock": "node CLOCK_MONOTONIC",
+      "gpu_fields": [
+        "gpu_uuid",
+        "temperature_gpu",
+        "sm_clock",
+        "memory_clock",
+        "p_state",
+        "power_draw",
+        "gpu_utilization",
+        "memory_used"
+      ],
+      "resource_fields": [
+        "gpu_process_ownership",
+        "cpu_affinity"
+      ]
+    },
+    "active_sample_predicate": "GPU utilization > 0",
+    "pilot_plateau": {
+      "first_window_after_min_conditioning": true,
+      "window_s": 20,
+      "min_total_samples": 18,
+      "min_active_samples_per_half": 6,
+      "max_temp_span_c": 2,
+      "max_sm_median_relative_change_between_halves": 0.1,
+      "min_active_memory_clock_mode_share": 0.9,
+      "freeze_target_from": "temperature median, active SM median, active memory clock mode; freeze before E1"
+    },
+    "per_measured_engine": {
+      "same_prelude_plateau_tests": true,
+      "preheat_temp_median_from_target_c": 2,
+      "preheat_active_sm_median_relative_from_target": 0.1,
+      "preheat_active_memory_mode_must_equal_target": true,
+      "max_age_of_actual_pre_t0_device_sample_s": 1.5,
+      "actual_pre_t0_temp_from_target_c": 2,
+      "abort_if_conditioning_or_pre_t0_check_fails": true
+    },
+    "in_window_comparability": {
+      "min_total_samples_per_round": 6,
+      "min_active_samples_per_round": 4,
+      "max_temp_median_difference_per_pair_c": 2,
+      "max_active_sm_median_relative_difference_per_pair": 0.1,
+      "same_active_memory_clock_mode_per_pair": true,
+      "preserve_all_results_if_comparability_fails": true
+    }
+  },
+  "stability_gate": {
+    "ttft": "nearest-rank p95 of planned arrival to first real client token",
+    "pair_reference": "first listed run in each pair",
+    "ttft_p95_absolute_floor_ns": 2000000,
+    "ttft_p95_relative_margin": 0.05,
+    "throughput_both_last_terminal_relative_margin": 0.05,
+    "required": "four complete 60-request endpoint rounds; original M5 source, timing, request, drain and resource gates; all predeclared thermal checks and all three pair comparisons",
+    "incomplete_or_failed_thermal_evidence": "retain originals and mark thermal control unverified",
+    "performance_gate_failure_with_valid_thermal_state": "endpoint remains unstable in tested state",
+    "success_scope": "endpoint stability under the controlled state on this GPU and frozen table only",
+    "old_C3_and_qualification_separate": true,
+    "no_invalid_run_replacement_or_data_exclusion": true
+  },
+  "budget": {
+    "requested_additional_allocations": 1,
+    "devices_per_allocation": 1,
+    "gpu": "RTX 3090",
+    "serial": true,
+    "requested_minutes": 20,
+    "allocation_work_deadline_s": 1050,
+    "five_engine_envelope_seconds": 325,
+    "thermal_pilot_seconds": 150,
+    "four_conditioning_envelope_seconds": 440,
+    "job_overhead_and_cleanup_seconds": 120,
+    "estimated_work_envelope_seconds": 1035,
+    "qualification_allocations": 0
+  },
+  "D2R110_plan_sha256": "891231f0444a0347be7104bb53ac4c4586d91c7d68e5500a5d971e29046b55c3",
+  "retained_D7": {
+    "status": "diagnostic-complete",
+    "analysis_sha256": "9c0d4f4c4548522c88546751dc4cb29c6c8535fc565609342265230c20801a83",
+    "proposal_sha256": "d74e98aa091f0b54d6da48dc4ffdc281d560d6b87df460586f4d516ed6d82b21",
+    "execution_commit": "fdfe2452ad30105201097344b0b4705830e011ee"
+  }
+}

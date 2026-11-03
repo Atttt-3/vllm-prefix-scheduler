@@ -29,6 +29,7 @@ from vllm_prefix_scheduler.m5_campaign import (
     D5R_ROLE,
     D6_ROLE,
     D7_ROLE,
+    D8_ROLE,
     digest,
     read_json,
     require,
@@ -67,6 +68,12 @@ from vllm_prefix_scheduler.m5_d7 import (
     D7_RUNS,
     d7_plan,
     d7_predecessor,
+)
+from vllm_prefix_scheduler.m5_d8 import (
+    D8_PREVIOUS_ANALYSIS,
+    D8_PROPOSAL_NAME,
+    d8_plan,
+    d8_predecessor,
 )
 from vllm_prefix_scheduler.m5_resources import audit_history, device
 
@@ -258,7 +265,14 @@ def device_samples(path, gpu):
 
 
 def bind_thermal_artifact(
-    leaf, row, proposal_sha=PROPOSAL_SHA, *, role=ROLE, d4_configs=None, d5_configs=None
+    leaf,
+    row,
+    proposal_sha=PROPOSAL_SHA,
+    *,
+    role=ROLE,
+    d4_configs=None,
+    d5_configs=None,
+    d8_configs=None,
 ):
     path = leaf / "raw/d2-thermal.json"
     want = digest(path)
@@ -274,6 +288,7 @@ def bind_thermal_artifact(
         D5R_ROLE: D5R_PROPOSAL_NAME,
         D6_ROLE: D6_PROPOSAL_NAME,
         D7_ROLE: D7_PROPOSAL_NAME,
+        D8_ROLE: D8_PROPOSAL_NAME,
     }[role]
     require(
         sum(
@@ -286,7 +301,10 @@ def bind_thermal_artifact(
         "D2 reviewed proposal is not in the collector",
     )
     previous = []
-    if role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE):
+    if role == D8_ROLE:
+        require(type(d8_configs) is dict and d8_configs, "D8 collector inputs missing")
+        previous.extend(d8_configs.items())
+    elif role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE):
         staged = d4_configs if role == D4_ROLE else d5_configs
         require(type(staged) is dict and staged, f"{role} collector inputs missing")
         previous.extend(staged.items())
@@ -606,6 +624,7 @@ def review(attempt, proposal_path):
     d5r = role == D5R_ROLE
     d6 = role == D6_ROLE
     d7 = role == D7_ROLE
+    d8 = role == D8_ROLE
     trace_diagnostic = d6 or d7
     trace_key = role.lower()
     expected_runs = D7_RUNS if d7 else D6_RUNS if d6 else RUNS
@@ -621,12 +640,16 @@ def review(attempt, proposal_path):
         D5R_ROLE,
         D6_ROLE,
         D7_ROLE,
+        D8_ROLE,
     )
     proposal_sha = digest(proposal_path)
     thermal_plan = capacity_plan = plan
     trace_audit = audit_step_trace
     verify_trace_sources = verify_step_sources
-    if d7:
+    if d8:
+        plan = d8_plan(proposal_path, ROOT / "configs/m5-d2r110.json")
+        thermal_plan = plan
+    elif d7:
         from m5_d7_audit import audit_d7_trace, verify_d7_sources
 
         inherited_d6 = ROOT / "configs/m5-d6.json"
@@ -702,6 +725,7 @@ def review(attempt, proposal_path):
         D5R_ROLE: 13,
         D6_ROLE: 14,
         D7_ROLE: 15,
+        D8_ROLE: 16,
     }[role]
     history = audit_history(attempt.parent)[:count]
     job = read_json(attempt / "submission.json")["stdout"].strip().split(";")[0]
@@ -718,7 +742,24 @@ def review(attempt, proposal_path):
         and auth["roles"] == [role],
         "D2 resource receipt or one-allocation authorization differs",
     )
-    if prospective and not (d4 or capacity):
+    if d8:
+        predecessor = d8_predecessor(plan, attempt.parent.parent / "d7-review/analysis-d7-01.json")
+        prior_release = history[14]
+        prior_attempt = attempt.parent / "d7-01"
+        prior_execution = read_json(prior_attempt / "planned.json")
+        prior_job = read_json(prior_attempt / "submission.json")["stdout"].strip().split(";")[0]
+        require(
+            auth["d8_plan_sha256"] == proposal_sha
+            and prior_release["role"] == D7_ROLE
+            and prior_release["complete"]
+            and prior_release["job_id"] == prior_job
+            and predecessor["resource_release"]
+            == json.loads(json.dumps(prior_release, default=str))
+            and predecessor["execution_commit"] == prior_execution["execution_commit"]
+            and predecessor["proposal_sha256"] == prior_execution["auxiliary_sha256"],
+            "D8 authorization, retained D7 diagnostic or release differs",
+        )
+    elif prospective and not (d4 or capacity):
         prior = attempt.parent.parent / "d2-independent-review/analysis.json"
         auth_plan = {
             D2R_ROLE: "d2r_plan_sha256",
@@ -866,7 +907,7 @@ def review(attempt, proposal_path):
     verify_thermal_run_order(
         rows,
         prospective=prospective,
-        require_reviewable_pilot=(d5r or trace_diagnostic) and resource["complete"],
+        require_reviewable_pilot=(d5r or trace_diagnostic or d8) and resource["complete"],
         expected_runs=expected_runs,
         stepped=D6_STEPPED if trace_diagnostic else (),
         step_status_key=f"{trace_key}_step_status",
@@ -924,6 +965,8 @@ def review(attempt, proposal_path):
             and row["rate_rps"] == rate,
             f"D2 run parameters differ for {identity}",
         )
+        if d8:
+            require(row["pair_id"] == role, f"D8 indexed pair identity differs for {identity}")
         if row.get("returncode") != 0 or not row.get("audit_sha256"):
             runs[identity] = {"status": "incomplete", "returncode": row.get("returncode")}
             if d4:
@@ -960,6 +1003,7 @@ def review(attempt, proposal_path):
             verify_native_sources(thermal_plan, read_json(leaf / "raw/sources.json"))
         d4_configs = None
         d5_configs = None
+        d8_configs = None
         if d4:
             d4_configs = {
                 D3_PROPOSAL_NAME: plan["D3_plan_sha256"],
@@ -991,8 +1035,23 @@ def review(attempt, proposal_path):
             if not pilot:
                 pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
                 d5_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
+        if d8:
+            d8_configs = {
+                D2R110_PROPOSAL_NAME: plan["D2R110_plan_sha256"],
+                D8_PREVIOUS_ANALYSIS: plan["retained_D7"]["analysis_sha256"],
+                "original-c3-result.json": C3_BLOCKED_SHA,
+            }
+            if not pilot:
+                pilot_thermal = f"{planned['remote_attempt']}/thermal-pilot/raw/d2-thermal.json"
+                d8_configs[pilot_thermal] = digest(node / "thermal-pilot/raw/d2-thermal.json")
         thermal = bind_thermal_artifact(
-            leaf, row, proposal_sha, role=role, d4_configs=d4_configs, d5_configs=d5_configs
+            leaf,
+            row,
+            proposal_sha,
+            role=role,
+            d4_configs=d4_configs,
+            d5_configs=d5_configs,
+            d8_configs=d8_configs,
         )
         require(
             thermal["schema_version"] == (2 if prospective else 1)
@@ -1012,6 +1071,17 @@ def review(attempt, proposal_path):
                 f"D2-R conditioning and cleanup lie outside the owned engine for {identity}",
             )
         client, engine = (read_json(leaf / "raw" / f"{name}.json") for name in ("client", "engine"))
+        if d8:
+            require(
+                client["tier"] == engine["tier"] == expected["tier"] == "endpoint"
+                and engine["profile"]["max_num_active_seqs"] is None
+                and "native_metrics_schema_version" not in client
+                and not any("native_metrics" in request for request in client["requests"])
+                and not any(
+                    (leaf / "raw" / f"d{version}-step.json").exists() for version in (6, 7)
+                ),
+                f"D8 endpoint profile or collector tier differs for {identity}",
+            )
         if trace_diagnostic:
             verify_trace_sources(plan, read_json(leaf / "raw/sources.json"))
             require(
@@ -1048,6 +1118,11 @@ def review(attempt, proposal_path):
                 and "measure_start_ns" not in phases,
                 f"D2 untimed run contains measured data for {identity}",
             )
+            if d8:
+                require(
+                    "d8_endpoint_complete" not in row,
+                    f"D8 untimed leaf claims endpoint completeness for {identity}",
+                )
         clock = client["clock"]
         require(
             clock["pid"] not in client_pids and engine["clock"]["pid"] not in engine_pids,
@@ -1145,6 +1220,11 @@ def review(attempt, proposal_path):
             counts[key] == expected["count_per_engine"]
             for key in ("planned", "submitted", "completed", "timely_first_token")
         )
+        if d8:
+            require(
+                row.get("d8_endpoint_complete") is complete,
+                f"D8 indexed endpoint completeness differs for {identity}",
+            )
         runs[identity].update(
             pre_t0_verified=pre_t0,
             in_window=measured,
@@ -1282,7 +1362,33 @@ def review(attempt, proposal_path):
             },
         }
 
-    if d5:
+    if d8:
+        for first, second in zip(RUNS[1:], RUNS[2:], strict=False):
+            require(
+                second not in runs or runs.get(first, {}).get("endpoint_evidence_complete") is True,
+                "D8 continued after independently incomplete endpoint evidence",
+            )
+        node_path = node / "d8-result.json"
+        if node_path.exists():
+            require(
+                read_json(node_path)
+                == {
+                    "status": "diagnostic-complete"
+                    if len(valid_metrics) == len(RUNS) - 1
+                    else "diagnostic-incomplete",
+                    "role": role,
+                    "proposal_sha256": proposal_sha,
+                    "inherited_d2r110_proposal_sha256": plan["D2R110_plan_sha256"],
+                    "retained_d7_analysis_sha256": plan["retained_D7"]["analysis_sha256"],
+                    "input_sha256": D1_INPUT_SHA,
+                    "audited_runs": sum("metrics" in run for run in runs.values()),
+                    "retained_c3_sha256": C3_BLOCKED_SHA,
+                },
+                "D8 node result differs from independent evidence",
+            )
+        elif resource["complete"]:
+            raise ValueError("Completed D8 lacks the node result")
+    elif d5:
         node_path = node / ("d5-r-result.json" if d5r else "d5-result.json")
         if node_path.exists():
             audited = sum("metrics" in run for run in runs.values())
@@ -1460,7 +1566,16 @@ def review(attempt, proposal_path):
         "proposal_sha256": proposal_sha,
         **(
             {"role": role, "retained_original_D2": plan["retained_D2"]}
-            if prospective and not (d4 or d5)
+            if prospective and not (d4 or d5 or d8)
+            else {}
+        ),
+        **(
+            {
+                "role": role,
+                "inherited_d2r110_proposal_sha256": plan["D2R110_plan_sha256"],
+                "retained_D7": plan["retained_D7"],
+            }
+            if d8
             else {}
         ),
         **(

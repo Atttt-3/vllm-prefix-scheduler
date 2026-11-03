@@ -11,7 +11,14 @@ from pathlib import Path
 
 from m3_sources import collect_sources, sha256
 
-from vllm_prefix_scheduler.m5_campaign import D2R110_ROLE, D2R_ROLE, D3_ROLE, read_json, require
+from vllm_prefix_scheduler.m5_campaign import (
+    D2R110_ROLE,
+    D2R_ROLE,
+    D3_ROLE,
+    D8_ROLE,
+    read_json,
+    require,
+)
 from vllm_prefix_scheduler.m5_d2 import d2r110_plan, d2r_plan, d3_plan
 from vllm_prefix_scheduler.m5_d3 import (
     bind_loaded_sources,
@@ -24,6 +31,7 @@ from vllm_prefix_scheduler.m5_d5 import d5_plan, d5_profile
 from vllm_prefix_scheduler.m5_d5r import d5r_plan
 from vllm_prefix_scheduler.m5_d6 import D6_RUNS, D6_STEPPED, d6_plan, d6_sources
 from vllm_prefix_scheduler.m5_d7 import D7_RUNS, d7_plan
+from vllm_prefix_scheduler.m5_d8 import d8_plan
 from vllm_prefix_scheduler.m5_workload import MODES
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -394,7 +402,7 @@ async def _run(
         from m5_d2_thermal import target_from_plateau
 
         plan = json.loads(args.d2_plan.read_text())
-        prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE)
+        prospective = plan["role"] in (D2R_ROLE, D2R110_ROLE, D3_ROLE, D8_ROLE)
         conditioning = plan["conditioning"]
         plan_sha = sha256(
             getattr(args, "d7_plan", None)
@@ -786,6 +794,7 @@ def main():
         "d5r-plan",
         "d6-plan",
         "d7-plan",
+        "d8-inherited-plan",
     ):
         parser.add_argument(f"--{field}", type=Path)
     args = parser.parse_args()
@@ -813,6 +822,10 @@ def main():
         parser.error("D6 requires its inherited D5-R plan")
     if args.d7_plan is not None and args.d6_plan is None:
         parser.error("D7 requires its inherited D6 plan")
+    if args.d8_inherited_plan is not None and (
+        args.d2_role is None or args.d4_plan is not None or args.d5_plan is not None
+    ):
+        parser.error("D8 inherited plan requires the original endpoint replay")
     native_timing = None
     preheat_workload = None
     d5_expected_profile = None
@@ -847,12 +860,19 @@ def main():
             parser.error(str(error))
     else:
         plan = json.loads(args.d2_plan.read_text())
+        if (plan["role"] == D8_ROLE) != (args.d8_inherited_plan is not None):
+            parser.error("D8 endpoint replay requires its inherited D2-R110 plan")
         if plan["role"] == D2R_ROLE:
             d2r_plan(plan)
         elif plan["role"] == D2R110_ROLE:
             d2r110_plan(plan)
         elif plan["role"] == D3_ROLE:
             native_timing = d3_plan(plan)["native_timing"]
+        elif plan["role"] == D8_ROLE:
+            try:
+                d8_plan(args.d2_plan, args.d8_inherited_plan)
+            except (KeyError, OSError, TypeError, ValueError) as error:
+                parser.error(str(error))
         planned = plan["target"]
         expected_id = (
             args.pair_id == "thermal-pilot"

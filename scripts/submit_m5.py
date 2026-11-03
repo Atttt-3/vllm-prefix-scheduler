@@ -42,6 +42,8 @@ from vllm_prefix_scheduler.m5_campaign import (  # noqa: E402
     D6_ROLE,
     D7_PLAN_FILENAME,
     D7_ROLE,
+    D8_PLAN_FILENAME,
+    D8_ROLE,
     DIAGNOSTIC_ROLES,
     JOB_PREFIX,
     SPLIT_C3_ROLES,
@@ -99,6 +101,11 @@ from vllm_prefix_scheduler.m5_d7 import (  # noqa: E402
     D7_PREVIOUS_ANALYSIS,
     D7_PROPOSAL_NAME,
     d7_specs,
+)
+from vllm_prefix_scheduler.m5_d8 import (  # noqa: E402
+    D8_PREVIOUS_ANALYSIS,
+    D8_PROPOSAL_NAME,
+    d8_specs,
 )
 from vllm_prefix_scheduler.m5_resources import (  # noqa: E402
     RESOURCE_SCHEMA_VERSION,
@@ -208,12 +215,13 @@ def preflight_diagnostic_stage(ssh, python, checkout, proposal, specs, role):
 import json, sys
 from pathlib import Path
 from vllm_prefix_scheduler.m5_campaign import read_json
-from vllm_prefix_scheduler.m5_d2 import D3_PROPOSAL_NAME
+from vllm_prefix_scheduler.m5_d2 import D2R110_PROPOSAL_NAME, D3_PROPOSAL_NAME
 from vllm_prefix_scheduler.m5_d4 import D4_INPUT_8_NAME, D4_INPUT_6_NAME, D4_PREVIOUS_ANALYSIS, d4_specs
 from vllm_prefix_scheduler.m5_d5 import D5_PREVIOUS_ANALYSIS, D5_PROPOSAL_NAME, d5_specs
 from vllm_prefix_scheduler.m5_d5r import D5R_PREVIOUS_ANALYSIS, D5R_PROPOSAL_NAME, d5r_specs
 from vllm_prefix_scheduler.m5_d6 import D6_PREVIOUS_ANALYSIS, D6_PROPOSAL_NAME, d6_specs
 from vllm_prefix_scheduler.m5_d7 import D7_LATE_TIMELINE, D7_PREVIOUS_ANALYSIS, d7_specs
+from vllm_prefix_scheduler.m5_d8 import D8_PREVIOUS_ANALYSIS, d8_specs
 config, proposal = map(Path, sys.argv[1:3])
 staged = proposal.parent
 common = (staged / "original-c3-result.json", staged / D3_PROPOSAL_NAME)
@@ -232,13 +240,16 @@ elif sys.argv[3] == "D6":
                      common[0], staged / D5R_PROPOSAL_NAME, staged / D5_PROPOSAL_NAME,
                      common[1], staged / D5_PREVIOUS_ANALYSIS, staged / D5R_PREVIOUS_ANALYSIS,
                      staged / D6_PREVIOUS_ANALYSIS)
-else:
-    assert sys.argv[3] == "D7"
+elif sys.argv[3] == "D7":
     specs = d7_specs(read_json(config), proposal, staged / "input.json", common[0],
                      staged / D6_PROPOSAL_NAME, staged / D5R_PROPOSAL_NAME,
                      staged / D5_PROPOSAL_NAME, common[1], staged / D5_PREVIOUS_ANALYSIS,
                      staged / D5R_PREVIOUS_ANALYSIS, staged / D6_PREVIOUS_ANALYSIS,
                      staged / D7_PREVIOUS_ANALYSIS, staged / D7_LATE_TIMELINE)
+else:
+    assert sys.argv[3] == "D8"
+    specs = d8_specs(read_json(config), proposal, staged / "input.json", common[0],
+                     staged / D2R110_PROPOSAL_NAME, staged / D8_PREVIOUS_ANALYSIS)
 print(json.dumps(specs))
 """
     result = remote(
@@ -451,6 +462,7 @@ def submit(args):
                 D5R_ROLE: 12,
                 D6_ROLE: 13,
                 D7_ROLE: 14,
+                D8_ROLE: 15,
             }
             require(
                 len(history) == previous_slots[args.role]
@@ -628,6 +640,30 @@ def submit(args):
                     diagnostic_run_specs = d6_specs(
                         config, proposal, input_table, old_result, *lineage
                     )
+            elif args.role == D8_ROLE:
+                previous = HISTORY / "d7-01"
+                require(
+                    history[-1]["role"] == D7_ROLE
+                    and history[-1] == audit_attempt(previous, require_completed=True),
+                    "D8 requires the retained D7 allocation and release",
+                )
+                proposal = CONFIG.with_name(D8_PLAN_FILENAME)
+                inherited = CONFIG.with_name(D2R110_PLAN_FILENAME)
+                previous_d7 = HISTORY.parent / "d7-review/analysis-d7-01.json"
+                diagnostic_run_specs = d8_specs(
+                    config, proposal, input_table, old_result, inherited, previous_d7
+                )
+                report = read_json(previous_d7)
+                require(
+                    report["resource_release"] == json.loads(json.dumps(history[-1], default=str))
+                    and report["execution_commit"]
+                    == read_json(previous / "planned.json")["execution_commit"],
+                    "D8 retained D7 analysis is detached from the prior release",
+                )
+                retained_analyses = {
+                    D2R110_PROPOSAL_NAME: inherited,
+                    D8_PREVIOUS_ANALYSIS: previous_d7,
+                }
             else:
                 is_d5r = args.role == D5R_ROLE
                 prior_role = D5_ROLE if is_d5r else D4_ROLE
@@ -676,6 +712,8 @@ def submit(args):
                     f"{args.role} retained {prior_role} analysis is detached from the prior release",
                 )
         else:
+            from m5_c3_bundle import qualified_calibration_stage
+
             if args.phase == "calibration" and calibration_roles != CALIBRATION:
                 verify_split_qualification(CONFIG, HISTORY, args.authorization, audits=history)
             stage_index = (
@@ -683,10 +721,22 @@ def submit(args):
                 if args.phase == "calibration"
                 else len(calibration_roles)
             )
+            qualified_reports = {}
             for stage in calibration_roles[:stage_index]:
                 require(
                     ("calibration", stage) in completed,
                     f"required qualified calibration stage {stage} missing",
+                )
+                path, _ = completed[("calibration", stage)]
+                qualified_reports[stage] = qualified_calibration_stage(
+                    CONFIG,
+                    path,
+                    stage,
+                    commit,
+                    rates=qualified_reports.get("C2", {}).get("selected_rates"),
+                    dress_reports=(qualified_reports["C4"], qualified_reports["C5"])
+                    if stage == "C6"
+                    else (),
                 )
             if args.phase == "formal":
                 freeze = read_json(args.freeze)
@@ -694,8 +744,11 @@ def submit(args):
                     if stage in SPLIT_C3_ROLES:
                         continue
                     path, _ = completed[("calibration", stage)]
+                    report = path / "node/calibration-result.json"
+                    report_bytes = report.read_bytes()
                     require(
-                        digest(path / "node/calibration-result.json")
+                        json.loads(report_bytes) == qualified_reports[stage]
+                        and hashlib.sha256(report_bytes).hexdigest()
                         == freeze["calibration_sha256"][stage],
                         "formal freeze detached from qualified calibration",
                     )
@@ -743,6 +796,7 @@ def submit(args):
                 D5R_ROLE: D5R_PROPOSAL_NAME,
                 D6_ROLE: D6_PROPOSAL_NAME,
                 D7_ROLE: D7_PROPOSAL_NAME,
+                D8_ROLE: D8_PROPOSAL_NAME,
             }
             name = staged_names.get(args.role, proposal.name)
             aux = remote_auth.parent / name
@@ -755,7 +809,7 @@ def submit(args):
             for filename, analysis in retained_analyses.items():
                 upload(ssh, aux.parent / filename, analysis.read_bytes().decode("utf-8"))
             auxiliary_hash = digest(proposal)
-            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE):
+            if args.role in (D4_ROLE, D5_ROLE, D5R_ROLE, D6_ROLE, D7_ROLE, D8_ROLE):
                 node_specs = preflight_diagnostic_stage(
                     ssh,
                     paths["remote_gpu_environment"] / "bin/python",
@@ -775,13 +829,16 @@ def submit(args):
             for stage in prerequisites:
                 directory, previous = completed[("calibration", stage)]
                 local = directory / "node/calibration-result.json"
-                result = read_json(local)
-                require(result["status"] == "qualified", f"{stage} report is not qualified")
+                report_bytes = local.read_bytes()
+                require(
+                    json.loads(report_bytes) == qualified_reports[stage],
+                    f"{stage} qualified report changed after audit",
+                )
                 reports.append(
                     {
                         "stage": stage,
                         "path": str(PurePosixPath(previous["remote_attempt"]) / local.name),
-                        "sha256": digest(local),
+                        "sha256": hashlib.sha256(report_bytes).hexdigest(),
                     }
                 )
             aux = root / "authorized" / args.attempt / "dependencies.json"

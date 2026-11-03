@@ -194,3 +194,18 @@ python scripts/submit_m5.py --authorization PRIVATE_D7_AUTH --phase calibration 
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d7-01 --proposal configs/m5-d7.json --output NEW_PRIVATE_D7_AUDIT
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D8 同条件端点资格前置
+
+[D8 冻结方案](../../configs/m5-d8.json) 从 D7 交付 `171eef2` 起步，绑定原 D2-R110 方案、D7 实际审查与释放记录、原 mixed 到达表和原 C3 `blocked`。D7 的晚段采集、五个 runner 槽及暖目标选择仍属 D7 诊断。D8 继承 D2-R110 原 `target`、`conditioning`、`stability_gate` 与预算，采用原基线四个 runner 槽、原生容量配置、guarded、8 请求/秒和仅端点采集。试跑按原热规则选首个合格平台。之后四轮新引擎按 E1–E4 顺序，各 60 条。
+
+四轮均须通过原热准入和端点有效性，独立复算 E1/E2、E3/E4、E1/E4。TTFT p95 容限为 `max(2 ms, 参考轮 p95 × 5%)`，请求与 token 末终态吞吐各 ±5%。独立审查核对五个阶段、原始客户端与设备记录、实际基线、相同的实测 KV 块数和资源释放。缺轮、热状态不合格、请求证据不完整或任一配对越界均阻断资格前置。D8 原件按执行 SHA 重放，只有完整通过且独立报告摘要一致才满足 `same-condition-ee-v1`。
+
+本批只规划一次串行单 RTX 3090，最多 20 分钟，无重试，新增为第 16 次分配。预计 1,035 秒，包括热试跑 150 秒、四轮热准入 440 秒、五引擎其他工作 325 秒、核验和清理 120 秒。作业内硬上限 1,050 秒。实际 GPU 提交须有 D8 独立授权、原件上传核验及 watcher 就绪。
+
+D8 通过后另行申请七次资格分配。提交侧按阶段顺序检查前置报告，并从封存输入、collector、审查原件和资源记录重新判定其资格。C3 任一场景未通过即阻断后续作业。原 C3 保持 `blocked`，正式 16 组另行冻结和审批。
+
+```bash
+python scripts/submit_m5.py --authorization PRIVATE_D8_AUTH --phase calibration --role D8 --attempt d8-01
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d8-01 --proposal configs/m5-d8.json --output NEW_PRIVATE_D8_AUDIT
+```
