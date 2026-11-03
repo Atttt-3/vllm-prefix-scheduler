@@ -14,8 +14,8 @@
   ],
   "repeats": 3,
   "native_rounds_per_seed": 100,
-  "gpu_profile_id": "capacity1025-v1-candidate",
-  "profile_status": "requires_real_calibration",
+  "gpu_profile_id": "capacity1025-v1",
+  "profile_status": "calibrated_frozen",
   "gpu_profile": {
     "dtype": "bfloat16",
     "tensor_parallel_size": 1,
@@ -1321,5 +1321,23 @@
       "content_id": "4783fe10ac3adce15ac8f358ef5462739852c569",
       "kind": "git_blob_sha1"
     }
+  },
+  "execution_groups": {
+    "all": [
+      "native",
+      "cpu",
+      "inputs",
+      "gpu",
+      "regressions"
+    ],
+    "metadata": [
+      "native",
+      "cpu",
+      "regressions"
+    ],
+    "gpu": [
+      "inputs",
+      "gpu"
+    ]
   }
 }

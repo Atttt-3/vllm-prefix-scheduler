@@ -243,3 +243,339 @@ def test_fresh_control_process_failure_is_not_accepted(tmp_path, monkeypatch):
     assert len(calls) == 1
     assert (destination / "native-stderr.log").read_text() == "local forced child failure\n"
     assert not (destination / "native" / "results.json").exists()
+
+
+def test_regression_job_uses_existing_m1_m2b_runtime_environment_schema():
+    # Field layout matches all three actual attempt01 regression runtime originals.
+    runtime = {
+        "project_commit": "a" * 40,
+        "environment": {
+            "CUDA_VISIBLE_DEVICES": "0",
+            "HF_HUB_OFFLINE": "1",
+            "PYTHONHASHSEED": "42",
+            "SLURM_JOB_ID": "12345",
+            "VLLM_USE_V2_MODEL_RUNNER": "1",
+        },
+    }
+    assert exporter.bind_regression_job(runtime, "a" * 40) == "12345"
+    for changed in (
+        {**runtime, "project_commit": "b" * 40},
+        {"project_commit": "a" * 40, "job_id": "12345"},
+        {**runtime, "environment": {}},
+        {**runtime, "environment": {"SLURM_JOB_ID": "unknown"}},
+        {**runtime, "job_id": "99999"},
+    ):
+        with pytest.raises(ValueError):
+            exporter.bind_regression_job(changed, "a" * 40)
+
+
+def test_cpu_public_costs_recompute_fixed_numeric_allowlist_without_private_extras():
+    secret = "PRIVATE_HOST_PATH_JOB_ID_MUST_NOT_LEAK"
+    events = [
+        {
+            "event": "m4_cpu_environment",
+            "machine": secret,
+            "unit": secret,
+            "processor": secret,
+            "clock": {"implementation": secret},
+            "empty_wrapper_ns": {
+                **{
+                    key: [1] * 500 + [100] * 500
+                    for key in ("bare_call_ns", "timed_wrapper_call_ns", "clock_pair_ns")
+                },
+                "private_extra": secret,
+            },
+        }
+    ]
+    for mode in ("native", "off", "prefix", "guarded"):
+        for workload in ("cold", "tied_hot", "mixed"):
+            for window in (8, 16, 32):
+                for outside in (0, 128, 4096):
+                    meta = {
+                        "mode": mode,
+                        "workload": workload,
+                        "window": window,
+                        "outside_length": outside,
+                        "job_id": secret,
+                        "path": secret,
+                        "extra": secret,
+                    }
+                    normal = {
+                        **meta,
+                        "event": "m4_cpu_sample",
+                        "variant": "normal",
+                        "calls": {**dict.fromkeys(exporter.CPU_CALLS, 2), "private": secret},
+                        "visits": {**dict.fromkeys(exporter.CPU_VISITS, 3), "private": secret},
+                    }
+                    # This is a numerical export unit fixture, not a native CPU run.
+                    events.extend([normal] * 500)
+                    events.append(
+                        {**meta, "event": "m4_cpu_unwrapped", "samples_ns": [1] * 50 + [100] * 50}
+                    )
+                    if mode not in {"prefix", "guarded"} or workload != "mixed":
+                        continue
+                    for duration in (5, 1, 9, 3, 7):
+                        events.append(
+                            {
+                                **meta,
+                                "event": "m4_cpu_sample",
+                                "variant": "prepend_restore",
+                                "duration_ns": {
+                                    **dict.fromkeys(exporter.CPU_PHASES, duration),
+                                    "private": secret,
+                                },
+                            }
+                        )
+                        events.append(
+                            {
+                                **meta,
+                                "event": "m4_cpu_restore_counter",
+                                "counts": {
+                                    "popleft_calls": 1,
+                                    "popleft_entries": 1,
+                                    "extendleft_calls": 1,
+                                    "extendleft_entries": window,
+                                    "private": secret,
+                                },
+                            }
+                        )
+    public = exporter.public_cpu_costs(events)
+    assert secret not in json.dumps(public)
+    assert set(public["empty_wrapper"]) == {
+        "bare_call_ns",
+        "timed_wrapper_call_ns",
+        "clock_pair_ns",
+    }
+    assert all(
+        item == {"n": 1000, "p50_ns": 1, "p95_ns": 100} for item in public["empty_wrapper"].values()
+    )
+    assert len(public["unwrapped"]) == len(public["normal_operation_counts"]) == 108
+    assert len(public["prepend_restore"]) == len(public["restore_operation_counts"]) == 18
+    assert public["restore_counter_samples"] == 90
+    assert public["unwrapped"][0]["p50_ns"] == 1  # Nearest rank, not the mean of two middle values.
+    assert public["unwrapped"][0]["n"] == 100
+    assert public["normal_operation_counts"][0]["n"] == 500
+    assert set(public["normal_operation_counts"][0]["calls"]) == set(exporter.CPU_CALLS)
+    assert set(public["normal_operation_counts"][0]["visits"]) == set(exporter.CPU_VISITS)
+    assert public["normal_operation_counts"][0]["calls"]["score"] == {"min": 2, "max": 2}
+    assert set(public["prepend_restore"][0]["phases"]) == set(exporter.CPU_PHASES)
+    assert public["prepend_restore"][0]["phases"]["total"] == {"n": 5, "p50_ns": 5, "p95_ns": 9}
+    assert set(public["restore_operation_counts"][0]["counts"]) == set(exporter.CPU_RESTORE_COUNTS)
+    assert public["duration_unit"] == "nanoseconds"
+    assert public["measurement_units"] == {
+        "native_off": "one PAUSED_ALL native schedule",
+        "prefix_guarded": "one waiting-window transaction",
+    }
+
+
+@pytest.fixture
+def layer_job_evidence():
+    # Ordinary JSON-compatible records exercise provenance binding only. These
+    # records make no claim that a native scheduler or GPU has been executed.
+    commit = "a" * 40
+    return {
+        "commit": commit,
+        "metadata_job": "12345",
+        "gpu_job": "12346",
+        "sources": {"project_commit": commit, "job_id": "12345"},
+        "events": [
+            {"event": "local_binding_begin", "job_id": "12345", "project_commit": commit},
+            {"event": "local_binding_end", "job_id": "12345", "project_commit": commit},
+        ],
+    }
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu"])
+def test_layer_job_binds_every_metadata_record(layer_job_evidence, layer):
+    evidence = layer_job_evidence
+    assert (
+        exporter.bind_layer_job(layer, evidence["events"], evidence["sources"], evidence["commit"])
+        == evidence["metadata_job"]
+    )
+
+
+@pytest.mark.parametrize("include_source_job", [False, True])
+def test_gpu_layer_job_binds_one_campaign_job(layer_job_evidence, include_source_job):
+    evidence = layer_job_evidence
+    sources = {"project_commit": evidence["commit"]}
+    if include_source_job:
+        sources["job_id"] = evidence["gpu_job"]
+    events = [
+        {"event": "local_engine_start", "campaign_job_id": evidence["gpu_job"]},
+        {"event": "local_worker_detail", "campaign_job_id": evidence["gpu_job"]},
+        {"event": "local_engine_end", "campaign_job_id": evidence["gpu_job"]},
+    ]
+    assert exporter.bind_layer_job("gpu", events, sources, evidence["commit"]) == "12346"
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu"])
+@pytest.mark.parametrize("invalid_job", [None, "", "not-a-job", "99999"])
+def test_metadata_layer_rejects_any_unbound_or_foreign_row(layer_job_evidence, layer, invalid_job):
+    evidence = layer_job_evidence
+    if invalid_job is None:
+        evidence["events"][1].pop("job_id")
+    else:
+        evidence["events"][1]["job_id"] = invalid_job
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(layer, evidence["events"], evidence["sources"], evidence["commit"])
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu"])
+@pytest.mark.parametrize("row_commit", [None, "b" * 40])
+def test_metadata_layer_rejects_any_missing_or_different_row_freeze(
+    layer_job_evidence, layer, row_commit
+):
+    evidence = layer_job_evidence
+    if row_commit is None:
+        evidence["events"][1].pop("project_commit")
+    else:
+        evidence["events"][1]["project_commit"] = row_commit
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(layer, evidence["events"], evidence["sources"], evidence["commit"])
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu", "gpu"])
+@pytest.mark.parametrize("source_commit", [None, "b" * 40])
+def test_layer_job_rejects_missing_or_different_source_freeze(
+    layer_job_evidence, layer, source_commit
+):
+    evidence = layer_job_evidence
+    sources = {"job_id": evidence["metadata_job"]}
+    if source_commit is not None:
+        sources["project_commit"] = source_commit
+    events = evidence["events"]
+    if layer == "gpu":
+        events = [{"campaign_job_id": evidence["metadata_job"]}]
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(layer, events, sources, evidence["commit"])
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu"])
+@pytest.mark.parametrize("source_job", [None, "", "not-a-job", "99999"])
+def test_metadata_layer_rejects_missing_invalid_or_foreign_source_job(
+    layer_job_evidence, layer, source_job
+):
+    evidence = layer_job_evidence
+    sources = {"project_commit": evidence["commit"]}
+    if source_job is not None:
+        sources["job_id"] = source_job
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(layer, evidence["events"], sources, evidence["commit"])
+
+
+@pytest.mark.parametrize(
+    "events",
+    [
+        [],
+        [{"event": "local_record_without_campaign_job"}],
+        [{"campaign_job_id": "12346"}, {"event": "local_row_missing_campaign_job"}],
+        [{"campaign_job_id": ""}],
+        [{"campaign_job_id": "not-a-job"}],
+        [{"campaign_job_id": "12346"}, {"campaign_job_id": "99999"}],
+    ],
+)
+def test_gpu_layer_rejects_missing_invalid_or_multiple_campaign_jobs(layer_job_evidence, events):
+    evidence = layer_job_evidence
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(
+            "gpu", events, {"project_commit": evidence["commit"]}, evidence["commit"]
+        )
+
+
+def test_gpu_layer_rejects_source_job_detached_from_campaign(layer_job_evidence):
+    evidence = layer_job_evidence
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(
+            "gpu",
+            [{"campaign_job_id": evidence["gpu_job"]}],
+            evidence["sources"],
+            evidence["commit"],
+        )
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu"])
+def test_metadata_layer_rejects_empty_raw_evidence(layer_job_evidence, layer):
+    evidence = layer_job_evidence
+    with pytest.raises(ValueError):
+        exporter.bind_layer_job(layer, [], evidence["sources"], evidence["commit"])
+
+
+@pytest.fixture
+def complete_job_binding():
+    return (
+        {"native": "12345", "cpu": "12345", "gpu": "12346"},
+        {"compat": "12345", "m1": "12345", "full": "12345"},
+    )
+
+
+def test_final_jobs_bind_complete_metadata_and_distinct_gpu_allocations(complete_job_binding):
+    layers, regressions = complete_job_binding
+    assert exporter.bind_final_jobs(layers, regressions) == {
+        "metadata": "12345",
+        "gpu": "12346",
+    }
+
+
+@pytest.mark.parametrize("layer", ["native", "cpu", "gpu"])
+def test_final_jobs_reject_any_missing_layer(complete_job_binding, layer):
+    layers, regressions = complete_job_binding
+    layers.pop(layer)
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+@pytest.mark.parametrize("regression", ["compat", "m1", "full"])
+def test_final_jobs_reject_any_missing_regression(complete_job_binding, regression):
+    layers, regressions = complete_job_binding
+    regressions.pop(regression)
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+@pytest.mark.parametrize("target", ["layers", "regressions"])
+def test_final_jobs_reject_extra_layer_or_regression(complete_job_binding, target):
+    layers, regressions = complete_job_binding
+    (layers if target == "layers" else regressions)["unexpected"] = "12345"
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+def test_final_jobs_reject_cpu_detached_from_native_allocation(complete_job_binding):
+    layers, regressions = complete_job_binding
+    layers["cpu"] = "99999"
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+@pytest.mark.parametrize("regression", ["compat", "m1", "full"])
+def test_final_jobs_reject_regression_detached_from_metadata_allocation(
+    complete_job_binding, regression
+):
+    layers, regressions = complete_job_binding
+    regressions[regression] = "99999"
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+def test_final_jobs_reject_reusing_metadata_job_as_gpu_job(complete_job_binding):
+    layers, regressions = complete_job_binding
+    layers["gpu"] = layers["native"]
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)
+
+
+@pytest.mark.parametrize("job", ["", "not-a-job"])
+def test_final_jobs_reject_nonnumeric_metadata_job_even_when_all_layers_agree(job):
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(
+            {"native": job, "cpu": job, "gpu": "12346"},
+            {"compat": job, "m1": job, "full": job},
+        )
+
+
+@pytest.mark.parametrize("job", ["", "not-a-job"])
+def test_final_jobs_reject_nonnumeric_gpu_job(complete_job_binding, job):
+    layers, regressions = complete_job_binding
+    layers["gpu"] = job
+    with pytest.raises(ValueError):
+        exporter.bind_final_jobs(layers, regressions)

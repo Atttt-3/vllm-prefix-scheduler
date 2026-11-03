@@ -5,9 +5,9 @@ import functools
 import gc
 import hashlib
 import json
+import math
 import os
 import platform
-import statistics
 import subprocess
 import sys
 import time
@@ -501,8 +501,8 @@ def main():
     summary = {
         key: {
             "n": len(values),
-            "p50_ns": statistics.median(values),
-            "p95_ns": sorted(values)[int((len(values) - 1) * 0.95)],
+            "p50_ns": sorted(values)[math.ceil(len(values) * 0.50) - 1],
+            "p95_ns": sorted(values)[math.ceil(len(values) * 0.95) - 1],
         }
         for key, values in groups.items()
     }

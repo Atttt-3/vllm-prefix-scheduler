@@ -27,6 +27,7 @@ def main():
     p.add_argument("--config", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--calibration", action="store_true")
+    p.add_argument("--group", choices=("all", "metadata", "gpu"), default="all")
     args = p.parse_args()
     if not __debug__ or not os.environ.get("SLURM_JOB_ID", "").isdigit():
         raise RuntimeError("Unoptimized execution in an existing allocation required")
@@ -37,6 +38,16 @@ def main():
     if subprocess.check_output(["git", "status", "--porcelain=v1"]):
         raise RuntimeError("M4 requires clean frozen checkout")
     config = json.loads(args.config.read_text())
+    execution_groups = {
+        "all": ["native", "cpu", "inputs", "gpu", "regressions"],
+        "metadata": ["native", "cpu", "regressions"],
+        "gpu": ["inputs", "gpu"],
+    }
+    if config.get("execution_groups") != execution_groups:
+        raise RuntimeError("Frozen execution groups differ")
+    declared = execution_groups[args.group]
+    if args.calibration and args.group != "all":
+        raise RuntimeError("Calibration uses the complete all group")
     args.output.mkdir(parents=True, exist_ok=False)
     args.output = args.output.resolve()
     python = os.environ["NATIVE_PYTHON"]
@@ -60,6 +71,8 @@ def main():
         "config_sha256": hashlib.sha256(args.config.read_bytes()).hexdigest(),
         "job_id": os.environ["SLURM_JOB_ID"],
         "phase": "calibration" if args.calibration else "formal",
+        "execution_group": args.group,
+        "declared_steps": declared,
         "started_unix_ns": time.time_ns(),
         "started_monotonic_ns": time.monotonic_ns(),
     }
@@ -173,85 +186,89 @@ def main():
         return step(name, argv, timeout + 15)
 
     try:
-        # The first allocation validates the native fixture before spending model time.
-        collect(
-            "native",
-            "native",
-            [
-                python,
-                "scripts/replay_m4.py",
-                "--config",
-                str(args.config),
-                "--model-config",
-                model,
-                "--output",
-                str(args.output / "native-data"),
-            ],
-            360,
-            ["runtime.json", "trace.jsonl", "summary.json"],
-        )
-        collect(
-            "cpu",
-            "native",
-            [
-                python,
-                "scripts/measure_m4_cpu.py",
-                "--config",
-                str(args.config),
-                "--model-config",
-                model,
-                "--output",
-                str(args.output / "cpu-data"),
-            ],
-            180,
-            ["runtime.json", "trace.jsonl", "summary.json"],
-        )
-        prepared = step(
-            "inputs",
-            [
-                python,
-                "scripts/prepare_m4_inputs.py",
-                "--config",
-                str(args.config),
-                "--model",
-                model,
-                "--output",
-                str(args.output / "gpu-inputs.json"),
-            ],
-            60,
-        )
-        if prepared == 0:
-            command = [
-                python,
-                "-u",
-                "scripts/run_m4_suite.py",
-                "--config",
-                str(args.config),
-                "--model",
-                model,
-                "--inputs",
-                str(args.output / "gpu-inputs.json"),
-                "--output",
-                str(args.output / "gpu-data"),
-            ]
-            if args.calibration:
-                command.append("--calibration")
+        if "native" in declared:
+            # The first allocation validates the native fixture before spending model time.
             collect(
-                "gpu",
-                "gpu",
-                command,
-                600,
+                "native",
+                "native",
                 [
-                    "sources.json",
-                    "trace.jsonl",
-                    "results.json",
-                    "resource-checkpoints.json",
-                    "raw-artifacts.tar.gz",
+                    python,
+                    "scripts/replay_m4.py",
+                    "--config",
+                    str(args.config),
+                    "--model-config",
+                    model,
+                    "--output",
+                    str(args.output / "native-data"),
                 ],
+                420,
+                ["runtime.json", "trace.jsonl", "summary.json"],
             )
-        # Reuse unchanged native baseline mechanisms under M4 allocation provenance.
-        os.environ["M3_REGRESSION_RUN"] = str(args.output / "regressions")
-        step("regressions", ["bash", "scripts/run_m4_regressions.sh"], 360)
+        if "cpu" in declared:
+            collect(
+                "cpu",
+                "native",
+                [
+                    python,
+                    "scripts/measure_m4_cpu.py",
+                    "--config",
+                    str(args.config),
+                    "--model-config",
+                    model,
+                    "--output",
+                    str(args.output / "cpu-data"),
+                ],
+                180,
+                ["runtime.json", "trace.jsonl", "summary.json"],
+            )
+        if "inputs" in declared:
+            prepared = step(
+                "inputs",
+                [
+                    python,
+                    "scripts/prepare_m4_inputs.py",
+                    "--config",
+                    str(args.config),
+                    "--model",
+                    model,
+                    "--output",
+                    str(args.output / "gpu-inputs.json"),
+                ],
+                60,
+            )
+            if prepared == 0:
+                command = [
+                    python,
+                    "-u",
+                    "scripts/run_m4_suite.py",
+                    "--config",
+                    str(args.config),
+                    "--model",
+                    model,
+                    "--inputs",
+                    str(args.output / "gpu-inputs.json"),
+                    "--output",
+                    str(args.output / "gpu-data"),
+                ]
+                if args.calibration:
+                    command.append("--calibration")
+                collect(
+                    "gpu",
+                    "gpu",
+                    command,
+                    900,
+                    [
+                        "sources.json",
+                        "trace.jsonl",
+                        "results.json",
+                        "resource-checkpoints.json",
+                        "raw-artifacts.tar.gz",
+                    ],
+                )
+        if "regressions" in declared:
+            # Reuse unchanged native baseline mechanisms under M4 allocation provenance.
+            os.environ["M3_REGRESSION_RUN"] = str(args.output / "regressions")
+            step("regressions", ["bash", "scripts/run_m4_regressions.sh"], 720)
     finally:
         signal.signal(signal.SIGTERM, lambda *_: None)
         signal.signal(signal.SIGINT, lambda *_: None)
@@ -291,7 +308,9 @@ def main():
             "cleanup_errors": errors,
         }
         write(args.output / "allocation-resource-checkpoints.json", resources)
-        ok = len(steps) == 5 and all(record.get("returncode") == 0 for record in steps)
+        ok = [record["name"] for record in steps] == declared and all(
+            record.get("returncode") == 0 and record.get("status") == "exited" for record in steps
+        )
         code = (
             0
             if ok

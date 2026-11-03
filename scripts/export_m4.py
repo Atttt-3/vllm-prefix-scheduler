@@ -5,11 +5,207 @@ import hashlib
 import json
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-from vllm_prefix_scheduler.m4_contract import audit, read_events, require, sha256  # noqa: E402
+from vllm_prefix_scheduler.m4_contract import (  # noqa: E402
+    audit,
+    audit_resources,
+    percentile,
+    read_events,
+    require,
+    sha256,
+    strict_int,
+)
+
+CPU_META = ("mode", "workload", "window", "outside_length")
+CPU_PHASES = ("window", "score", "sort_exclusive", "commit", "restore_residual", "total")
+CPU_CALLS = ("window", "score", "sort", "pop", "prepend", "guard_clock", "native_schedule")
+CPU_VISITS = ("candidate", "queue", "hash_lookup", "pop", "prepend")
+CPU_RESTORE_COUNTS = ("popleft_calls", "popleft_entries", "extendleft_calls", "extendleft_entries")
+
+
+def public_cpu_costs(events):
+    """Recompute numeric references/count ranges from the CPU rows already audited by main."""
+    conditions = {
+        (mode, workload, window, outside)
+        for mode in ("native", "off", "prefix", "guarded")
+        for workload in ("cold", "tied_hot", "mixed")
+        for window in (8, 16, 32)
+        for outside in (0, 128, 4096)
+    }
+    restoration_conditions = {
+        key for key in conditions if key[0] in {"prefix", "guarded"} and key[1] == "mixed"
+    }
+    groups = {name: defaultdict(list) for name in ("normal", "restore", "unwrapped", "counter")}
+    environments = []
+    for event in events:
+        kind = event.get("event")
+        if kind == "m4_cpu_environment":
+            environments.append(event)
+            continue
+        target = None
+        if kind == "m4_cpu_sample":
+            target = "normal" if event.get("variant") == "normal" else "restore"
+        elif kind == "m4_cpu_unwrapped":
+            target = "unwrapped"
+        elif kind == "m4_cpu_restore_counter":
+            target = "counter"
+        if target is not None:
+            key = tuple(event.get(name) for name in CPU_META)
+            require(key in conditions, "CPU public metadata is outside the frozen allowlist")
+            groups[target][key].append(event)
+    require(len(environments) == 1, "CPU public timer environment missing/duplicated")
+    require(
+        set(groups["normal"]) == set(groups["unwrapped"]) == conditions
+        and set(groups["restore"]) == set(groups["counter"]) == restoration_conditions,
+        "CPU public reference/count matrix missing",
+    )
+
+    def meta(key):
+        return dict(zip(CPU_META, key, strict=True))
+
+    def distribution(values, count):
+        require(
+            len(values) == count and all(strict_int(value) for value in values),
+            "CPU public duration sample count/value differs",
+        )
+        return {"n": count, "p50_ns": percentile(values, 0.50), "p95_ns": percentile(values, 0.95)}
+
+    def ranges(records, field, keys, count):
+        require(len(records) == count, "CPU public operation sample count differs")
+        result = {}
+        for name in keys:
+            values = [row[field][name] for row in records]
+            require(
+                all(strict_int(value) for value in values), "CPU public operation count invalid"
+            )
+            result[name] = {"min": min(values), "max": max(values)}
+        return result
+
+    wrapper = environments[0]["empty_wrapper_ns"]
+    unwrapped = []
+    for key, records in sorted(groups["unwrapped"].items()):
+        require(len(records) == 1, "CPU public unwrapped condition duplicated")
+        unwrapped.append({**meta(key), **distribution(records[0]["samples_ns"], 100)})
+    restore = [
+        {
+            **meta(key),
+            "n": 5,
+            "phases": {
+                phase: distribution([row["duration_ns"][phase] for row in records], 5)
+                for phase in CPU_PHASES
+            },
+        }
+        for key, records in sorted(groups["restore"].items())
+    ]
+    return {
+        "percentile_method": "nearest_rank",
+        "duration_unit": "nanoseconds",
+        "measurement_units": {
+            "native_off": "one PAUSED_ALL native schedule",
+            "prefix_guarded": "one waiting-window transaction",
+        },
+        "empty_wrapper": {
+            name: distribution(wrapper[name], 1000)
+            for name in ("bare_call_ns", "timed_wrapper_call_ns", "clock_pair_ns")
+        },
+        "unwrapped": unwrapped,
+        "prepend_restore": restore,
+        "normal_operation_counts": [
+            {
+                **meta(key),
+                "n": 500,
+                "calls": ranges(records, "calls", CPU_CALLS, 500),
+                "visits": ranges(records, "visits", CPU_VISITS, 500),
+            }
+            for key, records in sorted(groups["normal"].items())
+        ],
+        "restore_operation_counts": [
+            {
+                **meta(key),
+                "n": 5,
+                "counts": ranges(records, "counts", CPU_RESTORE_COUNTS, 5),
+            }
+            for key, records in sorted(groups["counter"].items())
+        ],
+        "restore_counter_samples": sum(len(records) for records in groups["counter"].values()),
+    }
+
+
+def bind_layer_job(layer, events, sources, commit):
+    """Derive one actual job from every raw row and the independently sealed runtime."""
+    require(layer in {"native", "cpu", "gpu"}, "unknown raw evidence layer")
+    require(
+        type(sources) is dict and sources.get("project_commit") == commit,
+        "layer source differs from final freeze",
+    )
+    require(type(events) is list and events, "layer raw events missing")
+    if layer == "gpu":
+        jobs = {row.get("campaign_job_id") for row in events}
+        require(
+            len(jobs) == 1 and all(type(job) is str and job.isdigit() for job in jobs),
+            "actual GPU job binding missing/mixed",
+        )
+        job = next(iter(jobs))
+        require(
+            "job_id" not in sources or sources["job_id"] == job,
+            "GPU source and raw job differ",
+        )
+    else:
+        job = sources.get("job_id")
+        require(
+            type(job) is str
+            and job.isdigit()
+            and all(
+                row.get("job_id") == job and row.get("project_commit") == commit for row in events
+            ),
+            "native/CPU raw and runtime job differ",
+        )
+    return job
+
+
+def bind_final_jobs(layer_jobs, regression_jobs):
+    """Only the frozen metadata+GPU two-job execution layout can form a final export."""
+    require(
+        type(layer_jobs) is dict
+        and set(layer_jobs) == {"native", "cpu", "gpu"}
+        and type(regression_jobs) is dict
+        and set(regression_jobs) == {"compat", "m1", "full"},
+        "complete native/CPU/GPU and regression layer bindings required",
+    )
+    jobs = list(layer_jobs.values()) + list(regression_jobs.values())
+    require(
+        all(type(job) is str and job.isdigit() for job in jobs),
+        "final layer job identity missing/invalid",
+    )
+    metadata = layer_jobs["native"]
+    require(
+        layer_jobs["cpu"] == metadata
+        and set(regression_jobs.values()) == {metadata}
+        and layer_jobs["gpu"] != metadata,
+        "final layers do not match distinct metadata/GPU roles",
+    )
+    return {"metadata": metadata, "gpu": layer_jobs["gpu"]}
+
+
+def bind_regression_job(runtime, commit):
+    """Read the existing M1/M2B runtime schema without changing historical producers."""
+    require(
+        type(runtime) is dict and runtime.get("project_commit") == commit,
+        "baseline regression tested another freeze",
+    )
+    environment = runtime.get("environment")
+    require(type(environment) is dict, "baseline regression environment missing")
+    job = environment.get("SLURM_JOB_ID")
+    require(type(job) is str and job.isdigit(), "baseline regression job binding missing")
+    require(
+        "job_id" not in runtime or runtime["job_id"] == job,
+        "baseline regression job fields disagree",
+    )
+    return job
 
 
 def bind_execution(commit, root=ROOT):
@@ -201,31 +397,39 @@ def main():
     require(not args.output.exists(), "public export output already exists")
     config = json.loads(args.config.read_text())
     resources = json.loads(args.resources.read_text())
+    require(
+        resources.get("config_sha256") == sha256(args.config),
+        "resource catalog differs from final configuration",
+    )
     reports, originals = {}, {"config": sha256(args.config), "resources": sha256(args.resources)}
     inputs = args.data / "gpu-inputs.json"
     initial_source = json.loads((args.data / "gpu-data/sources.json").read_text())
-    bound = bind_execution(initial_source["project_commit"])
+    commit = initial_source["project_commit"]
+    bound = bind_execution(commit)
     bound[str(args.resources)] = sha256(args.resources)
     bind_resource_references(resources, bound)
-    gpu_rows = read_events(args.data / "gpu-data/trace.jsonl")
-    jobs = {str(row.get("campaign_job_id")) for row in gpu_rows}
-    require(len(jobs) == 1 and next(iter(jobs)).isdigit(), "actual GPU job binding missing")
-    job = next(iter(jobs))
+    layer_jobs, regression_jobs = {}, {}
+    cpu_costs = None
     for layer in ("native", "cpu", "gpu"):
         data = args.data / f"{layer}-data"
         source = data / ("sources.json" if layer == "gpu" else "runtime.json")
         trace = data / "trace.jsonl"
+        events, source_record = read_events(trace), json.loads(source.read_text())
+        job = bind_layer_job(layer, events, source_record, commit)
+        layer_jobs[layer] = job
         reports[layer] = audit(
             config,
-            read_events(trace),
+            events,
             layer=layer,
-            sources=json.loads(source.read_text()),
+            sources=source_record,
             resources=resources if layer == "gpu" else None,
             root=ROOT,
             frozen_inputs=json.loads(inputs.read_text()) if layer == "gpu" else None,
             inputs_sha256=sha256(inputs) if layer == "gpu" else None,
         )
         require(reports[layer]["accepted"] is True, "M4 actual layer incomplete")
+        if layer == "cpu":
+            cpu_costs = public_cpu_costs(events)
         originals[f"{layer}_trace"] = sha256(trace)
         originals[f"{layer}_sources"] = sha256(source)
         bound.update(
@@ -250,7 +454,7 @@ def main():
         )
     commits = {report["project_commit"] for report in reports.values()}
     require(len(commits) == 1, "M4 source freezes were mixed")
-    commit = next(iter(commits))
+    require(commits == {commit}, "M4 layers differ from final execution freeze")
     regression = args.data / "regressions"
     for name, wanted in (("compat", 432), ("m1", 12), ("full", 636)):
         subprocess.run(
@@ -265,9 +469,8 @@ def main():
             text=True,
         )
         runtime = json.loads((regression / f"{name}-data/runtime.json").read_text())
-        require(
-            runtime.get("project_commit") == commit, "baseline regression tested another freeze"
-        )
+        job = bind_regression_job(runtime, commit)
+        regression_jobs[name] = job
         bound.update(
             bind_collector(
                 regression / name,
@@ -313,6 +516,10 @@ def main():
             outcome.get("audited_native_cases" if name == "m1" else "case_count") == wanted,
             "baseline regression raw case count differs",
         )
+    selected_jobs = bind_final_jobs(layer_jobs, regression_jobs)
+    reports["resources"] = audit_resources(
+        resources, config, selected_commit=commit, selected_jobs=selected_jobs
+    )
     control_counts, control_bound = rerun_controls(
         args.config, args.data, args.resources, args.controls_root
     )
@@ -348,11 +555,12 @@ def main():
             for key, row in reports["gpu"]["details"].items()
         },
         "cpu_groups": reports["cpu"]["details"]["groups"],
+        "cpu_costs": cpu_costs,
         "control_counts": control_counts,
         "budget": {
             "allocations_used": len(resources["allocations"]),
             "allocation_limit": 3,
-            "requested_minutes": reports["gpu"]["resources"]["requested_minutes"],
+            "requested_minutes": reports["resources"]["requested_minutes"],
             "requested_minutes_limit": 60,
         },
         "limitations": [

@@ -48,6 +48,20 @@ def owned_processes(pgid):
     ]
 
 
+def emit_process_exit(task_id, phase, result):
+    from vllm_prefix_scheduler.m3_events import emit
+
+    # The envelope identifies the launcher stream; the exited child is payload.
+    emit(
+        "m4_process_exit",
+        task_id=task_id,
+        layer="gpu",
+        phase=phase,
+        child_pid=result["pid"],
+        **{key: value for key, value in result.items() if key not in {"engine_id", "pid"}},
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("configs/m4-stability.json"))
@@ -206,15 +220,7 @@ def main():
                 M3_PHASE="diagnostic",
                 M4_PHASE=phase,
             )
-            from vllm_prefix_scheduler.m3_events import emit
-
-            emit(
-                "m4_process_exit",
-                task_id=config["task_id"],
-                layer="gpu",
-                phase=phase,
-                **{k: v for k, v in result.items() if k != "engine_id"},
-            )
+            emit_process_exit(config["task_id"], phase, result)
             if code != 0 or timed_out or residual or remaining:
                 raise RuntimeError(f"M4 engine failed: {engine_id}")
         status = 0

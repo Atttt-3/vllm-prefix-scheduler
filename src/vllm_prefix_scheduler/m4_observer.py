@@ -89,9 +89,9 @@ def storage_snapshot(instance, request):
     import enum
     import types
 
-    seen = {}
+    seen, nodes, pending = {}, [], deque()
 
-    def visit(value):
+    def reference(value):
         if value is None or type(value) in (str, int, bool, float):
             return value
         if isinstance(value, bytes):
@@ -101,42 +101,17 @@ def storage_snapshot(instance, request):
         if isinstance(value, (types.FunctionType, types.MethodType, type)):
             return {"callable": f"{value.__module__}.{value.__qualname__}"}
         if type(value).__module__ == "torch":
+            if type(value).__name__ not in {"dtype", "device"}:
+                raise TypeError("Tensor contents are outside the metadata snapshot contract")
             return {"torch": str(value)}
         oid = id(value)
-        if oid in seen:
-            return {"ref": seen[oid]}
-        seen[oid] = len(seen)
-        identity = {"identity": oid, "type": f"{type(value).__module__}.{type(value).__name__}"}
-        if isinstance(value, dict):
-            return {**identity, "items": [[visit(k), visit(v)] for k, v in value.items()]}
-        if isinstance(value, (list, tuple, deque)):
-            return {**identity, "items": [visit(v) for v in value]}
-        if isinstance(value, (set, frozenset)):
-            return {**identity, "items": [visit(v) for v in sorted(value, key=id)]}
-        if isinstance(value, weakref.ReferenceType):
-            return {**identity, "target": None if value() is None else id(value())}
-        fields = dict(getattr(value, "__dict__", {}))
-        for cls in type(value).__mro__:
-            slots = cls.__dict__.get("__slots__", ())
-            if isinstance(slots, str):
-                slots = (slots,)
-            for name in slots:
-                if name not in {"__dict__", "__weakref__"}:
-                    try:
-                        fields[name] = object.__getattribute__(value, name)
-                    except AttributeError:
-                        pass
-        if hasattr(type(value), "__struct_fields__"):
-            fields.update(
-                {
-                    name: object.__getattribute__(value, name)
-                    for name in type(value).__struct_fields__
-                }
-            )
-        return {**identity, "fields": {k: visit(v) for k, v in sorted(fields.items())}}
+        if oid not in seen:
+            seen[oid] = len(nodes)
+            nodes.append(None)
+            pending.append(value)
+        return {"ref": seen[oid]}
 
     manager = instance.kv_cache_manager
-    # A single traversal retains cross-root aliasing and compares object identity.
     roots = {
         "request": request,
         "manager": manager,
@@ -147,7 +122,50 @@ def storage_snapshot(instance, request):
         "holding": instance.kv_holding_waiting,
         "deferred": instance.deferred_waiting,
     }
-    return {key: visit(value) for key, value in roots.items()}
+    result = {"roots": {key: reference(value) for key, value in roots.items()}, "nodes": nodes}
+    # Flat graph traversal is bounded in call depth even for thousands of linked
+    # free blocks. The resulting JSON is also flat; merely making the walker
+    # iterative while nesting its output would move the recursion failure to IO.
+    while pending:
+        value = pending.popleft()
+        identity = {
+            "identity": id(value),
+            "type": f"{type(value).__module__}.{type(value).__name__}",
+        }
+        if isinstance(value, dict):
+            node = {**identity, "items": [[reference(k), reference(v)] for k, v in value.items()]}
+        elif isinstance(value, (list, tuple, deque)):
+            node = {**identity, "items": [reference(v) for v in value]}
+        elif isinstance(value, (set, frozenset)):
+            node = {**identity, "items": [reference(v) for v in sorted(value, key=id)]}
+        elif isinstance(value, weakref.ReferenceType):
+            target = value()
+            node = {**identity, "target": None if target is None else id(target)}
+        else:
+            fields = dict(getattr(value, "__dict__", {}))
+            for cls in type(value).__mro__:
+                slots = cls.__dict__.get("__slots__", ())
+                if isinstance(slots, str):
+                    slots = (slots,)
+                for name in slots:
+                    if name not in {"__dict__", "__weakref__"}:
+                        try:
+                            fields[name] = object.__getattribute__(value, name)
+                        except AttributeError:
+                            pass
+            if hasattr(type(value), "__struct_fields__"):
+                fields.update(
+                    {
+                        name: object.__getattribute__(value, name)
+                        for name in type(value).__struct_fields__
+                    }
+                )
+            node = {
+                **identity,
+                "fields": {key: reference(item) for key, item in sorted(fields.items())},
+            }
+        nodes[seen[id(value)]] = node
+    return result
 
 
 def _define_native_classes():

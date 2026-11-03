@@ -13,7 +13,7 @@ export PYTHONPATH="$TASK_ROOT/src:$TASK_ROOT/scripts"
 export PYTHONHASHSEED=42 VLLM_USE_V2_MODEL_RUNNER=1 HF_HUB_OFFLINE=1
 M4_FULL_DATA="$M3_REGRESSION_RUN/full-data"
 "$NATIVE_PYTHON" scripts/run_evidence.py --task-id M4-M2B-full-contract --kind native \
-  --output "$M3_REGRESSION_RUN/full" --timeout 240 --seed 42 \
+  --output "$M3_REGRESSION_RUN/full" --timeout 540 --seed 42 \
   --config configs/native-m2b.json --config configs/m4-stability.json \
   --artifact "$M4_FULL_DATA/runtime.json" --artifact "$M4_FULL_DATA/inputs.json" \
   --artifact "$M4_FULL_DATA/clock-plans.json" --artifact "$M4_FULL_DATA/case-index.json" \

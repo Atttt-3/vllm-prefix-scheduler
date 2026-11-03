@@ -9,7 +9,6 @@ import hashlib
 import json
 import math
 import re
-import statistics
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -44,6 +43,11 @@ BARRIERS = (
     "prepend_failure",
 )
 FAULTS = ("native_schedule_fault", "native_free_fault", "shutdown_closed")
+EXECUTION_GROUPS = {
+    "all": ["native", "cpu", "inputs", "gpu", "regressions"],
+    "metadata": ["native", "cpu", "regressions"],
+    "gpu": ["inputs", "gpu"],
+}
 
 
 def require(condition, message):
@@ -120,6 +124,7 @@ def config_gate(config):
         "seeds": list(SEEDS),
         "repeats": 3,
         "native_rounds_per_seed": 100,
+        "execution_groups": EXECUTION_GROUPS,
     }.items():
         require(
             type(config.get(key)) is type(value) and config[key] == value,
@@ -1096,7 +1101,7 @@ def audit_cpu(config, events, *, partial=False):
                 **meta,
                 "samples": len(records),
                 "phases": {
-                    phase: {"p50_ns": statistics.median(values), "p95_ns": percentile(values, 0.95)}
+                    phase: {"p50_ns": percentile(values, 0.50), "p95_ns": percentile(values, 0.95)}
                     for phase, values in durations.items()
                 },
             }
@@ -1272,7 +1277,11 @@ def audit(
                 "GPU raw events lack one actual job binding",
             )
             result["resources"] = audit_resources(
-                resources, config, selected_commit=commit, selected_job=next(iter(jobs))
+                resources,
+                config,
+                selected_commit=commit,
+                selected_job=next(iter(jobs)),
+                required_steps=EXECUTION_GROUPS["gpu"],
             )
     return result
 
@@ -1296,9 +1305,48 @@ def load_reference(reference, label):
     return json.loads(read_reference(reference, label).read_text())
 
 
-def audit_resources(resources, config, *, selected_commit=None, selected_job=None):
+def audit_resources(
+    resources,
+    config,
+    *,
+    selected_commit=None,
+    selected_job=None,
+    required_steps=None,
+    selected_jobs=None,
+):
     """M4 independent all-attempt budget; no historical unknown-terminal exception."""
     config_gate(config)
+    selection = None
+    if selected_jobs is not None:
+        require(
+            type(selected_jobs) is dict
+            and set(selected_jobs) == {"metadata", "gpu"}
+            and all(type(job) is str and job.isdigit() for job in selected_jobs.values())
+            and len(set(selected_jobs.values())) == 2,
+            "final selection requires two distinct metadata/gpu jobs",
+        )
+        require(
+            selected_commit is not None and selected_job is None and required_steps is None,
+            "final job selection cannot mix single-job options",
+        )
+        selection = {job: role for role, job in selected_jobs.items()}
+    else:
+        required_steps = EXECUTION_GROUPS["all"] if required_steps is None else required_steps
+        require(
+            type(required_steps) in {list, tuple}
+            and list(required_steps) in EXECUTION_GROUPS.values(),
+            "required execution steps are not a fixed group",
+        )
+        required_group = next(
+            role for role, steps in EXECUTION_GROUPS.items() if steps == list(required_steps)
+        )
+        require(
+            selected_job is None
+            or selected_commit is not None
+            and type(selected_job) is str
+            and selected_job.isdigit(),
+            "selected job lacks valid frozen commit binding",
+        )
     require(
         type(resources) is dict and resources.get("task_id") == TASK_ID,
         "resource task identity differs",
@@ -1394,7 +1442,9 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
         monitors.append((domain, clocks[-1]))
         if receipt["returncode"] != 0:
             require(
-                attempt.get("status") == "submission_failed" and receipt["returncode"] != 255,
+                attempt.get("status") == "submission_failed"
+                and receipt["returncode"] > 0
+                and receipt["returncode"] != 255,
                 "ambiguous submission cannot be treated as a failed allocation",
             )
             require(attempt.get("job_id") is None, "failed submission has accepted job identity")
@@ -1415,7 +1465,7 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
         and len(allocations) == len(accepted),
         "accepted job omitted/duplicated in allocation catalog",
     )
-    intervals, terminal_clocks, selected = [], [], 0
+    intervals, terminal_clocks, selected = [], [], {}
     for allocation in allocations:
         job = str(allocation["job_id"])
         attempt, receipt, ready, exited = accepted[job]
@@ -1505,6 +1555,13 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
             "watcher trace job/domain differs",
         )
         checks, exits, binding = raw["checkpoints"], raw["exit"], raw["binding"]
+        is_selected = selected_commit is not None and (
+            job in selection
+            if selection is not None
+            else job == selected_job
+            if selected_job is not None
+            else attempt["project_commit"] == selected_commit
+        )
         require(
             str(checks.get("job_id"))
             == str(exits.get("job_id"))
@@ -1524,6 +1581,33 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
             exits.get("owned_pids_remaining") == checks.get("owned_pids_remaining") == [],
             "allocation owned processes remain",
         )
+        steps = exits.get("steps")
+        require(
+            type(steps) is list and checks.get("launcher_steps") == steps,
+            "allocation step originals differ",
+        )
+        require(checks.get("cleanup_errors") == [], "allocation cleanup errors remain")
+        require(
+            all(type(step) is dict and step.get("remaining") == [] for step in steps),
+            "allocation step owned processes remain",
+        )
+        group, declared = binding.get("execution_group"), binding.get("declared_steps")
+        if group is None and declared is None and not is_selected:
+            # Old calibration originals remain immutable and cannot be selected.
+            group, declared = "all", EXECUTION_GROUPS["all"]
+        else:
+            require(
+                type(group) is str
+                and group in EXECUTION_GROUPS
+                and declared == EXECUTION_GROUPS[group]
+                and exits.get("execution_group") == group
+                and exits.get("declared_steps") == declared,
+                "allocation execution group/declaration differs",
+            )
+        require(
+            [step.get("name") for step in steps] == declared[: len(steps)],
+            "allocation actual steps differ from declared execution group",
+        )
         for name in ("gpu_before", "gpu_during", "gpu_after"):
             samples = checks.get(name)
             samples = [samples] if type(samples) is dict else samples
@@ -1533,19 +1617,23 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
             for sample in samples:
                 bridge.audit_gpu_snapshot(sample)
                 require(len(sample["stdout"].strip().splitlines()) == 1, "multiple GPUs observed")
-        if selected_commit is not None and (
-            job == selected_job
-            if selected_job is not None
-            else attempt["project_commit"] == selected_commit
-        ):
+        if is_selected:
             require(attempt["project_commit"] == selected_commit, "selected raw job commit differs")
-            steps = exits.get("steps", [])
             require(
-                type(steps) is list
-                and len(steps) == 5
-                and {step.get("name") for step in steps}
-                == {"native", "cpu", "inputs", "gpu", "regressions"},
-                "selected allocation lacks all five execution steps",
+                attempt["config_sha256"] == config_hash,
+                "selected raw job config differs",
+            )
+            require(
+                binding.get("phase") == exits.get("phase") == attempt.get("phase") == "formal",
+                "selected allocation is not a formal run",
+            )
+            expected_group = selection[job] if selection is not None else required_group
+            require(
+                group == expected_group
+                and attempt.get("execution_group") == group
+                and attempt.get("declared_steps") == declared
+                and [step.get("name") for step in steps] == EXECUTION_GROUPS[expected_group],
+                "selected allocation lacks its exact execution group",
             )
             require(
                 state == "COMPLETED"
@@ -1561,11 +1649,7 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
                 ),
                 "selected frozen allocation did not complete all layers",
             )
-            require(
-                checks.get("launcher_steps") == steps and checks.get("cleanup_errors") == [],
-                "selected allocation step/process cleanup originals differ",
-            )
-            selected += 1
+            selected[job] = {"execution_group": group, "declared_steps": declared}
     require(requested_minutes <= 60, "M4 requested GPU minutes exceed 60")
     intervals.sort()
     require(
@@ -1573,7 +1657,9 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
         "M4 allocations overlap",
     )
     if selected_commit is not None:
-        require(selected > 0, "selected tested commit absent from complete allocation")
+        require(selected, "selected tested commit absent from complete allocation")
+    if selection is not None:
+        require(set(selected) == set(selection), "selected metadata/gpu allocation missing")
     query = load_reference(resources.get("active_query_evidence"), "final full queue query")
     require(
         query == resources.get("active_query")
@@ -1606,6 +1692,7 @@ def audit_resources(resources, config, *, selected_commit=None, selected_job=Non
         "attempts": len(attempts),
         "requested_minutes": requested_minutes,
         "remaining_allocations": 3 - len(allocations),
+        "selected_jobs": selected,
     }
 
 

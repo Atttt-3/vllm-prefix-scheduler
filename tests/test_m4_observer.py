@@ -127,3 +127,30 @@ def test_identity_helper_does_not_edit_object():
     assert first != second
     assert first["generation"] < second["generation"]
     assert json.dumps(vars(a), sort_keys=True) == before
+
+
+def test_probe_snapshot_handles_full_capacity_linked_free_queue_without_recursion():
+    class Block:
+        __slots__ = ("block_id", "prev_free_block", "next_free_block")
+
+    blocks = [Block() for _ in range(1025)]
+    for index, block in enumerate(blocks):
+        block.block_id = index
+        block.prev_free_block = blocks[index - 1] if index else None
+        block.next_free_block = blocks[index + 1] if index + 1 < len(blocks) else None
+    pool = SimpleNamespace(blocks=blocks)
+    request = SimpleNamespace(request_id="probe")
+    instance = SimpleNamespace(
+        kv_cache_manager=SimpleNamespace(block_pool=pool),
+        kv_metrics_collector=None,
+        waiting=[request],
+        running=[],
+        kv_holding_waiting=[],
+        deferred_waiting=set(),
+    )
+    before = storage_snapshot(instance, request)
+    assert before == storage_snapshot(instance, request)
+    assert json.loads(json.dumps(before)) == before
+    assert sum(node["type"].endswith(".Block") for node in before["nodes"]) == 1025
+    blocks[512].next_free_block = blocks[514]
+    assert before != storage_snapshot(instance, request)
