@@ -1,6 +1,6 @@
 # M5 部分校准交接
 
-任务 ID 为 `M5-paired-performance`。原校准获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟。原六次额度用完后，D2 与 D2-R 各获批新增一次单卡 20 分钟。累计使用 8 次、160 申请分钟，Slurm 实际运行合计 51 分 25 秒。八次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
+任务 ID 为 `M5-paired-performance`。原校准获批 6 次串行单 RTX 3090 分配，每次最多 20 分钟。原六次额度用完后，D2、D2-R 与 D2-R110 各获批新增一次单卡 20 分钟。累计使用 9 次、180 申请分钟，Slurm 实际运行合计 62 分 35 秒。九次作业均已核对权威终态、全队列和资源清理。正式矩阵等待完成校准后另行授权。
 
 | 记录 | 状态 |
 | --- | --- |
@@ -10,6 +10,7 @@
 | D1 实际执行与独立分析 | `9b8a2e1ee84337e5998dbcfd2547735eab9cde58` |
 | D2 实际执行与独立分析 | `3fcb3a53192ddf9e5d0d59003c69f027d73b28da` |
 | D2-R 实际执行与独立分析 | `e4cfe667f937d09652ea9f06ec06e7d66a69c3e9` |
+| D2-R110 实际执行与独立分析 | `9f8637dd23dbb4b26eea71bbb7b5f842aeaab7ca` |
 | 草稿交付 | 本页所在提交，使用草稿 PR 的完整 head SHA |
 | 命令 | D2 执行候选的完整 `make check` 为 698 通过、3 项固定 Linux 原生 opt-in 跳过 |
 | 证据 | C1–C3 的 27 个真实运行叶及 D1 的 8 个叶均已独立核对原始 collector、源码和复算结果。D2 的热试跑和三个实际启动的叶也已复核 |
@@ -23,7 +24,7 @@
 | C | 16 组、64 模式轮次、32,000 请求的候选矩阵与配对审查器 | 完整同节点原始配对 |
 | D | 真实 runner 区间、受控 prefill 及 C3 阶段计时的独立复算 | 合格轻量采集与完整正式逐轮原件 |
 | E | 校准配对结果、失败分母和保留的扰动反例 | 正式性能、公平性、波动和成本结论 |
-| F | 本地子进程控制和全部八次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
+| F | 本地子进程控制和全部九次分配的终态及释放证明 | 正式原件控制、白名单发布与独立 A–F 签认 |
 
 命令、角色预算、测量定义与重放步骤见 [M5 设计](m5-design.md)。生产调度代码由 M4 继承。原仓库用户修改的 `docs/workflows.md` 保护 SHA-256 为 `c3dca495872357a584ecc2464dc92dafa5e4467d16237f4c11dfdf9ab096bb82`。M1–M4 工作树及历史审查保留，PR #4–#8 与 M5 草稿保持未合并。
 
@@ -100,5 +101,33 @@ D2-R 单独授权的新增分配已使用。作业 `140048` 为单 RTX 3090、�
 
 ```bash
 python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r-01 --proposal configs/m5-d2r.json --output runs/M5-paired-performance/d2-r-review/replayed.json
+python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
+```
+
+## D2-R110 热可比性通过，同档性能越界
+
+作业 `140049` 使用本批唯一一次单 RTX 3090 分配，申请 20 分钟，实际 670 秒，Slurm 终态为 `COMPLETED/0:0`。提交前独立 watcher ready、权威终态、全队列与 watcher 退出均已核验。GPU 边界为 1→1 MiB，进程、采样器与 IPC 清理通过。执行及审查 SHA 为 `9f8637dd23dbb4b26eea71bbb7b5f842aeaab7ca`。预检的完整 `UV_OFFLINE=1 make check` 为 801 项通过、3 项固定 Linux 原生 opt-in 跳过。
+
+热试跑冻结目标为 64.5°C、SM 1,860 MHz、显存 9,501 MHz。四轮共 240 条全部完成并按时取得首 token。测量窗口温度中位数为 65–66°C，SM 中位数为 1,860–1,890 MHz，显存众数均为 9,501 MHz。三对热状态均可比。
+
+| 轮次 | 实测请求 | 95 秒准入检查点 | TTFT p95 | 末终态请求/秒 | 末终态 token/秒 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| E1 | 60/60 | 60.423 秒 | 635.009 ms | 7.282 | 116.511 |
+| E2 | 60/60 | 72.195 秒 | 651.420 ms | 7.264 | 116.227 |
+| E3 | 60/60 | 55.358 秒 | 790.618 ms | 6.875 | 109.996 |
+| E4 | 60/60 | 81.979 秒 | 621.604 ms | 7.343 | 117.491 |
+
+| 配对 | 热状态 | TTFT p95 差值 | TTFT 容限 | 请求及 token 吞吐差 | 判定 |
+| --- | --- | ---: | ---: | ---: | --- |
+| E1/E2 | 可比 | +16.412 ms | 31.750 ms | −0.244% | 通过 |
+| E3/E4 | 可比 | −169.014 ms | 39.531 ms | +6.814% | 两项越界 |
+| E1/E4 | 可比 | −13.405 ms | 31.750 ms | +0.841% | 通过 |
+
+95 秒复算仅使用截止前完整排空、清 APC 和判定的波次。四轮都通过此预热准入检查。独立脚本与冻结审查器对热状态、配对统计和 95 秒判定完全一致。诊断完整，受控 E/E 仍不稳定。原 C3 保持 `blocked`，原热状态、TTFT p95 和吞吐门槛保留。用本次原件验证了资格入口拒绝继续。资格复验未启动，正式矩阵为 0/64 轮。
+
+私有原件在 `runs/M5-paired-performance/attempts/d2-r110-01/`。`runs/M5-paired-performance/d2-r110-review/` 保存资源账本、冻结审查和独立复算。`analysis.json` SHA-256 为 `27b389a03dfa8df4f9a6b531663e9767910de6f51ffbceef8006f5039cfdd844`，`raw-independent-compared.json` 为 `a75ed5a74734f1962382ae77d9ed7db28d42cbf6acaa39348bd92047ff1c9498`，`resource-ledger.json` 为 `7e886b98ad98c0a87d47681c91bfda06358dc3d845003f05ec1a08c2d91a7d58`。在执行 SHA 上复放时使用新的输出路径。
+
+```bash
+python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d2-r110-01 --proposal configs/m5-d2r110.json --output runs/M5-paired-performance/d2-r110-review/replayed.json
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
