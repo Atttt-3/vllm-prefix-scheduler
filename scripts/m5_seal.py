@@ -35,6 +35,96 @@ def verify_analysis(execution, analysis):
     require(execution == analysis, "M5 analysis requires the frozen execution auditor")
 
 
+def validate_profile(profile, run, config, source, git_files):
+    baseline = read_json(ROOT / config["baseline_config"])
+    expected = {
+        key: baseline[key]
+        for key in (
+            "async_scheduling",
+            "enable_prefix_caching",
+            "enable_chunked_prefill",
+            "enforce_eager",
+            "tensor_parallel_size",
+            "max_num_seqs",
+            "max_num_batched_tokens",
+            "max_model_len",
+            "gpu_memory_utilization",
+        )
+    }
+    expected.update(
+        block_size=config["block_size"],
+        attention_backend=[config["attention_backend"]],
+        gpu_name="NVIDIA GeForce RTX 3090",
+        compute_capability=[8, 6],
+        model_type="vllm.model_executor.models.qwen3.Qwen3ForCausalLM",
+        model_dtype="torch.bfloat16",
+        use_v2_model_runner=True,
+        pipeline_parallel_size=1,
+        executor_backend="uni",
+        scheduler_policy="fcfs",
+        runner_type="vllm.v1.worker.gpu.model_runner.GPUModelRunner",
+    )
+    if run["mechanism"]:
+        diagnostic = config["scenarios"]["mechanism"]
+        expected.update(
+            max_model_len=diagnostic["max_model_len"],
+            num_gpu_blocks=diagnostic[f"{run['mechanism']}_blocks"],
+        )
+    native = run["mode"] == "native"
+    if run["tier"] == "endpoint":
+        expected["scheduler_type"] = (
+            "vllm.v1.core.sched.async_scheduler.AsyncScheduler"
+            if native
+            else "vllm_prefix_scheduler.scheduler.PrefixAsyncScheduler"
+        )
+    else:
+        expected["scheduler_type"] = (
+            "vllm_prefix_scheduler.m5_observer.M5NativeScheduler"
+            if native
+            else "vllm_prefix_scheduler.m5_observer.M5PrefixScheduler"
+        )
+    require(
+        all(
+            type(profile[key]) is type(value) and profile[key] == value
+            for key, value in expected.items()
+        )
+        and profile["model_device"].startswith("cuda")
+        and type(profile["num_gpu_blocks"]) is int
+        and profile["num_gpu_blocks"] > 1,
+        "active runtime profile differs from the frozen engine",
+    )
+    modules = {
+        "vllm.v1.core.sched.scheduler",
+        "vllm.v1.core.sched.async_scheduler",
+        "vllm.v1.worker.gpu.model_runner",
+        "vllm.v1.worker.gpu.input_batch",
+        "vllm.v1.worker.gpu.states",
+        "vllm.v1.worker.gpu.async_utils",
+        "vllm.v1.worker.gpu.model_states.default",
+        "vllm.model_executor.models.qwen3",
+        "vllm.v1.attention.backends.flash_attn",
+    }
+    require(
+        set(profile["sources"]) == modules
+        and all(
+            row["sha256"] == source["upstream_sha256"][name.replace(".", "/") + ".py"]
+            for name, row in profile["sources"].items()
+        ),
+        "active runtime module hashes differ from pinned files",
+    )
+    policy = profile["production_modules"]
+    policy_names = {"scheduler", "config", "probe", "wait_guard"}
+    require(
+        set(policy) <= policy_names
+        and (native and run["tier"] == "endpoint" or set(policy) == policy_names)
+        and all(
+            row["sha256"] == git_files[f"src/vllm_prefix_scheduler/{name}.py"]
+            for name, row in policy.items()
+        ),
+        "active production scheduler hashes differ from the execution Git tree",
+    )
+
+
 def sealed_leaf(directory, remote_root, run, table, config_path, config, job, git_files, commit):
     leaf = directory / "node" / run["id"]
     raw = leaf / "raw"
@@ -146,6 +236,7 @@ def sealed_leaf(directory, remote_root, run, table, config_path, config, job, gi
         if name == "Makefile" or name.split("/")[0] in ("src", "scripts", "tests", "configs")
     }
     require(source["source_sha256"] == source_files, "bound runtime project sources differ")
+    validate_profile(engine["profile"], run, config, source, git_files)
     audit = leaf / "audit.json"
     require(digest(audit) == run["audit_sha256"], "on-node audit record changed")
     return {

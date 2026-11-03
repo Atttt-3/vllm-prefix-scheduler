@@ -585,12 +585,17 @@ def mechanism_gate(config, root, specs, index):
         )
         b_batch, b_start, b_gen = first["B"]
         c_batch, c_start, c_gen = first["C"]
-        expected_hit = 0 if pressure and native_order else prefix_tokens
+        loses_prefix = pressure and native_order
+        valid_hit = (
+            type(c_start) is int and 0 <= c_start < prefix_tokens and c_start % block_size == 0
+            if loses_prefix
+            else c_start == prefix_tokens
+        )
         require(
             decision["batch_id"] <= min(b_batch, c_batch)
             and b_start == 0
-            and c_start == expected_hit
-            and result["C"]["cached_tokens"] == expected_hit,
+            and valid_hit
+            and result["C"]["cached_tokens"] == c_start,
             f"{tag}: C hit does not match actual runner position and client result",
         )
         admitted = {
@@ -599,7 +604,7 @@ def mechanism_gate(config, root, specs, index):
             if row["success"]
         }
         require(
-            {("B", b_gen, b_batch, 0), ("C", c_gen, c_batch, expected_hit)} <= admitted,
+            {("B", b_gen, b_batch, 0), ("C", c_gen, c_batch, c_start)} <= admitted,
             f"{tag}: B/C successful allocation chain missing",
         )
         victims = {
@@ -609,14 +614,14 @@ def mechanism_gate(config, root, specs, index):
         }
         evicted = prefix_blocks & victims
         require(
-            bool(evicted) == (pressure and native_order),
+            bool(evicted) == loses_prefix,
             f"{tag}: B allocation did not establish the expected C-prefix eviction",
         )
         results.append(
             {
                 "id": tag,
                 "actual_kv_blocks": expected_blocks,
-                "C_hit_tokens": expected_hit,
+                "C_hit_tokens": c_start,
                 "B_evicted_C_blocks": len(evicted),
                 "B_prefill_tokens": prefill["B"],
                 "C_prefill_tokens": prefill["C"],

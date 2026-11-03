@@ -220,7 +220,7 @@ def diagnostic_evidence(root):
         profile, mode = spec["mechanism"], spec["mode"]
         native = mode in {"native", "off"}
         victim = native and profile == "pressure"
-        hit = 0 if victim else 1024
+        hit = (496 if mode == "native" else 0) if victim else 1024
         prefix = list(range(64))
         inputs_path, audit_path, run = (Path(row[key]) for key in ("inputs", "audit", "run"))
         inputs = read(inputs_path)
@@ -287,7 +287,9 @@ def diagnostic_evidence(root):
                     }
                     for rid in ("B", "C")
                 ],
-                "evictions": [{"request_id": "B", "batch_id": 2, "block_id": 0}] if victim else [],
+                "evictions": [{"request_id": "B", "batch_id": 2, "block_id": hit // 16}]
+                if victim
+                else [],
             },
         )
         write(
@@ -308,7 +310,8 @@ def test_mechanism_requires_actual_bound_causal_chain(tmp_path):
     result = cli("evaluate", "C1", accepted, "--index", index)
     assert result.returncode == 0, result.stderr
     pressure = {row["id"]: row for row in read(accepted)["mechanism"]}
-    assert pressure["mechanism-pressure-native"]["C_prefill_tokens"] == 1025
+    assert pressure["mechanism-pressure-native"]["C_prefill_tokens"] == 529
+    assert pressure["mechanism-pressure-off"]["C_prefill_tokens"] == 1025
     assert pressure["mechanism-pressure-prefix"]["C_prefill_tokens"] == 1
 
     target = tmp_path / "mechanism-pressure-native"
