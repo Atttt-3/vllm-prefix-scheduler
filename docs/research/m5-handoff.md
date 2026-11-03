@@ -325,3 +325,15 @@ python scripts/check_m5_d2.py --attempt runs/M5-paired-performance/attempts/d6-0
 python runs/M5-paired-performance/d6-review/independent-recompute.py runs/M5-paired-performance/attempts/d6-02
 python scripts/check_m5_resources.py runs/M5-paired-performance/attempts --history
 ```
+
+## D7 晚段接纳诊断离线预检
+
+从 `f8c20497a8eda41915deaf2669817e34a032316b` 起步，D7 冻结执行和独立审查为 `fdfe2452ad30105201097344b0b4705830e011ee`。方案 SHA-256 为 `d74e98aa091f0b54d6da48dc4ffdc281d560d6b87df460586f4d516ed6d82b21`。D5-R、D6 各自冻结审查及 14 次实际分配账本逐字节复算一致。D6 被拒的原始提交单列保留。新方案绑定 D6 的实际分析和七轮 420 条请求晚段复算。
+
+采集固定为 T0 后 3.5–7.5 秒。首个原生采集步记录运行、等待和 FIFO。窗前消耗的真实输出形成序号前缀，跨入批次通过原生 future 和正常消费路径绑定，派发与执行前段保持缺证，跨出批次保留到原生消费。独立审查分别报告积压形成和晚段放大，保留两个原生等待锚点、同请求与同构批次对齐、ABBA 六对热检查和原性能容限。
+
+完整 `UV_OFFLINE=1 make check` 为 1000 项通过、3 项固定 Linux opt-in 跳过，预检清单 SHA-256 为 `b97cca1a135d2553ea35c2dfcdbe1dfd888ea9a0d1823e578ef93f07564e05ec`。29 项 D7 专项测试通过。固定 EngineCore 与 UniProc 源码的真实 CPU 子进程核对跨入和跨出、序号及五次原生物化和消费一致，拒绝六种语义篡改。封存输入启动子进程接受原件并拒绝 13 种篡改。集群 CPU 核验 12 项上传材料、五阶段规格、Python 3.12.16 和 47 个安装源码哈希。CPU 夹具的配对中位增量约为窗前 3.8 µs/循环、窗内 30.3 µs/循环，实际推理扰动仍由 ABBA 实测核对。
+
+**待授权预算为一次串行单 RTX 3090，最多 20 分钟，无重试。** 预计作业内 1,040 秒，硬上限 1,050 秒。热试跑后四轮为端点、逐步、逐步、端点，每轮 60 条。提交须绑定冻结 SHA，独立 watcher 先于提交就绪。当前新增 GPU 分配为 0，原 C3 仍为 `blocked`，资格复验未启动，正式矩阵为 0/64。
+
+私有预检位于 `runs/M5-paired-performance/d7-review/`，包含 `preflight/`、`frozen-predecessor-replay/`、`independent-launch-controls/`、`independent-boundary-replay.json`、`observer-source-subprocess-controls.json`、`observer-host-benchmark.json` 和 `login-stage-preflight.json`。 [冻结方案和复放命令](m5-design.md#d7-晚段接纳诊断)
